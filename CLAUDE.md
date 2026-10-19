@@ -40,6 +40,9 @@ uv run mypy
 - `shortfall_years` (count of operating-shortfall years) is an extra summary measure alongside the section 6 list, feeding the Compare view.
 - `dues_y9`, `balance_y9` and `pf_y9` are `None` when the horizon is shorter than 9 years.
 - Expense lines and explicit dues outside the horizon are kept and ignored, not errors – shortening the horizon must never discard data. Pinned dues and assessments outside the horizon are errors, since they belong to a scenario's intent for those years.
+- The expense base year must fall between 50 years before the start year and the end year; a line dated before the base year is deflated by the same formula.
+- The percent-funded target must be above 0% and at most 100%.
+- A governance limit that is missing or `null` in a project file means no limit, and is written back as `null`. The spec's 20% / 5% defaults are what a new project starts with.
 - The engine runs under its own decimal context (28 digits, half-even); a caller's context cannot change its figures.
 
 ## Agents – when to invoke
