@@ -1,0 +1,263 @@
+{
+ "schema_version": 1,
+ "name": "Maple Row Condominiums (fictional demo)",
+ "notes": "Invented figures for demonstration and testing. Not a real association.",
+ "baseline": {
+  "start_year": 2027,
+  "end_year": 2042,
+  "starting_balance": "185000",
+  "expense_lines": [
+   {
+    "year": 2027,
+    "amount": "14000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2028,
+    "amount": "19500",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2029,
+    "amount": "150000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2030,
+    "amount": "11200",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2031,
+    "amount": "27000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2032,
+    "amount": "16800",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2033,
+    "amount": "58000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2034,
+    "amount": "12900",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2035,
+    "amount": "35400",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2036,
+    "amount": "20600",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2037,
+    "amount": "86000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2038,
+    "amount": "15500",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2039,
+    "amount": "30200",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2040,
+    "amount": "18200",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2041,
+    "amount": "46600",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2042,
+    "amount": "23000",
+    "description": "Reserve study total, all scheduled components",
+    "nominal": true,
+    "source": "Fictional reserve study, 2026, expense schedule"
+   },
+   {
+    "year": 2031,
+    "amount": "85000",
+    "description": "Exterior repaint",
+    "nominal": false,
+    "source": "Fictional painter's estimate, 2026 dollars"
+   },
+   {
+    "year": 2031,
+    "amount": "22000",
+    "description": "Balcony railing replacement",
+    "nominal": false,
+    "source": "Fictional contractor estimate, 2026 dollars"
+   },
+   {
+    "year": 2035,
+    "amount": "60000",
+    "description": "Boiler replacement",
+    "nominal": false,
+    "source": "Placeholder – no estimate yet"
+   }
+  ],
+  "expense_inflation": "0.035",
+  "expense_base_year": 2026,
+  "ffb": {
+   "2027": "610000",
+   "2028": "634000",
+   "2029": "659000",
+   "2030": "685000",
+   "2031": "712000",
+   "2032": "740000",
+   "2033": "770000",
+   "2034": "801000",
+   "2035": "833000",
+   "2036": "866000",
+   "2037": "901000",
+   "2038": "937000",
+   "2039": "974000",
+   "2040": "1013000",
+   "2041": "1054000",
+   "2042": "1096000",
+   "2043": "1140000"
+  },
+  "operating_start": "150000",
+  "operating_inflation": "0.04",
+  "interest_rate": "0.015",
+  "units": 24,
+  "current_dues": "560",
+  "cushion": "75000",
+  "target": "0.6",
+  "max_dues_increase": "0.20",
+  "max_assessment_share": "0.05",
+  "sources": {
+   "starting_balance": "Fictional balance sheet, December 2026",
+   "current_dues": "Fictional 2026 budget"
+  }
+ },
+ "scenarios": [
+  {
+   "name": "Dues only",
+   "description": "$650 from 2027, +4.5% a year, no assessment",
+   "dues": {
+    "mode": "rate",
+    "first_value": "650",
+    "annual_increase": "0.045",
+    "overrides": {}
+   },
+   "assessments": [],
+   "rounding": "dollar"
+  },
+  {
+   "name": "Two-part assessment",
+   "description": "$700 from 2027, +3.5% a year, pinned at $860 in 2032; $5,000 per unit in 2028 and again in 2029",
+   "dues": {
+    "mode": "rate",
+    "first_value": "700",
+    "annual_increase": "0.035",
+    "overrides": {
+     "2032": "860"
+    }
+   },
+   "assessments": [
+    {
+     "year": 2028,
+     "amount": "5000",
+     "note": "First installment"
+    },
+    {
+     "year": 2029,
+     "amount": "5000",
+     "note": "Second installment"
+    }
+   ],
+   "rounding": "dollar"
+  },
+  {
+   "name": "Hold then catch up",
+   "description": "Dues cut for two years, then a large step and steady increases",
+   "dues": {
+    "mode": "explicit",
+    "explicit": {
+     "2027": "515",
+     "2028": "530",
+     "2029": "680",
+     "2030": "712.5",
+     "2031": "745",
+     "2032": "779",
+     "2033": "814",
+     "2034": "851",
+     "2035": "889",
+     "2036": "929",
+     "2037": "971",
+     "2038": "1015",
+     "2039": "1061",
+     "2040": "1109",
+     "2041": "1159",
+     "2042": "1211"
+    }
+   },
+   "assessments": [
+    {
+     "year": 2033,
+     "amount": "2500",
+     "note": ""
+    }
+   ],
+   "rounding": "dollar"
+  },
+  {
+   "name": "Steady increase",
+   "description": "$640 from 2027, +4.2% a year, cents kept, no assessment",
+   "dues": {
+    "mode": "rate",
+    "first_value": "640",
+    "annual_increase": "0.042",
+    "overrides": {}
+   },
+   "assessments": [],
+   "rounding": "none"
+  }
+ ]
+}
