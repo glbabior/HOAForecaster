@@ -1,0 +1,19 @@
+#!/bin/sh
+# Before every commit – real-data guard, then lint, format and type checks (spec 8.1, 10.1).
+set -e
+
+# Refuse staged text matching the private deny-list, one case-insensitive fixed string per line.
+# The list lives in the private data repo, so the public repo never names what it guards against.
+DENY="${HOA_DATA_DIR:-../HOATracker-data}/denylist.txt"
+if [ -f "$DENY" ]; then
+    if git diff --cached -U0 --no-color -- . ':!uv.lock' ':!package-lock.json' | grep '^+' | grep -i -F -f "$DENY" >/dev/null; then
+        echo "pre-commit: staged changes contain text from the private deny-list – not committing." >&2
+        exit 1
+    fi
+else
+    echo "pre-commit: no deny-list at $DENY – real-data guard skipped." >&2
+fi
+
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy

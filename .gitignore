@@ -9,3 +9,7 @@ dist/
 # real association data lives in the private HOATracker-data repo
 ReferenceFiles/
 PRIVATE_APPENDIX.md
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
