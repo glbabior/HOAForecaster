@@ -26,6 +26,7 @@ def validate_baseline(b: Baseline) -> list[str]:
     span = b.end_year - b.start_year + 1
     if not MIN_YEARS <= span <= MAX_YEARS:
         problems.append(f"the horizon must be {MIN_YEARS}–{MAX_YEARS} full years, not {span}")
+        return problems  # nothing else can be checked over an impossible horizon
     missing = [y for y in range(b.start_year, b.end_year + 2) if y not in b.ffb]
     if missing:
         problems.append("Fully Funded Balance is missing for " + ", ".join(str(y) for y in missing))

@@ -21,6 +21,8 @@ from hoa_engine import (
     Scenario,
     baseline_from_dict,
     baseline_to_dict,
+    project_from_dict,
+    project_to_dict,
     run,
     scenario_from_dict,
     scenario_to_dict,
@@ -202,9 +204,15 @@ def test_invalid_inputs_raise_with_every_problem() -> None:
 # ---------------------------------------------------------------- validation
 
 
+def test_an_impossible_horizon_is_reported_alone() -> None:
+    # nothing else can be checked over it, and a huge one must not be walked year by year
+    assert validate_baseline(baseline(end_year=10**9)) == [
+        f"the horizon must be 5–30 full years, not {10**9 - 2030 + 1}"
+    ]
+
+
 def test_validate_baseline_reports_each_rule() -> None:
     b = baseline(
-        end_year=2070,
         expense_inflation=D("0.6"),
         target=D(0),
         starting_balance=D(-1),
@@ -212,8 +220,7 @@ def test_validate_baseline_reports_each_rule() -> None:
         ffb={2030: D(-1)},
     )
     problems = validate_baseline(b)
-    assert problems[0] == "the horizon must be 5–30 full years, not 41"
-    assert problems[1].startswith("Fully Funded Balance is missing for 2031, 2032")
+    assert problems[0] == "Fully Funded Balance is missing for 2031, 2032, 2033, 2034, 2035"
     assert "expense inflation must be between 0% and 50%" in problems
     assert "the percent-funded target must be above 0% and at most 100%" in problems
     assert "starting balance cannot be negative" in problems
@@ -327,3 +334,32 @@ def test_number_strings_may_carry_surrounding_spaces() -> None:
     raw = baseline_to_dict(baseline())
     raw["cushion"] = " 50000 "
     assert baseline_from_dict(raw).cushion == 50000
+
+
+def test_project_files_from_an_unknown_schema_version_are_refused() -> None:
+    raw = json.loads(DEMO.read_text(encoding="utf-8"))
+    raw["schema_version"] = 99
+    with pytest.raises(ProjectFormatError, match="schema version 99 is not supported"):
+        project_from_dict(raw)
+    raw["schema_version"] = 1
+    assert project_to_dict(project_from_dict(raw))["schema_version"] == 1
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"name": 5}, "expected text"),
+        ({"notes": "bell\x07"}, "control characters"),
+    ],
+)
+def test_project_text_must_be_plain_text(change: dict[str, object], message: str) -> None:
+    raw = {**json.loads(DEMO.read_text(encoding="utf-8")), **change}
+    with pytest.raises(ProjectFormatError, match=message):
+        project_from_dict(raw)
+
+
+def test_duplicate_scenario_names_are_refused() -> None:
+    raw = json.loads(DEMO.read_text(encoding="utf-8"))
+    raw["scenarios"].append(raw["scenarios"][0])
+    with pytest.raises(ProjectFormatError, match="scenario names must be unique – 'Dues only'"):
+        project_from_dict(raw)

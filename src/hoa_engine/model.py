@@ -7,6 +7,7 @@ binary floats. Rates and percentages are fractions (0.03 means 3%).
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -85,6 +86,17 @@ class Scenario:
     description: str = ""
 
 
+SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class Project:
+    name: str
+    baseline: Baseline
+    scenarios: tuple[Scenario, ...]
+    notes: str = ""
+
+
 # ---------------------------------------------------------------- JSON form
 
 
@@ -113,6 +125,17 @@ def _int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int | str):
         raise TypeError(f"expected a whole number, got {value!r}")
     return int(value)
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")  # tab, newline, return are fine
+
+
+def _str(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"expected text, got {value!r}")
+    if _CONTROL.search(value):
+        raise ValueError(f"text contains control characters – {value!r}")
+    return value
 
 
 def _bool(value: Any) -> bool:
@@ -220,8 +243,8 @@ def baseline_to_dict(b: Baseline) -> dict[str, Any]:
 def scenario_from_dict(d: dict[str, Any]) -> Scenario:
     dues = d["dues"]
     return Scenario(
-        name=d["name"],
-        description=d.get("description", ""),
+        name=_str(d["name"]),
+        description=_str(d.get("description", "")),
         dues=DuesPath(
             mode=DuesMode(dues["mode"]),
             explicit=_year_map(dues.get("explicit", {})),
@@ -253,4 +276,34 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
             {"year": a.year, "amount": str(a.amount), "note": a.note} for a in s.assessments
         ],
         "rounding": s.rounding.value,
+    }
+
+
+@_reading("project")
+def project_from_dict(d: dict[str, Any]) -> Project:
+    version = _int(d.get("schema_version", SCHEMA_VERSION))
+    if version != SCHEMA_VERSION:
+        raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
+    scenarios = tuple(scenario_from_dict(s) for s in d.get("scenarios", []))
+    names = [s.name for s in scenarios]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(
+            "scenario names must be unique – " + ", ".join(repr(n) for n in duplicates)
+        )
+    return Project(
+        name=_str(d["name"]),
+        notes=_str(d.get("notes", "")),
+        baseline=baseline_from_dict(d["baseline"]),
+        scenarios=scenarios,
+    )
+
+
+def project_to_dict(p: Project) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "name": p.name,
+        "notes": p.notes,
+        "baseline": baseline_to_dict(p.baseline),
+        "scenarios": [scenario_to_dict(s) for s in p.scenarios],
     }
