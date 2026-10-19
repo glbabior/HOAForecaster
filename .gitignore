@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.env
+~$*.xlsx
+.DS_Store
+# real association data lives in the private HOATracker-data repo
+ReferenceFiles/
+PRIVATE_APPENDIX.md
