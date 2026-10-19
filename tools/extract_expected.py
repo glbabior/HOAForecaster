@@ -60,6 +60,14 @@ def _num(value: Any) -> str:
     return repr(value)
 
 
+def _flag(key: str, value: Any) -> bool:
+    # anything but the two expected words – an error value above all – must fail loudly
+    allowed = {FLAG_TRUE[key]: True, "ok" if key == "low_flag" else "no": False}
+    if value not in allowed:
+        raise ValueError(f"{key} should be one of {sorted(allowed)}, found {value!r}")
+    return allowed[value]
+
+
 def _plan(ws: Any, years: range) -> dict[str, dict[str, Any]]:
     header = {ws.cell(4, c).value: c for c in range(2, ws.max_column + 1)}
     out: dict[str, dict[str, Any]] = {str(y): {} for y in years}
@@ -72,7 +80,7 @@ def _plan(ws: Any, years: range) -> dict[str, dict[str, Any]]:
             continue
         for y in years:
             v = ws.cell(r, header[y]).value
-            out[str(y)][key] = (v == FLAG_TRUE[key]) if key in FLAG_TRUE else _num(v)
+            out[str(y)][key] = _flag(key, v) if key in FLAG_TRUE else _num(v)
     return out
 
 
@@ -110,9 +118,11 @@ def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
         elif label.startswith("First year percent-funded target"):
             out["first_target_year"] = v if isinstance(v, int | float) else None
         elif label.startswith("Owner outlay per unit"):
-            out["outlay_total" if years[1] == end else "outlay_first5"] = _num(v)
+            first = "first" in label or years[1] != end
+            out["outlay_first5" if first else "outlay_total"] = _num(v)
         elif label.startswith("Extra cost vs"):
-            out["extra_total" if years[1] == end else "extra_first4"] = _num(v)
+            first = "first" in label or years[1] != end
+            out["extra_first4" if first else "extra_total"] = _num(v)
         elif label.startswith("Average owner cost"):
             out["avg_owner_cost"] = _num(v)
         elif label.startswith("Average extra cost"):
@@ -120,6 +130,17 @@ def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
     if isinstance(out.get("first_target_year"), float):
         out["first_target_year"] = int(out["first_target_year"])
     return out
+
+
+def _plan_sheet(wb: Any, name: str) -> Any:
+    """The sheet named after the scenario, or – when the name had to be cleaned up to be a
+    legal sheet name – the sheet whose title cell holds it."""
+    if name in wb.sheetnames:
+        return wb[name]
+    for ws in wb.worksheets:
+        if ws["A1"].value == name:
+            return ws
+    raise ValueError(f"no sheet for scenario {name!r}")
 
 
 def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
@@ -131,7 +152,7 @@ def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
     for s in project["scenarios"]:
         name = s["name"]
         scenarios[name] = {
-            "years": _plan(wb[name], range(start, end + 1)),
+            "years": _plan(_plan_sheet(wb, name), range(start, end + 1)),
             "summary": _summary(compare, columns[name], start, end),
         }
     return {"workbook": workbook.name, "scenarios": scenarios}

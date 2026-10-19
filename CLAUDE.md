@@ -8,10 +8,11 @@ This repository is public. Never commit a real association's name, figures, peop
 
 ## Layout
 
-- `src/hoa_engine/` – the calculation engine (section 6). Pure Python, no I/O, `Decimal` throughout. `run(baseline, scenario)` is the only entry point the app and exporter need.
-- `tests/engine/` – unit tests and the section 9 acceptance tests. 100% coverage of `hoa_engine` is enforced.
-- `demo/fixtures/` – the fictional project (`project.json`), its formula workbook (`reference.xlsx`) and the figures LibreOffice computed from it (`expected.json`). Regenerate with `uv run python demo/build_reference_workbook.py` after changing the demo project; the builder must never import the engine.
-- `tools/recalc.py` – LibreOffice headless recalculation and formula-error scan. `tools/extract_expected.py` – reads expected figures out of any workbook in the reference layout.
+- `src/hoa_engine/` – the calculation engine (section 6). Pure Python, no I/O, `Decimal` throughout. `run(baseline, scenario)` is the only entry point. `model.py` also holds `Project` and the JSON project format.
+- `src/hoa_workbook/` – Excel export and re-import (sections 7.1, 7.6). `layout.py` is the single source for sheet names, rows and labels, shared by `export.py` (writer) and `read.py` (reader); `charts.py` builds the native charts. It imports only `hoa_engine.model` – never the engine – so its formulas stay an independent check on the engine (enforced by `tests/workbook/test_independence.py`).
+- `tests/engine/` – unit tests and the section 9 acceptance tests; 100% coverage of `hoa_engine` is enforced. `tests/workbook/` – export recalculates in LibreOffice to the engine's figures, export → import round trip, Excel open check (Windows with Excel), bad-file handling. `tests/compare.py` – the engine-vs-workbook comparison both use.
+- `demo/fixtures/` – the fictional project (`project.json`), its exported workbook (`reference.xlsx`) and the figures LibreOffice computed from it (`expected.json`). Regenerate with `uv run python demo/build_reference_workbook.py` after changing the demo project or the exporter's formulas; `expected.json` changing means a formula changed.
+- `tools/recalc.py` – LibreOffice headless recalculation and formula-error scan. `tools/extract_expected.py` – reads expected figures out of any workbook in the reference layout. `tools/excel_check.ps1` – opens a workbook in real Excel and reports any repair.
 
 ## Commands
 
@@ -31,6 +32,11 @@ uv run mypy
 - Money and rates are `Decimal` in memory and decimal strings in JSON; floats are refused on load.
 - Dues rounding applies only to grown dues, each year rounded half-up from the unrounded growth; typed and pinned values are used as typed.
 - Expected figures always come from a spreadsheet recalculated by Excel or LibreOffice, never from the engine.
+- Export – sheets in the reference order (Method, Inputs, Compare, Charts, Expenses, then one per scenario). Scenario sheets are named from the scenario, cleaned to a legal, unique name (31 UTF-16 units, no trailing apostrophe); the full name is in cell A1. Dues settings sit below the table; the rounding cell drives the dues formulas (a dropdown), while the dues mode is set in the app because it decides which cells hold formulas. Special assessments are a list, one row each with spare rows, summed into the year row by SUMIF – so installments and notes survive a re-import.
+- User text is always written as text, and text starting with = + - @ also gets Excel's quote prefix so it stays text when edited or saved as CSV. Control characters are refused when a project is read.
+- Import (`read.py`) reads only the export layout. Section 7.1a (CSV of expenses and FFB) and 7.1b (the original reference workbook, with its partial first year) are still open; the private repo's `fixtures/make_project.py` does 7.1b as a one-off. A re-import is identical to the exported project except that numbers pass through Excel's doubles (about 15 significant digits). An expense row without its year formulas is refused rather than read, because the workbook's own totals would leave it out.
+- Import limits – 20 MB file, 20 MB unpacked, 100:1 compression per part, 2,000 rows by 200 columns per sheet; defusedxml must be active. Imported projects are validated before they are returned.
+- The Charts sheet's shared dollar scale is passed in by the caller from the engine's results, snapped to a grid whose lines coincide with 0–100% in 20% steps.
 
 ### Engine choices the spec leaves open
 
