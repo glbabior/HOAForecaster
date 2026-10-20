@@ -1,10 +1,10 @@
-# HOA Reserve Planner
+# HOAForecaster
 
-The specification is [HOA_Reserve_Planner_REQUIREMENTS.md](HOA_Reserve_Planner_REQUIREMENTS.md). Read it before changing behaviour; cite its section numbers in reviews and commit bodies.
+The specification is [HOAForecaster_REQUIREMENTS.md](HOAForecaster_REQUIREMENTS.md). Read it before changing behaviour; cite its section numbers in reviews and commit bodies.
 
 ## Public code, private data
 
-This repository is public. Never commit a real association's name, figures, people, documents or workbook – not in code, tests, fixtures, comments, commit messages or docs. Real data lives in the private sibling repository `HOATracker-data` (section 8.1). Public tests use the fictional demo project in `demo/`.
+This repository is public. Never commit a real association's name, figures, people, documents or workbook – not in code, tests, fixtures, comments, commit messages or docs. Real data lives in the private sibling repository `HOAForecaster-data` (section 8.1). Public tests use the fictional demo project in `demo/`.
 
 ## Layout
 
@@ -18,7 +18,7 @@ This repository is public. Never commit a real association's name, figures, peop
 
 ```
 uv sync                                     # install
-uv run pytest --cov                         # tests; add HOA_DATA_DIR=../HOATracker-data for the private set
+uv run pytest --cov                         # tests; add HOA_DATA_DIR=../HOAForecaster-data for the private set
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 ```

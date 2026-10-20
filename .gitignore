@@ -6,7 +6,7 @@ dist/
 .env
 ~$*.xlsx
 .DS_Store
-# real association data lives in the private HOATracker-data repo
+# real association data lives in the private HOAForecaster-data repo
 ReferenceFiles/
 PRIVATE_APPENDIX.md
 .coverage

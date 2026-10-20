@@ -1,5 +1,5 @@
 [project]
-name = "hoa-reserve-planner"
+name = "hoaforecaster"
 version = "0.1.0"
 description = "Local reserve funding planner for homeowners associations"
 readme = "README.md"

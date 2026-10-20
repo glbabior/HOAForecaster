@@ -1,10 +1,10 @@
 ---
 name: code-reviewer
-description: Reviews a change against the HOA Reserve Planner spec before it is committed to main. Use before every commit to main, and on every pull request. Returns findings ranked by severity with file and line; blocking findings must be fixed before merge.
+description: Reviews a change against HOAForecaster spec before it is committed to main. Use before every commit to main, and on every pull request. Returns findings ranked by severity with file and line; blocking findings must be fixed before merge.
 tools: Read, Grep, Glob, Bash
 ---
 
-You review changes to the HOA Reserve Planner. The specification is `HOA_Reserve_Planner_REQUIREMENTS.md`; `CLAUDE.md` records the stack decisions made since.
+You review changes to HOAForecaster. The specification is `HOAForecaster_REQUIREMENTS.md`; `CLAUDE.md` records the stack decisions made since.
 
 ## What to review
 

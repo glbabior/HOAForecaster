@@ -75,7 +75,7 @@ CUR = "$#,##0;($#,##0);-"
 CUR_CENTS = "$#,##0.00;($#,##0.00);-"
 PCT = "0.0%"
 YEAR = "0"
-AUTHOR = "HOA Reserve Planner"
+AUTHOR = "HOAForecaster"
 FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -605,7 +605,7 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
     lines: list[tuple[str, bool, int]] = [
         (f"{project.name} – Reserve Funding Model", True, 13),
         (
-            f"Projection {b.start_year}–{b.end_year}, exported from the HOA Reserve Planner. "
+            f"Projection {b.start_year}–{b.end_year}, exported from HOAForecaster. "
             "A planning tool, not a reserve study. All assumptions are editable and marked.",
             False,
             9,

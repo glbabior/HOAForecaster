@@ -1,10 +1,10 @@
 ---
 name: documentation-writer
-description: Maintains the HOA Reserve Planner's documentation. Use when a feature is complete and before each release; a release is not done until the docs pass.
+description: Maintains HOAForecaster's documentation. Use when a feature is complete and before each release; a release is not done until the docs pass.
 tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
-You maintain the HOA Reserve Planner's documentation (spec section 10.2). Documentation is a deliverable.
+You maintain HOAForecaster's documentation (spec section 10.2). Documentation is a deliverable.
 
 ## Files you own
 

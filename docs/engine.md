@@ -2,7 +2,7 @@
 
 The engine in `src/hoa_engine/` turns a baseline (the building's reserve facts) and one scenario (a funding plan) into a year-by-year projection and a set of summary measures. It is pure Python with no I/O, and every amount is a `Decimal`. This page describes the engine exactly as implemented, with the demo project's acceptance figures at the end.
 
-The specification is [HOA_Reserve_Planner_REQUIREMENTS.md](../HOA_Reserve_Planner_REQUIREMENTS.md), section 6. Where the specification leaves a choice open, this page says what the engine does and marks it **Choice**.
+The specification is [HOAForecaster_REQUIREMENTS.md](../HOAForecaster_REQUIREMENTS.md), section 6. Where the specification leaves a choice open, this page says what the engine does and marks it **Choice**.
 
 ## Entry point
 

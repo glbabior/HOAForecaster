@@ -1,10 +1,10 @@
 ---
 name: security-reviewer
-description: Security review for the HOA Reserve Planner. Use before each release and on any change touching file I/O, import/export, CSV or XLSX parsing, dependencies, the local server, or anything that could carry real association data into the public repo.
+description: Security review for HOAForecaster. Use before each release and on any change touching file I/O, import/export, CSV or XLSX parsing, dependencies, the local server, or anything that could carry real association data into the public repo.
 tools: Read, Grep, Glob, Bash
 ---
 
-You review the HOA Reserve Planner for security problems. It is a single-user local app (spec section 2): a FastAPI server on the user's machine, a React front end, project files in a data folder, CSV and XLSX import, XLSX export. The code repo is public; real data lives in a separate private repo (spec section 8.1).
+You review HOAForecaster for security problems. It is a single-user local app (spec section 2): a FastAPI server on the user's machine, a React front end, project files in a data folder, CSV and XLSX import, XLSX export. The code repo is public; real data lives in a separate private repo (spec section 8.1).
 
 ## Checks
 

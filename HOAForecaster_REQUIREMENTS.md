@@ -1,6 +1,8 @@
-# HOA Reserve Planner – Application Requirements
+# HOAForecaster – Application Requirements
 
-Version 1.3 – October 19, 2026 (v1.0–v1.2 earlier the same day) – the brief for a Claude Code build.
+Version 1.4 – October 20, 2026 (v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+
+Changes in v1.4 – the application is named HOAForecaster; the repositories are HOAForecaster (public) and HOAForecaster-data (private).
 
 Changes in v1.3 – code and data separated for a public repository (section 8.1); real-association figures moved to a private appendix in the private data repository; public acceptance tests use a fictional demo project (section 9); security review checks that no real data enters the public repo.
 
@@ -156,8 +158,8 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 ### 8.1 Code and data separation
 
 - The code is public; real association data is not. Two repositories –
-  - **HOATracker** (public) – code, this spec, the fictional demo project and its fixtures. It must never contain a real association's name, figures, documents or workbook.
-  - **HOATracker-data** (private, cloned beside the code) – real projects, the reference workbook and handoff notes, the private appendix and the private acceptance fixtures.
+  - **HOAForecaster** (public) – code, this spec, the fictional demo project and its fixtures. It must never contain a real association's name, figures, documents or workbook.
+  - **HOAForecaster-data** (private, cloned beside the code) – real projects, the reference workbook and handoff notes, the private appendix and the private acceptance fixtures.
 - The app reads and writes projects in a data folder set by the `HOA_DATA_DIR` environment variable or a setting, defaulting to the bundled demo folder. No path into the private repo is hard-coded.
 - No plugin system in v1 – the data folder is the seam. Importers for other reserve-study formats are a possible later use for one.
 

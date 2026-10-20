@@ -1,8 +1,8 @@
-# HOA Reserve Planner
+# HOAForecaster
 
 A local app for homeowners association boards. Enter a building's reserve facts once, then build and compare funding plans – dues paths and special assessments – and see each plan's year-by-year reserve balance, percent funded and cost per owner.
 
-Work in progress – the calculation engine is built and tested; the Excel exporter and the user interface come next. See [the requirements](HOA_Reserve_Planner_REQUIREMENTS.md).
+Work in progress – the calculation engine is built and tested; the Excel exporter and the user interface come next. See [the requirements](HOAForecaster_REQUIREMENTS.md).
 
 ## Develop
 
