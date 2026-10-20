@@ -160,6 +160,7 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 - The code is public; real association data is not. Two repositories –
   - **HOAForecaster** (public) – code, this spec, the fictional demo project and its fixtures. It must never contain a real association's name, figures, documents or workbook.
   - **HOAForecaster-data** (private, cloned beside the code) – real projects, the reference workbook and handoff notes, the private appendix and the private acceptance fixtures.
+- `HOA_PRIVATE_DIR` names the private repository for the private acceptance tests and the commit guard; it is never the app's data folder.
 - The app reads and writes projects in a data folder set by the `HOA_DATA_DIR` environment variable or a setting, defaulting to the bundled demo folder. No path into the private repo is hard-coded.
 - No plugin system in v1 – the data folder is the seam. Importers for other reserve-study formats are a possible later use for one.
 
@@ -175,7 +176,7 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 Two fixture sets, one engine.
 
 - **Public – demo project** (`demo/` in the public repo, tests always run). A fictional association – invented name, unit count, balance, expense schedule and FFB – with three scenarios that between them exercise every dues mode (explicit, first-year value + rate, rate with per-year overrides), a special assessment, nominal and inflated expense lines, a LOW year, an operating shortfall year, a needs-vote year, a target met and a target never met. Expected figures come from a demo workbook built with the reference formulas and recalculated in LibreOffice headless – never from the engine itself. The demo workbook and the script that builds it are committed with the fixtures.
-- **Private – real project** (private appendix, section A3). Runs when `HOA_DATA_DIR` points at the private repo; skipped otherwise. Must pass before every release.
+- **Private – real project** (private appendix, section A3). Runs when `HOA_PRIVATE_DIR` points at the private repo; skipped otherwise. Must pass before every release.
 
 Also – a round-trip export → re-import reproduces the same results for both projects; the exported workbook recalculates in LibreOffice headless with zero formula errors.
 

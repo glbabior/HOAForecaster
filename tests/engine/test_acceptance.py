@@ -2,7 +2,7 @@
 
 Each fixture set is a project.json plus an expected.json extracted from a
 workbook that Excel or LibreOffice recalculated from its own formulas. The demo
-set is always present; the private set runs when HOA_DATA_DIR points at the
+set is always present; the private set runs when HOA_PRIVATE_DIR points at the
 private data repository.
 """
 
@@ -23,12 +23,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _fixture_dirs() -> list[Any]:
     dirs = [pytest.param(ROOT / "demo" / "fixtures", id="demo")]
-    data_dir = os.environ.get("HOA_DATA_DIR")
+    data_dir = os.environ.get("HOA_PRIVATE_DIR")
     if data_dir:
         dirs.append(pytest.param(Path(data_dir) / "fixtures", id="private"))
     else:
         dirs.append(
-            pytest.param(None, id="private", marks=pytest.mark.skip(reason="HOA_DATA_DIR not set"))
+            pytest.param(
+                None, id="private", marks=pytest.mark.skip(reason="HOA_PRIVATE_DIR not set")
+            )
         )
     return dirs
 

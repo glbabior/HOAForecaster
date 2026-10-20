@@ -76,7 +76,7 @@ def _short_project() -> Project:
 
 def _projects() -> list[Any]:
     out = [pytest.param(DEMO, id="demo"), pytest.param(_short_project(), id="short")]
-    data_dir = os.environ.get("HOA_DATA_DIR")
+    data_dir = os.environ.get("HOA_PRIVATE_DIR")
     if data_dir:
         out.append(pytest.param(_load(Path(data_dir) / "fixtures" / "project.json"), id="private"))
     return out
@@ -385,7 +385,7 @@ def test_suspiciously_compressed_files_are_refused(monkeypatch: pytest.MonkeyPat
 
 def test_oversized_sheets_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reader, "MAX_ROWS", 10)
-    with pytest.raises(WorkbookFormatError, match="far larger than a planner export"):
+    with pytest.raises(WorkbookFormatError, match="far larger than an HOAForecaster export"):
         read_workbook(export_workbook(DEMO))
 
 

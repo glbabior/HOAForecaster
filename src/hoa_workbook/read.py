@@ -58,7 +58,7 @@ class WorkbookFormatError(ValueError):
 
 def _check_package(data: bytes) -> None:
     if len(data) > MAX_FILE_BYTES:
-        raise WorkbookFormatError("the file is larger than 20 MB – not a planner workbook")
+        raise WorkbookFormatError("the file is larger than 20 MB – not an HOAForecaster workbook")
     try:
         entries = zipfile.ZipFile(BytesIO(data)).infolist()
     except zipfile.BadZipFile:
@@ -98,13 +98,13 @@ def _check_size(wb: Workbook) -> None:
     for ws in wb.worksheets:
         if ws.max_row > MAX_ROWS or ws.max_column > MAX_COLUMNS:
             raise WorkbookFormatError(
-                f"the {ws.title} sheet is far larger than a planner export – not read"
+                f"the {ws.title} sheet is far larger than an HOAForecaster export – not read"
             )
 
 
 def _sheet(wb: Workbook, name: str) -> Worksheet:
     if name not in wb.sheetnames:
-        raise WorkbookFormatError(f"the workbook has no {name} sheet – not a planner export")
+        raise WorkbookFormatError(f"the workbook has no {name} sheet – not an HOAForecaster export")
     return wb[name]
 
 
