@@ -7,7 +7,13 @@ requires-python = ">=3.12"
 dependencies = [
     "openpyxl>=3.1",
     "defusedxml>=0.7",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
 ]
+
+[project.scripts]
+hoaforecaster = "hoa_app.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -16,6 +22,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-openpyxl",
+    "httpx2",
 ]
 
 [build-system]
@@ -23,7 +30,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/hoa_engine", "src/hoa_workbook", "src/hoa_store"]
+packages = ["src/hoa_engine", "src/hoa_workbook", "src/hoa_store", "src/hoa_app"]
+
+[tool.uv]
+# a cooldown – only releases at least a week old, so a compromised release has time to be caught
+exclude-newer = "1 week"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -31,7 +42,7 @@ pythonpath = [".", "tools"]
 addopts = "-ra"
 
 [tool.coverage.run]
-source = ["hoa_engine", "hoa_workbook", "hoa_store"]
+source = ["hoa_engine", "hoa_workbook", "hoa_store", "hoa_app"]
 branch = true
 
 [tool.coverage.report]
