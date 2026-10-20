@@ -159,6 +159,8 @@ needs_vote       = dues jump or large assessment
 - The starting balance, operating expenses, current dues, minimum cushion, every expense line and every Fully Funded Balance are not negative.
 - There is at least one unit.
 
+When the horizon itself is impossible, that is the only problem reported, since nothing else can be checked over it.
+
 Years are contiguous by construction – the horizon is a start year and an end year, not a list.
 
 **Scenario**
@@ -184,7 +186,17 @@ A project is one JSON file. The demo project is [`demo/fixtures/project.json`](.
 }
 ```
 
-The engine reads and writes the `baseline` object and each `scenarios` entry with `baseline_from_dict` / `baseline_to_dict` and `scenario_from_dict` / `scenario_to_dict`. The top-level fields (`schema_version`, `name`, `notes`) are part of the file but are not read by the engine.
+`project_from_dict` / `project_to_dict` (in `model.py`) read and write the whole file as a `Project` – its name, notes, baseline and scenarios. `baseline_from_dict` / `baseline_to_dict` and `scenario_from_dict` / `scenario_to_dict` do the same for the parts. `run` itself takes only a baseline and one scenario.
+
+**Top-level fields**
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` | whole number | Optional, default 1. Any other version is refused |
+| `name` | text | Required – the association's name |
+| `notes` | text | Optional |
+| `baseline` | object | Required – see below |
+| `scenarios` | list | Optional. Scenario names must be unique – a file with two scenarios of the same name is refused |
 
 **Numbers**
 
@@ -193,6 +205,7 @@ The engine reads and writes the `baseline` object and each `scenarios` entry wit
 - Surrounding spaces in a number string are allowed. `NaN`, infinities and any magnitude of 10<sup>15</sup> or more are refused.
 - Years and the unit count are whole numbers – a JSON integer or a string such as `"2027"`. A fraction such as `"2027.5"` is refused.
 - `nominal` must be a real `true` or `false`.
+- The project's `name` and `notes` and each scenario's `name` and `description` must be JSON strings with no control characters – anything below a space other than tab, newline and carriage return.
 - Year-keyed tables (`ffb`, `explicit`, `overrides`) use the year as a string key.
 
 When writing, every amount is written as a decimal string and year-keyed tables are sorted by year.
@@ -232,7 +245,7 @@ When writing, every amount is written as a decimal string and year-keyed tables 
 
 When a scenario is written back, only the fields for its dues mode are written.
 
-A file that cannot be read raises `ProjectFormatError` with a plain-language message, such as "the baseline is missing 'units'" or "the scenario has a bad value – money and rates must be strings or integers, not float (0.035)".
+A file that cannot be read raises `ProjectFormatError` with a plain-language message, such as "the baseline is missing 'units'", "the scenario has a bad value – money and rates must be strings or integers, not float (0.035)" or "the project has a bad value – scenario names must be unique – 'Dues only'".
 
 ## Acceptance figures – the demo project
 
@@ -284,7 +297,7 @@ The acceptance test (`tests/engine/test_acceptance.py`) checks every yearly row 
 
 The expected figures never come from the engine. They are produced independently, from a spreadsheet, in three steps.
 
-1. `demo/build_reference_workbook.py` writes `demo/fixtures/reference.xlsx` from `project.json` in the reference workbook's layout – Inputs, Expenses, one Plan sheet per scenario and Compare – with every result a live Excel formula. The script never imports the engine.
+1. `demo/build_reference_workbook.py` exports `project.json` to `demo/fixtures/reference.xlsx` with the app's Excel exporter (see [workbook.md](workbook.md)) – Method, Inputs, Compare, Charts, Expenses and one Plan sheet per scenario, with every result a live Excel formula. Neither the script nor the exporter runs the engine. The exporter imports only the project model and its input checks, and `tests/workbook/test_independence.py` keeps it that way.
 2. `tools/recalc.py` opens the workbook in LibreOffice headless, recalculates every formula, saves the computed values into the file and fails if any cell holds a formula error.
 3. `tools/extract_expected.py` reads those computed values back – Plan rows matched by label, summary measures from the Compare sheet – and writes `demo/fixtures/expected.json`.
 
@@ -296,4 +309,4 @@ uv run python demo/build_reference_workbook.py
 
 This needs [LibreOffice](https://www.libreoffice.org/) installed. If it is not in the usual place, set `SOFFICE` to the path of `soffice`.
 
-A private fixture set for a real project, in the same format, runs when `HOA_DATA_DIR` points at the private data folder. It is skipped otherwise.
+A private fixture set for a real project, in the same format, runs when `HOA_PRIVATE_DIR` points at the private data repository. It is skipped otherwise.
