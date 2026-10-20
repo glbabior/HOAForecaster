@@ -100,7 +100,7 @@ class Project:
 # ---------------------------------------------------------------- JSON form
 
 
-MAX_MAGNITUDE = Decimal("1e15")  # far above any association's money; rejects absurd exponents
+MAX_DIGITS = 15  # whole-number digits; far above any association's money, rejects absurd exponents
 
 
 class ProjectFormatError(ValueError):
@@ -116,7 +116,8 @@ def _dec(value: Any) -> Decimal:
         d = Decimal(value.strip() if isinstance(value, str) else value)
     except InvalidOperation:
         raise ValueError(f"{value!r} is not a number") from None
-    if not d.is_finite() or abs(d) >= MAX_MAGNITUDE:
+    # check the exponent before any arithmetic – abs() of 1e999999999 overflows
+    if not d.is_finite() or d.adjusted() >= MAX_DIGITS:
         raise ValueError(f"{value!r} is not a usable number")
     return d
 
@@ -136,6 +137,12 @@ def _str(value: Any) -> str:
     if _CONTROL.search(value):
         raise ValueError(f"text contains control characters – {value!r}")
     return value
+
+
+def _sources(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise TypeError(f"sources should be a set of notes, got {value!r}")
+    return {_str(k): _str(v) for k, v in value.items()}
 
 
 def _bool(value: Any) -> bool:
@@ -184,9 +191,9 @@ def baseline_from_dict(d: dict[str, Any]) -> Baseline:
             ExpenseLine(
                 year=_int(e["year"]),
                 amount=_dec(e["amount"]),
-                description=e.get("description", ""),
+                description=_str(e.get("description", "")),
                 nominal=_bool(e.get("nominal", False)),
-                source=e.get("source", ""),
+                source=_str(e.get("source", "")),
             )
             for e in d.get("expense_lines", [])
         ),
@@ -202,7 +209,7 @@ def baseline_from_dict(d: dict[str, Any]) -> Baseline:
         target=_dec(d["target"]),
         max_dues_increase=_opt_dec(d.get("max_dues_increase")),
         max_assessment_share=_opt_dec(d.get("max_assessment_share")),
-        sources=dict(d.get("sources", {})),
+        sources=_sources(d.get("sources", {})),
     )
 
 
@@ -253,7 +260,7 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
             overrides=_year_map(dues.get("overrides", {})),
         ),
         assessments=tuple(
-            Assessment(year=_int(a["year"]), amount=_dec(a["amount"]), note=a.get("note", ""))
+            Assessment(year=_int(a["year"]), amount=_dec(a["amount"]), note=_str(a.get("note", "")))
             for a in d.get("assessments", [])
         ),
         rounding=Rounding(d.get("rounding", Rounding.DOLLAR)),

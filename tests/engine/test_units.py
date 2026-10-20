@@ -363,3 +363,10 @@ def test_duplicate_scenario_names_are_refused() -> None:
     raw["scenarios"].append(raw["scenarios"][0])
     with pytest.raises(ProjectFormatError, match="scenario names must be unique – 'Dues only'"):
         project_from_dict(raw)
+
+
+def test_sources_must_be_notes() -> None:
+    raw = baseline_to_dict(baseline())
+    raw["sources"] = ["a list"]
+    with pytest.raises(ProjectFormatError, match="sources should be a set of notes"):
+        baseline_from_dict(raw)
