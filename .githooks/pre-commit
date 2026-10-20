@@ -17,3 +17,10 @@ fi
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy
+
+# the screens – types, lint, formatting and tests, with the installed tools only (never a download)
+if [ -d web/node_modules ]; then
+    (cd web && npx --no-install tsc --noEmit && npm run --silent lint && npx --no-install vitest run --silent)
+else
+    echo "pre-commit: web/node_modules not installed – front-end checks skipped." >&2
+fi
