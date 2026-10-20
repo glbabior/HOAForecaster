@@ -54,7 +54,7 @@ Column B holds the values and column C a note on where each one came from.
 
 Leaving either owner-vote limit (rows 18 and 19) blank turns that rule off – the sheet never flags a vote for it.
 
-Do not change the start year or end year in Excel. The year columns on the Expenses and Plan sheets are fixed when the workbook is made, so a new end year changes nothing in the workbook, and a new start year shifts the operating-cost growth without moving the columns. Change the horizon in HOAForecaster and export again.
+Do not change the start year or end year in Excel. The year columns on the Expenses and Plan sheets are fixed when the workbook is made, so a new end year changes nothing in the workbook, and a new start year shifts the operating-cost growth without moving the columns. Change the horizon in HOAForecaster and export again. If the start or end year on Inputs no longer matches a Plan sheet's year columns, the app refuses the workbook on re-import and says so.
 
 ## Expenses
 
@@ -76,7 +76,7 @@ Below that are a row of years and the **Fully Funded Balance at start of year** 
 
 **To remove an expense**, delete its whole row.
 
-An expense typed into a blank row has no year formulas, so the workbook's total leaves it out. The app refuses such a workbook on re-import rather than read a figure the workbook itself ignores.
+An expense typed into a blank row has no year formulas, so the workbook's total leaves it out. The app refuses such a workbook on re-import rather than read a figure the workbook itself ignores. The same goes for an expense on a row the total does not add up – above the first expense row or in the blank row just above the total.
 
 ## Plan sheets
 
@@ -153,7 +153,7 @@ The charts draw from the Plan sheet's cells, so they redraw when the workbook re
 
 ## What you can change in Excel
 
-Only the blue-on-yellow cells and the text cells listed below are read back into the app. Typing over a black or green formula changes the workbook's own figures but is lost on re-import.
+Only the blue-on-yellow cells and the text cells listed below are read back into the app. Typing over a black or green formula changes the workbook's own figures, so the app refuses such a workbook on re-import and names the sheet, row and year – change the inputs the row is calculated from instead. For grown dues, set a year's dues by pinning it in row 36.
 
 | Change | Where | Effect |
 |---|---|---|
@@ -175,7 +175,7 @@ Only the blue-on-yellow cells and the text cells listed below are read back into
 
 **The horizon.** See [Inputs](#inputs).
 
-**The layout of a Plan sheet.** The app finds a Plan sheet's rows by position. Do not insert or delete rows above the special-assessment list. A sheet whose row 33 no longer says "How dues are set" is not recognised as a Plan sheet and its scenario is left out on re-import. Inserting rows inside the assessment list is fine.
+**The layout of a Plan sheet.** The app finds a Plan sheet's rows by their labels in column A, so inserted rows do no harm. Renaming or deleting a labelled row makes the app refuse the workbook, naming the missing row. Only the rows that row 6's sum adds up are read as assessments – an amount typed below the list, which the sheet itself does not count, is refused rather than read.
 
 On the Inputs and Expenses sheets, the app finds rows by their labels in column A, so rows can be moved or inserted there as long as the labels are left alone.
 

@@ -7,6 +7,7 @@ read is passed through the same strict parser as a project file.
 
 from __future__ import annotations
 
+import re
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -20,7 +21,6 @@ from hoa_engine.model import Project, ProjectFormatError, project_from_dict
 from hoa_engine.validate import validate_baseline, validate_scenario
 from hoa_workbook.layout import (
     ASSESS_AMOUNT_COL,
-    ASSESS_FIRST_ROW,
     ASSESS_NOTE_COL,
     ASSESS_YEAR_COL,
     CHARTS_LABEL,
@@ -28,7 +28,6 @@ from hoa_workbook.layout import (
     EXPENSE_YEAR_COL,
     EXPENSES,
     FFB_LABEL,
-    FIRST_EXPENSE_ROW,
     HEADER_ROW,
     INPUT_ROWS,
     INPUTS,
@@ -138,14 +137,20 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
         raise WorkbookFormatError(
             "the Expenses sheet is missing its total or Fully Funded Balance row"
         )
+    total_row = rows[EXPENSE_TOTAL_LABEL]
+    summed = _summed_rows(ex.cell(total_row, EXPENSE_YEAR_COL).value, "Expenses total")
     lines = []
-    for r in range(FIRST_EXPENSE_ROW, rows[EXPENSE_TOTAL_LABEL]):
+    for r in range(HEADER_ROW + 1, total_row):
         description, amount = ex.cell(r, 1).value, ex.cell(r, 2).value
         if description is None and amount is None:
             continue
         where = f"Expenses row {r}"
-        first_year = ex.cell(r, EXPENSE_YEAR_COL).value
-        if not (isinstance(first_year, str) and first_year.startswith("=")):
+        if r not in summed:
+            raise WorkbookFormatError(
+                f"{where} is outside the rows the total adds up – insert new expenses between "
+                "two existing expense rows"
+            )
+        if not _is_formula(ex.cell(r, EXPENSE_YEAR_COL).value):
             # the workbook's total would leave this row out; refuse rather than disagree with it
             raise WorkbookFormatError(
                 f"{where} has no year formulas, so the workbook's totals leave it out – "
@@ -177,23 +182,72 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
     return text, raw
 
 
+_RANGE = re.compile(r"\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)")
+# rows whose year cells are always formulas; the dues rows are formulas only for grown dues
+_INPUT_KEYS = {"dues", "grown", "mode", "first", "rate", "pinned", "rounding"}
+_CALCULATED = [k for k in ROW if k not in _INPUT_KEYS]
+
+
+def _is_formula(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith("=")
+
+
+def _summed_rows(formula: Any, what: str) -> range:
+    """The rows a SUM or SUMIF in the export adds up – the reader takes exactly those."""
+    match = _RANGE.search(formula) if isinstance(formula, str) else None
+    if match is None:
+        raise WorkbookFormatError(
+            f"the {what} formula has been changed – export again from the app"
+        )
+    return range(int(match[1]), int(match[2]) + 1)
+
+
+def _plan_rows(ws: Worksheet) -> dict[str, int]:
+    """Plan rows by label, so a row a board member inserts moves nothing out of reach."""
+    rows = _label_rows(ws)
+    missing = [label for _, label in PLAN_ROWS.values() if label not in rows]
+    if missing:
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{missing[0]}'")
+    return {key: rows[label] for key, (_, label) in PLAN_ROWS.items()}
+
+
 def _is_plan(ws: Worksheet) -> bool:
-    return ws.title not in RESERVED and _text(ws.cell(ROW["mode"], 1).value) == PLAN_ROWS["mode"][1]
+    return ws.title not in RESERVED and PLAN_ROWS["mode"][1] in _label_rows(ws)
 
 
-def _scenario(ws: Worksheet) -> dict[str, Any]:
+def _scenario(ws: Worksheet, horizon: range) -> dict[str, Any]:
+    row = _plan_rows(ws)
     years: dict[int, int] = {}
     for c in range(PLAN_FIRST_COL, ws.max_column + 1):
         v = ws.cell(HEADER_ROW, c).value
         if v is not None:
             years[_whole(v, f"{ws.title} year header")] = c
-    mode = _text(ws.cell(ROW["mode"], PLAN_FIRST_COL).value)
-    rounding = _text(ws.cell(ROW["rounding"], PLAN_FIRST_COL).value)
+    if list(years) != list(horizon):
+        raise WorkbookFormatError(
+            f"{ws.title} has year columns that no longer match the start and end year on Inputs – "
+            "the horizon can only be changed in the app"
+        )
+    mode = _text(ws.cell(row["mode"], PLAN_FIRST_COL).value)
+    rounding = _text(ws.cell(row["rounding"], PLAN_FIRST_COL).value)
     if mode not in (MODE_TYPED, MODE_GROWN) or rounding not in (ROUND_DOLLAR, ROUND_NONE):
         raise WorkbookFormatError(f"{ws.title} – unrecognised dues settings below the table")
 
     def at(key: str, c: int) -> Any:
-        return ws.cell(ROW[key], c).value
+        return ws.cell(row[key], c).value
+
+    calculated = _CALCULATED + (["dues", "grown"] if mode == MODE_GROWN else [])
+    for key in calculated:
+        for y, c in years.items():
+            if not _is_formula(at(key, c)):
+                advice = (
+                    "pin that year's dues in the row below the table instead"
+                    if key == "dues"
+                    else "change the inputs it is calculated from instead"
+                )
+                raise WorkbookFormatError(
+                    f"{ws.title} – '{PLAN_ROWS[key][1]}' for {y} was typed over, but that row is "
+                    f"calculated; {advice}"
+                )
 
     if mode == MODE_TYPED:
         dues: dict[str, Any] = {
@@ -203,8 +257,8 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
             },
         }
     else:
-        first = ws.cell(ROW["first"], PLAN_FIRST_COL).value
-        rate = ws.cell(ROW["rate"], PLAN_FIRST_COL).value
+        first = ws.cell(row["first"], PLAN_FIRST_COL).value
+        rate = ws.cell(row["rate"], PLAN_FIRST_COL).value
         dues = {
             "mode": "rate",
             "first_value": _number(first, f"{ws.title} first-year dues"),
@@ -215,12 +269,19 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
                 if at("pinned", c) is not None
             },
         }
+
+    listed = _summed_rows(at("sa", PLAN_FIRST_COL), f"{ws.title} special assessment")
     assessments = []
-    r = ASSESS_FIRST_ROW
+    r = listed.start
     while r <= ws.max_row and not _text(ws.cell(r, 1).value).startswith(CHARTS_LABEL):
         year, amount = ws.cell(r, ASSESS_YEAR_COL).value, ws.cell(r, ASSESS_AMOUNT_COL).value
         if year is not None or amount is not None:
             where = f"{ws.title} assessment row {r}"
+            if r not in listed:
+                raise WorkbookFormatError(
+                    f"{where} is below the assessment list, so the sheet does not count it – "
+                    "insert new assessments between two rows of the list"
+                )
             note = ws.cell(r, ASSESS_NOTE_COL).value
             assessments.append(
                 {
@@ -251,7 +312,8 @@ def read_workbook(source: Path | bytes) -> Project:
         ) from None
     _check_size(wb)
     text, baseline = _baseline(wb)
-    scenarios = [_scenario(ws) for ws in wb.worksheets if _is_plan(ws)]
+    horizon = range(baseline["start_year"], baseline["end_year"] + 1)
+    scenarios = [_scenario(ws, horizon) for ws in wb.worksheets if _is_plan(ws)]
     try:
         project = project_from_dict({**text, "baseline": baseline, "scenarios": scenarios})
     except ProjectFormatError as e:

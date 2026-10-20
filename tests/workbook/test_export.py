@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import zipfile
 from dataclasses import fields, replace
@@ -291,30 +292,138 @@ def test_unreasonable_unpacked_size_is_refused(monkeypatch: pytest.MonkeyPatch) 
         read_workbook(export_workbook(DEMO))
 
 
-def _insert_expense(copy_formulas: bool) -> Any:
+def _relabel(sheet: str, old: str, new: str) -> Any:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Expenses"]
-        ws.insert_rows(5)
-        ws["A5"], ws["B5"], ws["C5"], ws["D5"] = "New gate", 9000, 2030, "no"
-        if copy_formulas:  # what copying a whole row in Excel does
-            for c in range(5, ws.max_column + 1):
-                source = ws.cell(6, c)
-                ws.cell(5, c).value = Translator(source.value, source.coordinate).translate_formula(
-                    ws.cell(5, c).coordinate
-                )
+        for (cell,) in wb[sheet].iter_rows(max_col=1):
+            if cell.value == old:
+                cell.value = new
 
     return edit
 
 
-def test_an_expense_row_copied_in_excel_is_read() -> None:
-    project = read_workbook(_broken(_insert_expense(copy_formulas=True)))
-    assert project.baseline.expense_lines[0] == ExpenseLine(2030, D(9000), "New gate")
+def _excel_insert(ws: Any, at: int) -> None:
+    """Insert a row the way Excel does – shifting rows and stretching every range that
+    spans the insertion point (openpyxl alone moves cells but never rewrites formulas)."""
+    ws.insert_rows(at)
+    for row in ws.iter_rows():  # Excel rewrites references anywhere on the sheet
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value.startswith("="):
+
+                def stretch(m: re.Match[str]) -> str:
+                    a, b = int(m[2]), int(m[4])
+                    a += 1 if a >= at else 0
+                    b += 1 if b >= at else 0
+                    return f"{m[1]}{a}:{m[3]}{b}"
+
+                cell.value = re.sub(r"(\$?[A-Z]+\$?)(\d+):(\$?[A-Z]+\$?)(\d+)", stretch, cell.value)
+
+
+def _insert_expense(at: int, copy_formulas: bool) -> Any:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Expenses"]
+        _excel_insert(ws, at)
+        ws.cell(at, 1, "New gate")
+        ws.cell(at, 2, 9000)
+        ws.cell(at, 3, 2030)
+        ws.cell(at, 4, "no")
+        if copy_formulas:  # what copying a whole row in Excel does
+            for c in range(5, ws.max_column + 1):
+                source = ws.cell(at + 1, c)
+                ws.cell(at, c).value = Translator(
+                    source.value, source.coordinate
+                ).translate_formula(ws.cell(at, c).coordinate)
+
+    return edit
+
+
+def test_an_expense_row_copied_between_rows_in_excel_is_read() -> None:
+    project = read_workbook(_broken(_insert_expense(6, copy_formulas=True)))
+    assert ExpenseLine(2030, D(9000), "New gate") in project.baseline.expense_lines
 
 
 def test_an_expense_typed_into_a_bare_row_is_refused() -> None:
     # the workbook's own totals would leave it out, so reading it would disagree with them
-    with pytest.raises(WorkbookFormatError, match="row 5 has no year formulas"):
-        read_workbook(_broken(_insert_expense(copy_formulas=False)))
+    with pytest.raises(WorkbookFormatError, match="row 6 has no year formulas"):
+        read_workbook(_broken(_insert_expense(6, copy_formulas=False)))
+
+
+def test_an_expense_above_the_summed_rows_is_refused() -> None:
+    # Excel does not stretch SUM(E5:E…) for a row inserted at row 5, so the total skips it
+    with pytest.raises(WorkbookFormatError, match="row 5 is outside the rows the total adds up"):
+        read_workbook(_broken(_insert_expense(5, copy_formulas=True)))
+
+
+def test_an_expense_typed_in_the_gap_above_the_total_is_refused() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Expenses"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        gap = rows["TOTAL projected reserve expenses"] - 1
+        ws.cell(gap, 1, "Forgotten")
+        ws.cell(gap, 2, 100)
+
+    with pytest.raises(WorkbookFormatError, match="outside the rows the total adds up"):
+        read_workbook(_broken(edit))
+
+
+def test_a_row_inserted_on_a_scenario_sheet_keeps_the_scenario() -> None:
+    project = read_workbook(_broken(lambda wb: _excel_insert(wb["Two-part assessment"], 39)))
+    assert project == DEMO
+
+
+def test_an_assessment_below_the_list_is_refused() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        charts = next(
+            c.row for (c,) in ws.iter_rows(max_col=1) if str(c.value).startswith("Charts")
+        )
+        below = charts - 1  # the blank row between the list's spare rows and the charts
+        ws.cell(below, 3, 2030)
+        ws.cell(below, 4, 500)
+
+    with pytest.raises(WorkbookFormatError, match="below the assessment list"):
+        read_workbook(_broken(edit))
+
+
+@pytest.mark.parametrize(
+    ("sheet", "key", "advice"),
+    [
+        ("Dues only", "dues", "pin that year's dues"),
+        ("Dues only", "end", "change the inputs it is calculated from"),
+        ("Hold then catch up", "sa", "change the inputs"),
+    ],
+)
+def test_a_value_typed_over_a_formula_is_refused(sheet: str, key: str, advice: str) -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        wb[sheet].cell(ROW[key], 5, 123)
+
+    with pytest.raises(WorkbookFormatError, match=f"typed over.*{advice}"):
+        read_workbook(_broken(edit))
+
+
+def test_typed_dues_may_be_edited() -> None:
+    project = read_workbook(_broken(lambda wb: wb["Hold then catch up"].cell(ROW["dues"], 5, 700)))
+    hold = next(s for s in project.scenarios if s.name == "Hold then catch up")
+    assert hold.dues.explicit[DEMO.baseline.start_year + 2] == 700
+
+
+def test_changing_the_horizon_in_excel_is_refused() -> None:
+    with pytest.raises(WorkbookFormatError, match="horizon can only be changed in the app"):
+        read_workbook(_broken(lambda wb: wb["Inputs"].cell(8, 2, DEMO.baseline.end_year - 1)))
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (
+            lambda wb: wb["Dues only"].cell(ROW["sa"], 3, "=0"),
+            "special assessment formula has been changed",
+        ),
+        (_relabel("Dues only", "Interest earned", "Interest"), "missing the row 'Interest earned'"),
+    ],
+)
+def test_a_reshaped_scenario_sheet_is_refused(edit: Any, message: str) -> None:
+    with pytest.raises(WorkbookFormatError, match=message):
+        read_workbook(_broken(edit))
 
 
 def test_assessments_round_trip_one_row_each() -> None:
@@ -395,15 +504,6 @@ def test_a_damaged_package_gets_a_plain_message() -> None:
         z.writestr("[Content_Types].xml", "<not a workbook")
     with pytest.raises(WorkbookFormatError, match="may be damaged or not an Excel file"):
         read_workbook(out.getvalue())
-
-
-def _relabel(sheet: str, old: str, new: str) -> Any:
-    def edit(wb: openpyxl.Workbook) -> None:
-        for (cell,) in wb[sheet].iter_rows(max_col=1):
-            if cell.value == old:
-                cell.value = new
-
-    return edit
 
 
 def _assessment_in(year: int) -> Any:
