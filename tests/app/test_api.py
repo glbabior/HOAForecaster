@@ -251,22 +251,56 @@ def test_baseline_impact_counts_a_scenario_that_now_runs_as_changed(client: Test
 # ---------------------------------------------------------------- drafts
 
 
-def test_drafts_round_trip_and_are_discarded(client: TestClient, demo_id: str) -> None:
-    assert client.get(f"/api/projects/{demo_id}/draft").json() == {"draft": None}
-    put = client.put(
-        f"/api/projects/{demo_id}/draft", json={"edits": {"name": ""}, "base_revision": 1}
-    )
-    assert put.status_code == 204
-    draft = client.get(f"/api/projects/{demo_id}/draft").json()["draft"]
-    assert draft["edits"] == {"name": ""} and draft["base_revision"] == 1
-    assert client.delete(f"/api/projects/{demo_id}/draft").status_code == 204
-    assert client.get(f"/api/projects/{demo_id}/draft").json() == {"draft": None}
+def test_drafts_round_trip_per_screen_and_are_discarded(client: TestClient, demo_id: str) -> None:
+    url = f"/api/projects/{demo_id}/drafts"
+    assert client.get(url).json() == {"drafts": {}}
+    body = {"screen": "baseline", "edits": {"name": ""}, "base_revision": 1}
+    assert client.put(url, json=body).status_code == 204
+    other = {"screen": "scenario:Dues only", "edits": {"x": 1}, "base_revision": 1}
+    assert client.put(url, json=other).status_code == 204
+    drafts = client.get(url).json()["drafts"]
+    assert drafts["baseline"]["edits"] == {"name": ""} and drafts["baseline"]["base_revision"] == 1
+    assert client.delete(url, params={"screen": "baseline"}).status_code == 204
+    assert set(client.get(url).json()["drafts"]) == {"scenario:Dues only"}
+    assert client.delete(url).status_code == 204
+    assert client.get(url).json() == {"drafts": {}}
 
 
-def test_bad_drafts_are_refused(client: TestClient, demo_id: str) -> None:
-    response = client.put(f"/api/projects/{demo_id}/draft", json={"edits": [1], "base_revision": 1})
-    assert response.status_code == 422
-    assert client.get("/api/projects/0123456789ab/draft").status_code == 404
+def test_bad_and_stale_drafts_are_refused(client: TestClient, demo_id: str) -> None:
+    url = f"/api/projects/{demo_id}/drafts"
+    bad = client.put(url, json={"screen": "baseline", "edits": [1], "base_revision": 1})
+    assert bad.status_code == 422
+    nameless = client.put(url, json={"edits": {}, "base_revision": 1})
+    assert nameless.status_code == 422
+    client.put(f"/api/projects/{demo_id}", json={"project": DEMO_RAW, "base_revision": 1})
+    stale = client.put(url, json={"screen": "baseline", "edits": {}, "base_revision": 1})
+    assert stale.status_code == 409
+    assert client.get("/api/projects/0123456789ab/drafts").status_code == 404
+
+
+def test_baseline_impact_judges_the_scenarios_as_they_will_be_saved(
+    client: TestClient, demo_id: str
+) -> None:
+    longer = {**DEMO_RAW["baseline"], "end_year": DEMO.baseline.end_year + 2}
+    longer["ffb"] = {
+        **longer["ffb"],
+        str(DEMO.baseline.end_year + 2): "1",
+        str(DEMO.baseline.end_year + 3): "1",
+    }
+    url = f"/api/projects/{demo_id}/baseline-impact"
+    as_saved = client.post(url, json={"baseline": longer}).json()
+    assert "Hold then catch up" in as_saved["invalid"]  # typed dues stop short of the new end
+    stretched = json.loads(json.dumps(DEMO_RAW["scenarios"]))
+    hold = next(s for s in stretched if s["name"] == "Hold then catch up")
+    last = hold["dues"]["explicit"][str(DEMO.baseline.end_year)]
+    for y in (DEMO.baseline.end_year + 1, DEMO.baseline.end_year + 2):
+        hold["dues"]["explicit"][str(y)] = last
+    stretched.append({**stretched[0], "name": "Brand new"})
+    proposed = client.post(url, json={"baseline": longer, "scenarios": stretched}).json()
+    assert proposed["invalid"] == []
+    assert "Hold then catch up" in proposed["changed"] and "Brand new" in proposed["changed"]
+    bad = client.post(url, json={"baseline": longer, "scenarios": [{"name": "x"}]})
+    assert bad.status_code == 422
 
 
 # ---------------------------------------------------------------- export and import
@@ -412,8 +446,8 @@ def test_about_names_the_data_folder(client: TestClient, store: ProjectStore) ->
 
 
 def test_revisions_are_positive(client: TestClient, demo_id: str) -> None:
-    body = {"edits": {}, "base_revision": 0}
-    assert client.put(f"/api/projects/{demo_id}/draft", json=body).status_code == 422
+    body = {"screen": "baseline", "edits": {}, "base_revision": 0}
+    assert client.put(f"/api/projects/{demo_id}/drafts", json=body).status_code == 422
 
 
 def test_editing_only_an_expense_description_changes_no_scenario(

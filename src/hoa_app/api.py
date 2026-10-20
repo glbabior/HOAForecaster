@@ -337,30 +337,40 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
 
     @app.post("/api/projects/{project_id}/baseline-impact")
     async def baseline_impact(project_id: str, request: Request) -> dict[str, Any]:
-        """Which saved scenarios a baseline edit would change (spec 7.1), before saving it."""
+        """Which saved scenarios a baseline edit would change (spec 7.1), before saving it.
+
+        `scenarios`, when sent, are the scenarios exactly as the save will store them (for
+        example with typed dues stretched to a new horizon); each is compared with the saved
+        scenario of the same name against the saved baseline."""
         body = await body_json(request)
         stored = store.get(project_id)
         try:
             baseline = baseline_from_dict(body.get("baseline") or {})
+            sent = body.get("scenarios")
+            proposed = (
+                [scenario_from_dict(s) for s in sent]
+                if isinstance(sent, list)
+                else list(stored.project.scenarios)
+            )
         except ProjectFormatError as e:
             raise ApiError(422, str(e)) from None
         problems = validate_baseline(baseline)
         if problems:
             raise ApiError(422, "the baseline has problems", problems)
-        old = stored.project.baseline
+        saved = {s.name: s for s in stored.project.scenarios}
         changed: list[str] = []
         unchanged: list[str] = []
         invalid: list[str] = []
-        for s in stored.project.scenarios:
+        for s in proposed:
             if validate_scenario(s, baseline):
                 invalid.append(s.name)
                 continue
-            try:
-                before = run(old, s)
-            except InvalidInputs:
-                changed.append(s.name)
-                continue
             after = run(baseline, s)
+            try:
+                before = run(stored.project.baseline, saved[s.name])
+            except (InvalidInputs, KeyError):
+                changed.append(s.name)  # it could not be worked out before, or is new
+                continue
             (unchanged if figures(before) == figures(after) else changed).append(s.name)
         return {"changed": changed, "unchanged": unchanged, "invalid": invalid}
 
@@ -382,25 +392,25 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
 
     # ------------------------------------------------------------ drafts
 
-    @app.get("/api/projects/{project_id}/draft")
-    def get_draft(project_id: str) -> dict[str, Any]:
+    @app.get("/api/projects/{project_id}/drafts")
+    def get_drafts(project_id: str) -> dict[str, Any]:
         store.get(project_id)
-        draft = store.get_draft(project_id)
-        return {"draft": to_json(draft) if draft else None}
+        return {"drafts": to_json(store.get_drafts(project_id))}
 
-    @app.put("/api/projects/{project_id}/draft", status_code=204)
+    @app.put("/api/projects/{project_id}/drafts", status_code=204)
     async def save_draft(project_id: str, request: Request) -> Response:
         body = await body_json(request)
-        edits = body.get("edits")
-        if not isinstance(edits, dict):
-            raise ApiError(422, "a draft must be a set of edits")
-        store.save_draft(project_id, edits, revision(body.get("base_revision")))
+        edits, screen = body.get("edits"), body.get("screen")
+        if not isinstance(edits, dict) or not isinstance(screen, str):
+            raise ApiError(422, "a draft must name its screen and hold a set of edits")
+        store.save_draft(project_id, screen, edits, revision(body.get("base_revision")))
         return Response(status_code=204)
 
-    @app.delete("/api/projects/{project_id}/draft", status_code=204)
-    def discard_draft(project_id: str) -> Response:
+    @app.delete("/api/projects/{project_id}/drafts", status_code=204)
+    def discard_draft(project_id: str, screen: str | None = None) -> Response:
+        """One screen's draft with `?screen=`, otherwise every draft of the project."""
         store.get(project_id)
-        store.discard_draft(project_id)
+        store.discard_draft(project_id, screen)
         return Response(status_code=204)
 
     # ------------------------------------------------------------ export and import

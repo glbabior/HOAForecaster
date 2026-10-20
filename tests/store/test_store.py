@@ -274,10 +274,10 @@ def test_a_byte_order_mark_is_accepted(store: ProjectStore) -> None:
 
 def test_delete_moves_to_trash_and_drops_the_draft(store: ProjectStore) -> None:
     saved = store.create(DEMO)
-    store.save_draft(saved.id, {"anything": 1}, base_revision=1)
+    store.save_draft(saved.id, "baseline", {"anything": 1}, base_revision=1)
     store.delete(saved.id)
     assert (store.trash / f"{saved.id}.json").is_file()
-    assert store.get_draft(saved.id) is None
+    assert store.get_drafts(saved.id) == {}
     with pytest.raises(NotFound):
         store.get(saved.id)
 
@@ -285,47 +285,85 @@ def test_delete_moves_to_trash_and_drops_the_draft(store: ProjectStore) -> None:
 # ---------------------------------------------------------------- drafts
 
 
-def test_drafts_hold_unfinished_edits_and_their_base_until_saved(store: ProjectStore) -> None:
+def test_each_screen_keeps_its_own_draft(store: ProjectStore) -> None:
     saved = store.create(DEMO)
-    assert store.get_draft(saved.id) is None
-    store.save_draft(saved.id, {"baseline": {"units": ""}}, base_revision=1)  # need not be valid
-    draft = store.get_draft(saved.id)
-    assert draft is not None and draft.edits == {"baseline": {"units": ""}}
-    assert draft.base_revision == 1
+    assert store.get_drafts(saved.id) == {}
+    store.save_draft(saved.id, "baseline", {"baseline": {"units": ""}}, base_revision=1)
+    store.save_draft(saved.id, "scenario:Dues only", {"name": "x"}, base_revision=1)
+    store.save_draft(saved.id, "baseline", {"baseline": {"units": "3"}}, base_revision=1)
+    drafts = store.get_drafts(saved.id)
+    assert set(drafts) == {"baseline", "scenario:Dues only"}
+    assert drafts["baseline"].edits == {"baseline": {"units": "3"}}  # need not be valid
+    assert drafts["baseline"].base_revision == 1
+
+
+def test_a_save_keeps_other_drafts_but_late_autosaves_are_refused(store: ProjectStore) -> None:
+    saved = store.create(DEMO)
+    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
     store.save(saved.id, DEMO, base_revision=1)
-    assert store.get_draft(saved.id) is None  # a save supersedes the draft
+    assert store.get_drafts(saved.id)["baseline"].base_revision == 1  # offered as begun earlier
+    with pytest.raises(Conflict, match="saved since these edits began"):
+        store.save_draft(saved.id, "baseline", {"a": 2}, base_revision=1)
+
+
+def test_discarding_one_screen_or_all(store: ProjectStore) -> None:
+    saved = store.create(DEMO)
+    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
+    store.save_draft(saved.id, "new-scenario", {"b": 1}, base_revision=1)
+    store.discard_draft(saved.id, "baseline")
+    store.discard_draft(saved.id, "baseline")  # already gone – harmless
+    assert set(store.get_drafts(saved.id)) == {"new-scenario"}
+    store.discard_draft(saved.id, "new-scenario")  # the last one – the file goes too
+    assert not (store.drafts / f"{saved.id}.json").exists()
+    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
+    store.discard_draft(saved.id)
+    assert store.get_drafts(saved.id) == {}
 
 
 @pytest.mark.parametrize(
-    ("edits", "message"),
+    ("screen", "edits", "message"),
     [
-        ([1, 2], "must be a set of edits"),
-        ({"x": float("nan")}, "cannot be stored"),
-        ({"x": "y" * 40}, "larger than 5 MB"),
+        ("baseline", [1, 2], "must be a set of edits"),
+        ("somewhere", {}, "must name its screen"),
+        ("scenario:", {}, "must name its screen"),
+        ("scenario:a\x07", {}, "must name its screen"),
+        ("baseline", {"x": float("nan")}, "cannot be stored"),
+        ("baseline", {"x": "y" * 60}, "larger than 5 MB"),
     ],
 )
 def test_unstorable_drafts_are_refused(
-    store: ProjectStore, monkeypatch: pytest.MonkeyPatch, edits: object, message: str
+    store: ProjectStore,
+    monkeypatch: pytest.MonkeyPatch,
+    screen: str,
+    edits: object,
+    message: str,
 ) -> None:
     saved = store.create(DEMO)
     monkeypatch.setattr(store_module, "MAX_DRAFT_BYTES", 100)
     with pytest.raises(BadProjectFile, match=message):
-        store.save_draft(saved.id, edits, base_revision=1)  # type: ignore[arg-type]
+        store.save_draft(saved.id, screen, edits, base_revision=1)  # type: ignore[arg-type]
 
 
 def test_a_draft_needs_its_project(store: ProjectStore) -> None:
     with pytest.raises(NotFound):
-        store.save_draft("0123456789ab", {}, base_revision=1)
+        store.save_draft("0123456789ab", "baseline", {}, base_revision=1)
 
 
 @pytest.mark.parametrize(
-    "content", ["{broken", "[1, 2]", '{"saved": "x", "base_revision": "1", "edits": {}}']
+    "content",
+    [
+        "{broken",
+        "[1, 2]",
+        '{"screens": [1]}',
+        '{"screens": {"baseline": 5}}',
+        '{"screens": {"baseline": {"saved": "x", "base_revision": "1", "edits": {}}}}',
+    ],
 )
 def test_damaged_drafts_are_not_offered(store: ProjectStore, content: str) -> None:
     saved = store.create(DEMO)
     store.drafts.mkdir(parents=True, exist_ok=True)
     (store.drafts / f"{saved.id}.json").write_text(content, encoding="utf-8")
-    assert store.get_draft(saved.id) is None
+    assert store.get_drafts(saved.id) == {}
 
 
 # ---------------------------------------------------------------- export and import

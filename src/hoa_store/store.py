@@ -1,7 +1,7 @@
 """Projects on disk – one human-readable JSON file per project (spec section 8).
 
     <data folder>/projects/<id>.json   saved projects
-    <data folder>/drafts/<id>.json     autosaved unsaved edits, restored after a crash
+    <data folder>/drafts/<id>.json     autosaved unsaved edits per screen, restored after a crash
     <data folder>/trash/<id>.json      deleted projects, kept until the user empties the folder
 
 File names come only from server-generated ids, never from user text, so no
@@ -29,6 +29,7 @@ from typing import Any
 from hoa_engine.model import Project, ProjectFormatError, project_from_dict, project_to_dict
 
 ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
+SCREEN_PATTERN = re.compile(r"^(baseline|new-scenario|scenario:[^\x00-\x1f\x7f]{1,200})$")
 MAX_PROJECT_BYTES = 5 * 1024 * 1024  # a large project is well under 100 KB
 MAX_DRAFT_BYTES = MAX_PROJECT_BYTES
 APP_DIR_NAME = "HOAForecaster"
@@ -309,7 +310,7 @@ class ProjectStore:
                 baseline_times=baseline_times,
                 scenario_times=scenario_times,
             )
-            self.discard_draft(project_id)
+            # other screens' drafts stay; they now show as begun before this save
             return self.get(project_id)
 
     def delete(self, project_id: str) -> None:
@@ -371,32 +372,65 @@ class ProjectStore:
 
     # ------------------------------------------------------------ drafts
 
-    def save_draft(self, project_id: str, edits: dict[str, Any], base_revision: int) -> None:
-        """Autosave of unsaved edits – any JSON object, even one that is not yet valid."""
+    # One file per project holding one draft per screen – "baseline", or "scenario:<name>" –
+    # so editing one screen never overwrites another screen's unsaved edits.
+
+    def _read_drafts(self, project_id: str) -> dict[str, Any]:
+        raw = _loads_object(_read_capped(self._path(self.drafts, project_id), MAX_DRAFT_BYTES))
+        screens = raw.get("screens") if raw else None
+        return screens if isinstance(screens, dict) else {}
+
+    def _write_drafts(self, project_id: str, screens: dict[str, Any]) -> None:
+        if not screens:
+            self._path(self.drafts, project_id).unlink(missing_ok=True)
+            return
+        try:
+            data = _dump({"screens": screens})
+        except (ValueError, TypeError, RecursionError):
+            raise BadProjectFile("the draft cannot be stored – not saved") from None
+        if len(data) > MAX_DRAFT_BYTES:
+            raise BadProjectFile("the draft is larger than 5 MB – not saved")
+        _atomic_write(self._path(self.drafts, project_id), data)
+
+    def save_draft(
+        self, project_id: str, screen: str, edits: dict[str, Any], base_revision: int
+    ) -> None:
+        """Autosave of one screen's unsaved edits – any JSON object, even one not yet valid.
+
+        Refused when the project was saved since the edits began, so a late autosave can
+        never resurrect edits that a save already superseded."""
         if not isinstance(edits, dict):
             raise BadProjectFile("a draft must be a set of edits – not saved")
+        if not SCREEN_PATTERN.fullmatch(screen):
+            raise BadProjectFile("a draft must name its screen – not saved")
         with self._lock:
-            self.get(project_id)  # a draft belongs to an existing project
-            try:
-                data = _dump({"saved": _now(), "base_revision": base_revision, "edits": edits})
-            except (ValueError, TypeError, RecursionError):
-                raise BadProjectFile("the draft cannot be stored – not saved") from None
-            if len(data) > MAX_DRAFT_BYTES:
-                raise BadProjectFile("the draft is larger than 5 MB – not saved")
-            _atomic_write(self._path(self.drafts, project_id), data)
+            current = self.get(project_id)  # a draft belongs to an existing project
+            if base_revision != current.revision:
+                raise Conflict("the project was saved since these edits began – reload first")
+            screens = self._read_drafts(project_id)
+            screens[screen] = {"saved": _now(), "base_revision": base_revision, "edits": edits}
+            self._write_drafts(project_id, screens)
 
-    def get_draft(self, project_id: str) -> Draft | None:
-        """The autosaved edits, or None – a damaged draft is simply not offered."""
-        raw = _loads_object(_read_capped(self._path(self.drafts, project_id), MAX_DRAFT_BYTES))
-        if raw is None:
-            return None
-        saved, base, edits = raw.get("saved"), raw.get("base_revision"), raw.get("edits")
-        if not isinstance(saved, str) or not isinstance(base, int) or not isinstance(edits, dict):
-            return None
-        return Draft(saved, base, edits)
+    def get_drafts(self, project_id: str) -> dict[str, Draft]:
+        """Every screen's autosaved edits – a damaged draft is simply not offered."""
+        drafts = {}
+        for screen, raw in self._read_drafts(project_id).items():
+            if not isinstance(raw, dict):
+                continue
+            saved, base, edits = raw.get("saved"), raw.get("base_revision"), raw.get("edits")
+            if isinstance(saved, str) and isinstance(base, int) and isinstance(edits, dict):
+                drafts[screen] = Draft(saved, base, edits)
+        return drafts
 
-    def discard_draft(self, project_id: str) -> None:
-        self._path(self.drafts, project_id).unlink(missing_ok=True)
+    def discard_draft(self, project_id: str, screen: str | None = None) -> None:
+        """Drop one screen's draft, or – with no screen – every draft of the project."""
+        with self._lock:
+            if screen is None:
+                self._path(self.drafts, project_id).unlink(missing_ok=True)
+                return
+            screens = self._read_drafts(project_id)
+            if screens.pop(screen, None) is not None:
+                self._write_drafts(project_id, screens)
 
     # ------------------------------------------------------------ first run
 
