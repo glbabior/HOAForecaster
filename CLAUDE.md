@@ -25,9 +25,19 @@ uv run hoaforecaster                        # start the app – builds web/dist 
 uv run pytest --cov                         # tests; add HOA_PRIVATE_DIR=../HOAForecaster-data for the private set
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
+cd web && npm ci                            # front-end packages (exact pins, lockfile)
+cd web && npm test && npm run lint && npx tsc --noEmit
+cd web && npm run build                     # after changing web/src – a running server lists dist files at start-up, so restart it
 ```
 
-`git config core.hooksPath .githooks` once per clone turns on the pre-commit lint, format and type checks.
+`git config core.hooksPath .githooks` once per clone turns on the pre-commit checks – the real-data guard (deny-list at `../HOAForecaster-data/denylist.txt`, or `$HOA_PRIVATE_DIR`), ruff, mypy, and the front end's types, lint and tests.
+
+### This machine (Windows)
+
+- LibreOffice is at `C:\Program Files\LibreOffice` (tests use it to recalculate exports); Excel is installed and `tests/workbook` opens exports in it.
+- If PyPI or npm cannot be reached, `UV_OFFLINE=1` (or `uv … --offline`) works from the cache; installing new packages needs the network.
+- To look at the screens without a browser session, run the app on a spare port with a scratch `HOA_DATA_DIR` and screenshot pages with headless Edge (`msedge --headless=new --screenshot=… --virtual-time-budget=6000 URL`).
+- Shell quoting on this machine mangles backslashes in inline Python; put multi-line edit scripts in a file.
 
 ## Stack decisions
 
@@ -80,4 +90,17 @@ uv run mypy
 
 ## Working method
 
-Engine first (done), then the exporter, then the UI (section 10.3). Write the failing test first. Commit after each green test run; one concern per commit.
+Write the failing test first. Commit after each green test run; one concern per commit. Run the code-reviewer (and the security-reviewer where it applies) before committing, fix blocking findings, and record any new decision under Stack decisions.
+
+## Status and next steps
+
+As of October 21, 2026 – the engine, Excel export and re-import, storage, local server and all section 7 screens are built, reviewed and committed. 214 Python tests (100% coverage) and 49 front-end tests pass; both repositories are local only.
+
+Next, roughly in this order –
+
+1. **User guide** – run the documentation-writer for `docs/user-guide.md` (each screen, then the workflow from a new project to export) and refresh `CHANGELOG.md`. Required before calling anything a release (section 10.2).
+2. **Trash** – list and restore deleted projects in the app (and a way to empty it).
+3. **Section 7.1a** – CSV import of the expense and Fully Funded Balance tables, with one server-side parser for CSV and pasted text.
+4. **Section 7.1b** – import the original reference workbook from the app (its partial first year folds into the next January 1 balance). The private repo's `fixtures/make_project.py` shows the mapping; its result is the check.
+5. **Smaller items left from the front-end review** – hover shows expense descriptions but not amounts; percent funded above 100% is clipped on charts; per-field highlighting of problems needs field keys from `validate.py`.
+6. **GitHub** – only when asked. Push HOAForecaster as public and HOAForecaster-data as private; check `git log -p` against the deny-list first.
