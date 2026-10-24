@@ -3,13 +3,30 @@
 
 export type Dec = string;
 
+/** How often an expense falls (spec 4.1) – monthly and yearly lines are operating costs paid
+ * from dues; once and every-few-years lines are reserve expenses. */
+export type Frequency = "monthly" | "yearly" | "every" | "once";
+
 export interface ExpenseLine {
-  year: number;
+  id: string;
+  frequency: Frequency;
+  /** the year of a once line, the first of an every-few-years line, or the first year of a
+   * monthly or yearly line (null – from the start year) */
+  year: number | null;
   amount: Dec;
   description: string;
-  nominal: boolean;
   source: string;
+  /** repeating lines – the last year it applies (null – to the end) */
+  end_year?: number | null;
+  /** every-few-years lines – the years between occurrences */
+  interval?: number | null;
+  /** monthly and yearly lines – their own inflation rate (null – the operating rate) */
+  inflation?: Dec | null;
+  /** once and every-few-years lines – already in that year's dollars */
+  nominal?: boolean;
 }
+
+export const isOperating = (f: Frequency): boolean => f === "monthly" || f === "yearly";
 
 export interface Baseline {
   start_year: number;
@@ -19,7 +36,6 @@ export interface Baseline {
   expense_inflation: Dec;
   expense_base_year: number;
   ffb: Record<string, Dec>;
-  operating_start: Dec;
   operating_inflation: Dec;
   interest_rate: Dec;
   units: number;
@@ -78,18 +94,29 @@ export interface ProjectSummary {
   scenarios: number;
 }
 
+/** An expense line's amount in one year of the results. */
+export interface LineAmount {
+  id: string;
+  frequency: Frequency;
+  description: string;
+  source: string;
+  nominal: boolean;
+  amount: Dec;
+}
+
 export interface YearResult {
   year: number;
   dues: Dec;
   assessment_per_unit: Dec;
   total_dues: Dec;
   operating: Dec;
+  operating_lines: LineAmount[];
   contribution: Dec;
   assessment: Dec;
   total_from_owners: Dec;
   interest: Dec;
   expenses: Dec;
-  expense_lines: { description: string; source: string; nominal: boolean; amount: Dec }[];
+  expense_lines: LineAmount[];
   starting_balance: Dec;
   ending_balance: Dec;
   ffb_next: Dec;

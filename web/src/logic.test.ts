@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { linesFromPaste } from "./components/tables";
+import { linesFromPaste, newLineId, withFrequency } from "./components/tables";
 import { csvCell, parsePasted, toCsv } from "./csv";
 import { fromPercent, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
 import { dues, money, percent, span } from "./format";
@@ -92,12 +92,69 @@ describe("CSV", () => {
   it("turns pasted rows into expense lines and counts the rest", () => {
     const { lines, skipped } = linesFromPaste(
       "Year\tAmount\n2030\t$1,000\tRoof\tyes\tStudy\n2031\t500\tGate",
+      ["line-1"],
     );
     expect(skipped).toBe(1); // the header row
     expect(lines).toEqual([
-      { year: 2030, amount: "1000", description: "Roof", nominal: true, source: "Study" },
-      { year: 2031, amount: "500", description: "Gate", nominal: false, source: "" },
+      {
+        id: "line-2",
+        frequency: "once",
+        year: 2030,
+        amount: "1000",
+        description: "Roof",
+        nominal: true,
+        source: "Study",
+      },
+      {
+        id: "line-3",
+        frequency: "once",
+        year: 2031,
+        amount: "500",
+        description: "Gate",
+        nominal: false,
+        source: "",
+      },
     ]);
+  });
+});
+
+describe("expense frequencies", () => {
+  const once = {
+    id: "roof",
+    frequency: "once" as const,
+    year: 2030,
+    amount: "100",
+    description: "Roof",
+    source: "Study",
+    nominal: true,
+  };
+
+  it("keeps a line's words and years and only the fields its new frequency uses", () => {
+    const monthly = withFrequency(once, "monthly", 2027);
+    expect(monthly).toEqual({
+      id: "roof",
+      frequency: "monthly",
+      year: 2030,
+      end_year: null,
+      inflation: null,
+      amount: "100",
+      description: "Roof",
+      source: "Study",
+    });
+    expect(withFrequency({ ...monthly, year: null }, "every", 2027)).toEqual({
+      ...once,
+      frequency: "every",
+      year: 2027,
+      interval: 5,
+      end_year: null,
+      nominal: false,
+    });
+    expect(withFrequency(withFrequency(once, "every", 2027), "once", 2027)).toEqual(once);
+  });
+
+  it("gives new lines an identifier no other line has", () => {
+    expect(newLineId([])).toBe("line-1");
+    expect(newLineId(["line-1", "line-3"])).toBe("line-2");
   });
 });
 

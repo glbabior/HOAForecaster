@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from hoa_engine.dues import resolve_dues
-from hoa_engine.model import Baseline, ExpenseLine, Scenario
+from hoa_engine.model import Baseline, ExpenseLine, Frequency, Scenario
 from hoa_engine.validate import validate_baseline, validate_scenario
 
 ZERO = Decimal(0)
@@ -25,12 +25,13 @@ class YearResult:
     assessment_per_unit: Decimal
     total_dues: Decimal
     operating: Decimal
+    operating_lines: tuple[tuple[ExpenseLine, Decimal], ...]  # monthly and yearly lines this year
     contribution: Decimal
     assessment: Decimal  # all units
     total_from_owners: Decimal
     interest: Decimal
     expenses: Decimal
-    expense_lines: tuple[tuple[ExpenseLine, Decimal], ...]  # each line with its amount this year
+    expense_lines: tuple[tuple[ExpenseLine, Decimal], ...]  # reserve lines with this year's amount
     starting_balance: Decimal
     ending_balance: Decimal
     ffb_next: Decimal
@@ -80,10 +81,28 @@ class ScenarioResult:
     summary: Summary
 
 
-def _line_amount(line: ExpenseLine, b: Baseline) -> Decimal:
+def falls_in(line: ExpenseLine, year: int) -> bool:
+    """Whether the line has an amount in `year` (spec 4.1)."""
+    if line.frequency is Frequency.ONCE:
+        return year == line.year
+    if line.end_year is not None and year > line.end_year:
+        return False
+    if line.frequency is Frequency.EVERY:
+        assert line.year is not None and line.interval  # validate_baseline guarantees both
+        return year >= line.year and (year - line.year) % line.interval == 0
+    return line.year is None or year >= line.year
+
+
+def line_amount(line: ExpenseLine, year: int, b: Baseline) -> Decimal:
+    """The line's amount in `year`, in that year's dollars."""
+    if line.frequency.operating:
+        rate = b.operating_inflation if line.inflation is None else line.inflation
+        first = b.start_year if line.year is None else line.year
+        per_year = line.amount * 12 if line.frequency is Frequency.MONTHLY else line.amount
+        return per_year * (1 + rate) ** (year - first)
     if line.nominal:
         return line.amount
-    return line.amount * (1 + b.expense_inflation) ** (line.year - b.expense_base_year)
+    return line.amount * (1 + b.expense_inflation) ** (year - b.expense_base_year)
 
 
 def _needs_vote(
@@ -105,10 +124,6 @@ def project_years(b: Baseline, s: Scenario) -> tuple[YearResult, ...]:
     assessment_by_year: dict[int, Decimal] = {}
     for a in s.assessments:
         assessment_by_year[a.year] = assessment_by_year.get(a.year, ZERO) + a.amount
-    lines_by_year: dict[int, list[ExpenseLine]] = {}
-    for line in b.expense_lines:
-        lines_by_year.setdefault(line.year, []).append(line)
-
     out = []
     balance = b.starting_balance
     prior_dues = b.current_dues
@@ -117,11 +132,17 @@ def project_years(b: Baseline, s: Scenario) -> tuple[YearResult, ...]:
         dues = dues_by_year[y]
         per_unit = assessment_by_year.get(y, ZERO)
         total_dues = dues * b.units * 12
-        operating = b.operating_start * (1 + b.operating_inflation) ** (y - b.start_year)
+        falling = [line for line in b.expense_lines if falls_in(line, y)]
+        operating_lines = tuple(
+            (line, line_amount(line, y, b)) for line in falling if line.frequency.operating
+        )
+        lines = tuple(
+            (line, line_amount(line, y, b)) for line in falling if not line.frequency.operating
+        )
+        operating = sum((amount for _, amount in operating_lines), ZERO)
         contribution = max(ZERO, total_dues - operating)
         assessment = per_unit * b.units
         interest = balance * b.interest_rate
-        lines = tuple((line, _line_amount(line, b)) for line in lines_by_year.get(y, []))
         expenses = sum((amount for _, amount in lines), ZERO)
         ending = balance + contribution + assessment + interest - expenses
         ffb_next = b.ffb[y + 1]
@@ -137,6 +158,7 @@ def project_years(b: Baseline, s: Scenario) -> tuple[YearResult, ...]:
                 assessment_per_unit=per_unit,
                 total_dues=total_dues,
                 operating=operating,
+                operating_lines=operating_lines,
                 contribution=contribution,
                 assessment=assessment,
                 total_from_owners=total_dues + assessment,

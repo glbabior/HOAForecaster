@@ -35,7 +35,16 @@ from hoa_engine import (
 from hoa_workbook import read as reader
 from hoa_workbook.charts import shared_grid
 from hoa_workbook.export import build_workbook, export_workbook
-from hoa_workbook.layout import ASSESS_FIRST_ROW, INPUT_ROWS, ROW, quote, sheet_names
+from hoa_workbook.layout import (
+    ASSESS_FIRST_ROW,
+    EXPENSE_COL,
+    EXPENSE_TOTAL_LABEL,
+    EXPENSE_YEAR_COL,
+    INPUT_ROWS,
+    ROW,
+    quote,
+    sheet_names,
+)
 from hoa_workbook.read import WorkbookFormatError, read_workbook
 from tests.compare import mismatches
 
@@ -251,6 +260,13 @@ def test_shared_dollar_grid_lines_up_with_percent(
 # ---------------------------------------------------------------- bad files
 
 
+def _retarget_operating_total(wb: openpyxl.Workbook) -> None:
+    ws = wb["Expenses"]
+    rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+    cell = ws.cell(rows["TOTAL operating expenses (monthly and yearly lines)"], EXPENSE_YEAR_COL)
+    cell.value = re.sub(r"\$5:", "$6:", cell.value)
+
+
 def _broken(edit: Any) -> bytes:
     wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
     edit(wb)
@@ -272,7 +288,26 @@ def _broken(edit: Any) -> bytes:
             "unrecognised dues",
         ),
         (lambda: _broken(lambda wb: wb["Inputs"].cell(9, 2, 2.5)), "should be a whole number"),
-        (lambda: _broken(lambda wb: wb["Expenses"].cell(5, 2, 1e20)), "not a usable number"),
+        (
+            lambda: _broken(lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["amount"], 1e20)),
+            "not a usable number",
+        ),
+        (
+            lambda: _broken(lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["frequency"], "often")),
+            "'How often' should be one of monthly, yearly, every few years, once",
+        ),
+        (
+            lambda: _broken(lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["frequency"], "yearly ")),
+            "'How often' should be one of",  # the workbook's SUMIF totals would skip it
+        ),
+        (
+            lambda: _broken(lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["interval"], 2.5)),
+            "row 5 interval should be a number of years",
+        ),
+        (
+            lambda: _broken(_retarget_operating_total),
+            "operating and reserve totals on Expenses add up different rows",
+        ),
     ],
 )
 def test_unreadable_workbooks_are_refused_in_plain_language(data: Any, message: str) -> None:
@@ -322,12 +357,16 @@ def _insert_expense(at: int, copy_formulas: bool) -> Any:
     def edit(wb: openpyxl.Workbook) -> None:
         ws = wb["Expenses"]
         _excel_insert(ws, at)
-        ws.cell(at, 1, "New gate")
-        ws.cell(at, 2, 9000)
-        ws.cell(at, 3, 2030)
-        ws.cell(at, 4, "no")
+        for key, value in (
+            ("description", "New gate"),
+            ("frequency", "once"),
+            ("amount", 9000),
+            ("year", 2030),
+            ("nominal", "no"),
+        ):
+            ws.cell(at, EXPENSE_COL[key], value)
         if copy_formulas:  # what copying a whole row in Excel does
-            for c in range(5, ws.max_column + 1):
+            for c in range(EXPENSE_YEAR_COL, ws.max_column + 1):
                 source = ws.cell(at + 1, c)
                 ws.cell(at, c).value = Translator(
                     source.value, source.coordinate
@@ -338,7 +377,28 @@ def _insert_expense(at: int, copy_formulas: bool) -> Any:
 
 def test_an_expense_row_copied_between_rows_in_excel_is_read() -> None:
     project = read_workbook(_broken(_insert_expense(6, copy_formulas=True)))
-    assert ExpenseLine(2030, D(9000), "New gate") in project.baseline.expense_lines
+    lines = project.baseline.expense_lines
+    assert ExpenseLine(2030, D(9000), "New gate", id="line-1") in lines
+    assert len({line.id for line in lines}) == len(lines) == len(DEMO.baseline.expense_lines) + 1
+
+
+def test_a_new_row_gets_an_id_no_other_line_has() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        _insert_expense(6, copy_formulas=True)(wb)
+        wb["Expenses"].cell(5, EXPENSE_COL["id"], "line-1")
+
+    lines = read_workbook(_broken(edit)).baseline.expense_lines
+    assert [line.id for line in lines[:2]] == ["line-1", "line-2"]
+
+
+def test_a_copied_row_that_keeps_its_line_id_is_refused() -> None:
+    # scenarios refer to lines by id, and which row is the original cannot be told
+    def edit(wb: openpyxl.Workbook) -> None:
+        _insert_expense(6, copy_formulas=True)(wb)
+        wb["Expenses"].cell(6, EXPENSE_COL["id"], "insurance")
+
+    with pytest.raises(WorkbookFormatError, match="rows 6 and 8 on Expenses share the line id"):
+        read_workbook(_broken(edit))
 
 
 def test_an_expense_typed_into_a_bare_row_is_refused() -> None:
@@ -357,9 +417,9 @@ def test_an_expense_typed_in_the_gap_above_the_total_is_refused() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
         ws = wb["Expenses"]
         rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
-        gap = rows["TOTAL projected reserve expenses"] - 1
-        ws.cell(gap, 1, "Forgotten")
-        ws.cell(gap, 2, 100)
+        gap = rows["TOTAL operating expenses (monthly and yearly lines)"] - 1
+        ws.cell(gap, EXPENSE_COL["description"], "Forgotten")
+        ws.cell(gap, EXPENSE_COL["amount"], 100)
 
     with pytest.raises(WorkbookFormatError, match="outside the rows the total adds up"):
         read_workbook(_broken(edit))
@@ -517,8 +577,11 @@ def _assessment_in(year: int) -> Any:
 @pytest.mark.parametrize(
     ("edit", "message"),
     [
-        (_relabel("Expenses", "TOTAL projected reserve expenses", "Total"), "missing its total"),
-        (lambda wb: wb["Inputs"].cell(11, 2, -5), "operating expenses cannot be negative"),
+        (_relabel("Expenses", EXPENSE_TOTAL_LABEL, "Total"), "missing its total"),
+        (
+            lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["amount"], -5),
+            "the yearly expense 'Management, accounting and administration' cannot be negative",
+        ),
         (lambda wb: wb["Dues only"].cell(ROW["pinned"], 3 + 20, 700), None),
         (_assessment_in(1999), "the 1999 assessment is outside"),
     ],

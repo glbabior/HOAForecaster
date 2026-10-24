@@ -87,15 +87,18 @@ def result_json(result: ScenarioResult) -> dict[str, Any]:
     years = []
     for y in result.years:
         row = to_json(y)
-        row["expense_lines"] = [
-            {
-                "description": line.description,
-                "source": line.source,
-                "nominal": line.nominal,
-                "amount": str(amount),
-            }
-            for line, amount in y.expense_lines
-        ]
+        for key in ("expense_lines", "operating_lines"):
+            row[key] = [
+                {
+                    "id": line.id,
+                    "frequency": line.frequency.value,
+                    "description": line.description,
+                    "source": line.source,
+                    "nominal": line.nominal,
+                    "amount": str(amount),
+                }
+                for line, amount in getattr(y, key)
+            ]
         years.append(row)
     return {"years": years, "summary": to_json(result.summary)}
 
@@ -125,7 +128,11 @@ def _results(project: Project) -> dict[str, Any]:
 def figures(result: ScenarioResult) -> Any:
     """A result's numbers only – an expense's description or source is not a change."""
     years = [
-        (replace(y, expense_lines=()), [amount for _, amount in y.expense_lines])
+        (
+            replace(y, expense_lines=(), operating_lines=()),
+            [amount for _, amount in y.expense_lines],
+            [amount for _, amount in y.operating_lines],
+        )
         for y in result.years
     ]
     return years, result.summary

@@ -49,11 +49,11 @@ const SCALARS: {
     hint: "The no-change reference for extra cost",
   },
   {
-    key: "operating_start",
-    label: "Operating expenses in the start year",
-    hint: "Annual, excluding reserve contributions",
+    key: "operating_inflation",
+    label: "Operating cost inflation",
+    percent: true,
+    hint: "For monthly and yearly expenses without a rate of their own",
   },
-  { key: "operating_inflation", label: "Operating cost inflation", percent: true },
   { key: "expense_inflation", label: "Reserve expense inflation", percent: true },
   {
     key: "expense_base_year",
@@ -350,7 +350,7 @@ function BaselineForm({
         </section>
 
         <section className="panel">
-          <h2>Reserve expenses by year</h2>
+          <h2>Expenses</h2>
           <ExpenseTable
             lines={b.expense_lines}
             defaultYear={b.start_year}

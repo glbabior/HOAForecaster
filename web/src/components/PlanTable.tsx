@@ -3,7 +3,13 @@ import { useRef, useState } from "react";
 import { CsvButton } from "./CsvButton";
 
 import { dues, money, percent } from "../format";
-import type { ScenarioResult, YearResult } from "../types";
+import {
+  isOperating,
+  type Frequency,
+  type LineAmount,
+  type ScenarioResult,
+  type YearResult,
+} from "../types";
 
 type Kind = "dues" | "money" | "percent" | "flag";
 
@@ -75,6 +81,24 @@ function cell(row: Row, y: YearResult): { text: string; csv: string; className: 
   return { text, csv: raw, className: `num${negative}` };
 }
 
+type LineKind = "operating" | "reserve";
+
+/** The rows whose figure is a sum of expense lines, which a click opens. */
+const LINE_ROWS: Record<string, LineKind | undefined> = {
+  "Operating expenses": "operating",
+  "Reserve expenses": "reserve",
+};
+
+const linesOf = (y: YearResult, kind: LineKind): LineAmount[] =>
+  kind === "operating" ? y.operating_lines : y.expense_lines;
+
+const FREQUENCY_WORDS: Record<Frequency, string> = {
+  monthly: "monthly",
+  yearly: "yearly",
+  every: "every few years",
+  once: "once",
+};
+
 /** The year-by-year Plan table for one scenario – the equivalent of a Plan sheet. */
 export function PlanTable({
   result,
@@ -85,9 +109,10 @@ export function PlanTable({
   caption: string;
   filename: string;
 }) {
-  const [openYear, setOpenYear] = useState<number | null>(null);
+  const [opened, setOpened] = useState<{ year: number; kind: LineKind } | null>(null);
   const table = useRef<HTMLTableElement>(null);
-  const open = result.years.find((y) => y.year === openYear);
+  const open = result.years.find((y) => y.year === opened?.year);
+  const openLines = open && opened ? linesOf(open, opened.kind) : [];
   return (
     <div>
       <div className="section-head">
@@ -116,15 +141,22 @@ export function PlanTable({
                 <th scope="row">{row.label}</th>
                 {result.years.map((y) => {
                   const c = cell(row, y);
-                  if (row.label === "Reserve expenses" && y.expense_lines.length > 0) {
+                  const kind = LINE_ROWS[row.label];
+                  const lines = kind ? linesOf(y, kind) : [];
+                  if (kind && lines.length > 0) {
+                    const isOpen = opened?.year === y.year && opened.kind === kind;
                     return (
                       <td key={y.year} className={c.className} data-csv={c.csv}>
                         <button
                           type="button"
                           className="link"
-                          aria-expanded={openYear === y.year}
-                          title={y.expense_lines.map((l) => l.description).join("\n")}
-                          onClick={() => setOpenYear(openYear === y.year ? null : y.year)}
+                          aria-expanded={isOpen}
+                          title={lines
+                            .map(
+                              (l) => `${money(l.amount)} – ${l.description || "(no description)"}`,
+                            )
+                            .join("\n")}
+                          onClick={() => setOpened(isOpen ? null : { year: y.year, kind })}
                         >
                           {c.text}
                         </button>
@@ -142,15 +174,22 @@ export function PlanTable({
           </tbody>
         </table>
       </div>
-      {open && (
+      {open && opened && (
         <section className="expense-detail" aria-live="polite">
-          <h4>Reserve expenses in {open.year}</h4>
+          <h4>
+            {opened.kind === "operating" ? "Operating expenses" : "Reserve expenses"} in {open.year}
+          </h4>
           <ul>
-            {open.expense_lines.map((line, i) => (
+            {openLines.map((line, i) => (
               <li key={i}>
-                {money(line.amount)} – {line.description || "(no description)"}
-                {line.nominal ? " (already in that year's dollars)" : " (grown with inflation)"}
-                {line.source && <span className="source"> · Source – {line.source}</span>}
+                {money(line.amount)} – {line.description || "(no description)"} (
+                {FREQUENCY_WORDS[line.frequency]}
+                {isOperating(line.frequency)
+                  ? ""
+                  : line.nominal
+                    ? ", already in that year's dollars"
+                    : ", grown with inflation"}
+                ){line.source && <span className="source"> · Source – {line.source}</span>}
               </li>
             ))}
           </ul>

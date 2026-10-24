@@ -24,7 +24,6 @@ def blank_project(name: str, today: date) -> Project:
             "expense_inflation": "0.03",
             "expense_base_year": start - 1,
             "ffb": {str(y): "0" for y in range(start, end + 2)},
-            "operating_start": "0",
             "operating_inflation": "0.03",
             "interest_rate": "0.02",
             "units": 1,

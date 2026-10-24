@@ -1,5 +1,5 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "name": "Maple Row Condominiums (fictional demo)",
  "notes": "Invented figures for demonstration and testing. Not a real association.",
  "baseline": {
@@ -8,6 +8,58 @@
   "starting_balance": "185000",
   "expense_lines": [
    {
+    "id": "management",
+    "frequency": "yearly",
+    "year": null,
+    "end_year": null,
+    "inflation": null,
+    "amount": "58000",
+    "description": "Management, accounting and administration",
+    "source": "Fictional 2027 budget"
+   },
+   {
+    "id": "utilities",
+    "frequency": "monthly",
+    "year": null,
+    "end_year": null,
+    "inflation": "0.035",
+    "amount": "3100",
+    "description": "Common-area water, power and gas",
+    "source": "Fictional 2026 utility bills"
+   },
+   {
+    "id": "insurance",
+    "frequency": "yearly",
+    "year": null,
+    "end_year": null,
+    "inflation": "0.045",
+    "amount": "41000",
+    "description": "Master insurance policy",
+    "source": "Fictional broker quote"
+   },
+   {
+    "id": "landscaping",
+    "frequency": "yearly",
+    "year": 2027,
+    "end_year": 2033,
+    "inflation": "0.025",
+    "amount": "13000",
+    "description": "Landscaping contract",
+    "source": "Fictional contract, 2027–2033"
+   },
+   {
+    "id": "landscaping-renewal",
+    "frequency": "yearly",
+    "year": 2034,
+    "end_year": null,
+    "inflation": null,
+    "amount": "16500",
+    "description": "Landscaping contract after renewal",
+    "source": "Placeholder – contract to be re-bid"
+   },
+   {
+    "id": "study-2027",
+    "frequency": "once",
     "year": 2027,
     "amount": "14000",
     "description": "Reserve study total, all scheduled components",
@@ -15,6 +67,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2028",
+    "frequency": "once",
     "year": 2028,
     "amount": "19500",
     "description": "Reserve study total, all scheduled components",
@@ -22,6 +76,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2029",
+    "frequency": "once",
     "year": 2029,
     "amount": "150000",
     "description": "Reserve study total, all scheduled components",
@@ -29,6 +85,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2030",
+    "frequency": "once",
     "year": 2030,
     "amount": "11200",
     "description": "Reserve study total, all scheduled components",
@@ -36,6 +94,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2031",
+    "frequency": "once",
     "year": 2031,
     "amount": "27000",
     "description": "Reserve study total, all scheduled components",
@@ -43,6 +103,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2032",
+    "frequency": "once",
     "year": 2032,
     "amount": "16800",
     "description": "Reserve study total, all scheduled components",
@@ -50,6 +112,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2033",
+    "frequency": "once",
     "year": 2033,
     "amount": "58000",
     "description": "Reserve study total, all scheduled components",
@@ -57,6 +121,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2034",
+    "frequency": "once",
     "year": 2034,
     "amount": "12900",
     "description": "Reserve study total, all scheduled components",
@@ -64,6 +130,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2035",
+    "frequency": "once",
     "year": 2035,
     "amount": "35400",
     "description": "Reserve study total, all scheduled components",
@@ -71,6 +139,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2036",
+    "frequency": "once",
     "year": 2036,
     "amount": "20600",
     "description": "Reserve study total, all scheduled components",
@@ -78,6 +148,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2037",
+    "frequency": "once",
     "year": 2037,
     "amount": "86000",
     "description": "Reserve study total, all scheduled components",
@@ -85,6 +157,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2038",
+    "frequency": "once",
     "year": 2038,
     "amount": "15500",
     "description": "Reserve study total, all scheduled components",
@@ -92,6 +166,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2039",
+    "frequency": "once",
     "year": 2039,
     "amount": "30200",
     "description": "Reserve study total, all scheduled components",
@@ -99,6 +175,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2040",
+    "frequency": "once",
     "year": 2040,
     "amount": "18200",
     "description": "Reserve study total, all scheduled components",
@@ -106,6 +184,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2041",
+    "frequency": "once",
     "year": 2041,
     "amount": "46600",
     "description": "Reserve study total, all scheduled components",
@@ -113,6 +193,8 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "study-2042",
+    "frequency": "once",
     "year": 2042,
     "amount": "23000",
     "description": "Reserve study total, all scheduled components",
@@ -120,13 +202,19 @@
     "source": "Fictional reserve study, 2026, expense schedule"
    },
    {
+    "id": "repaint",
+    "frequency": "every",
     "year": 2031,
+    "end_year": null,
+    "interval": 8,
     "amount": "85000",
     "description": "Exterior repaint",
     "nominal": false,
     "source": "Fictional painter's estimate, 2026 dollars"
    },
    {
+    "id": "railings",
+    "frequency": "once",
     "year": 2031,
     "amount": "22000",
     "description": "Balcony railing replacement",
@@ -134,11 +222,24 @@
     "source": "Fictional contractor estimate, 2026 dollars"
    },
    {
+    "id": "boiler",
+    "frequency": "once",
     "year": 2035,
     "amount": "60000",
     "description": "Boiler replacement",
     "nominal": false,
     "source": "Placeholder – no estimate yet"
+   },
+   {
+    "id": "gutters",
+    "frequency": "every",
+    "year": 2028,
+    "end_year": 2040,
+    "interval": 3,
+    "amount": "4500",
+    "description": "Gutter cleaning and roof sealing",
+    "nominal": false,
+    "source": "Fictional maintenance plan"
    }
   ],
   "expense_inflation": "0.035",
@@ -162,7 +263,6 @@
    "2042": "1096000",
    "2043": "1140000"
   },
-  "operating_start": "150000",
   "operating_inflation": "0.04",
   "interest_rate": "0.015",
   "units": 24,

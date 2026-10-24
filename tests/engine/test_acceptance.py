@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from hoa_engine import baseline_from_dict, run, scenario_from_dict
+from hoa_engine import project_from_dict, run
 from tests.compare import mismatches
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,8 +50,8 @@ def _cases() -> list[Any]:
         for s in project["scenarios"]:
             cases.append(
                 pytest.param(
-                    project["baseline"],
-                    s,
+                    project,
+                    s["name"],
                     expected["scenarios"][s["name"]],
                     id=f"{p.id}-{s['name']}",
                 )
@@ -59,11 +59,14 @@ def _cases() -> list[Any]:
     return cases
 
 
-@pytest.mark.parametrize(("baseline", "scenario", "expected"), _cases())
+@pytest.mark.parametrize(("raw", "name", "expected"), _cases())
 def test_matches_reference_workbook(
-    baseline: dict[str, Any], scenario: dict[str, Any], expected: dict[str, Any]
+    raw: dict[str, Any], name: str, expected: dict[str, Any]
 ) -> None:
-    assert baseline is not None, "fixture set is missing project.json or expected.json"
-    result = run(baseline_from_dict(baseline), scenario_from_dict(scenario))
+    assert raw is not None, "fixture set is missing project.json or expected.json"
+    # the whole project file, so an older schema goes through its upgrade (spec 8.2)
+    project = project_from_dict(raw)
+    scenario = next(s for s in project.scenarios if s.name == name)
+    result = run(project.baseline, scenario)
     problems = mismatches(result, expected)
     assert not problems, "\n".join(problems)

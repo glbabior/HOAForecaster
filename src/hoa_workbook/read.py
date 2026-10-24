@@ -24,15 +24,18 @@ from hoa_workbook.layout import (
     ASSESS_NOTE_COL,
     ASSESS_YEAR_COL,
     CHARTS_LABEL,
+    EXPENSE_COL,
     EXPENSE_TOTAL_LABEL,
     EXPENSE_YEAR_COL,
     EXPENSES,
     FFB_LABEL,
+    FREQUENCY_TEXT,
     HEADER_ROW,
     INPUT_ROWS,
     INPUTS,
     MODE_GROWN,
     MODE_TYPED,
+    OPERATING_TOTAL_LABEL,
     PLAN_FIRST_COL,
     PLAN_ROWS,
     RESERVED,
@@ -133,15 +136,22 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
 
     ex = _sheet(wb, EXPENSES)
     rows = _label_rows(ex)
-    if EXPENSE_TOTAL_LABEL not in rows or FFB_LABEL not in rows:
+    if not {EXPENSE_TOTAL_LABEL, OPERATING_TOTAL_LABEL, FFB_LABEL} <= rows.keys():
         raise WorkbookFormatError(
             "the Expenses sheet is missing its total or Fully Funded Balance row"
         )
     total_row = rows[EXPENSE_TOTAL_LABEL]
     summed = _summed_rows(ex.cell(total_row, EXPENSE_YEAR_COL).value, "Expenses total")
+    operating = ex.cell(rows[OPERATING_TOTAL_LABEL], EXPENSE_YEAR_COL).value
+    if _summed_rows(operating, "operating total") != summed:
+        raise WorkbookFormatError(
+            "the operating and reserve totals on Expenses add up different rows – "
+            "export again from the app"
+        )
     lines = []
-    for r in range(HEADER_ROW + 1, total_row):
-        description, amount = ex.cell(r, 1).value, ex.cell(r, 2).value
+    for r in range(HEADER_ROW + 1, rows[OPERATING_TOTAL_LABEL]):
+        description = ex.cell(r, EXPENSE_COL["description"]).value
+        amount = ex.cell(r, EXPENSE_COL["amount"]).value
         if description is None and amount is None:
             continue
         where = f"Expenses row {r}"
@@ -156,16 +166,8 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
                 f"{where} has no year formulas, so the workbook's totals leave it out – "
                 "copy a whole existing row to add an expense"
             )
-        lines.append(
-            {
-                "year": _whole(ex.cell(r, 3).value, where + " year"),
-                "amount": _number(amount, where + " amount"),
-                "description": _text(description),
-                "nominal": _text(ex.cell(r, 4).value).lower() == "yes",
-                "source": _comment(ex.cell(r, 1)),
-            }
-        )
-    raw["expense_lines"] = lines
+        lines.append((r, _expense_line(ex, r, where)))
+    raw["expense_lines"] = _with_ids(lines, EXPENSES)
 
     ffb_row = rows[FFB_LABEL]
     if _comment(ex.cell(ffb_row, 1)):
@@ -180,6 +182,68 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
         )
     raw["ffb"] = ffb
     return text, raw
+
+
+_FREQUENCY = {text: key for key, text in FREQUENCY_TEXT.items()}
+
+
+def _optional_whole(value: Any, where: str) -> int | None:
+    return None if value is None else _whole(value, where)
+
+
+def _expense_line(ws: Worksheet, r: int, where: str) -> dict[str, Any]:
+    """The inputs of one expense row, in the project file's form."""
+
+    def cell(key: str) -> Any:
+        return ws.cell(r, EXPENSE_COL[key]).value
+
+    # exactly as written (SUMIF ignores case but not spaces), or the totals would leave it out
+    text = cell("frequency")
+    frequency = _FREQUENCY.get(text.lower()) if isinstance(text, str) else None
+    if frequency is None:
+        raise WorkbookFormatError(
+            f"{where} – 'How often' should be one of {', '.join(FREQUENCY_TEXT.values())}"
+        )
+    inflation = cell("inflation")
+    interval = cell("interval")
+    return {
+        "id": _text(cell("id")),
+        "frequency": frequency,
+        "description": _text(cell("description")),
+        "source": _comment(ws.cell(r, EXPENSE_COL["description"])),
+        "amount": _number(cell("amount"), where + " amount"),
+        "year": _optional_whole(cell("year"), where + " year"),
+        "end_year": _optional_whole(cell("end_year"), where + " last year"),
+        "interval": None
+        if interval is None
+        else _whole(interval, where + " interval", "a number of years"),
+        "inflation": None if inflation is None else _number(inflation, where + " inflation"),
+        "nominal": _text(cell("nominal")).lower() == "yes",
+    }
+
+
+def _with_ids(lines: list[tuple[int, dict[str, Any]]], sheet: str) -> list[dict[str, Any]]:
+    """Every line with an identifier of its own. A row added in Excel with its id cleared gets
+    a new one; a row copied with its id kept is refused, since which row is the original –
+    the one scenarios refer to – cannot be told."""
+    rows_of: dict[str, list[int]] = {}
+    for r, line in lines:
+        if line["id"]:
+            rows_of.setdefault(line["id"], []).append(r)
+    for line_id, rows in rows_of.items():
+        if len(rows) > 1:
+            raise WorkbookFormatError(
+                f"rows {rows[0]} and {rows[1]} on {sheet} share the line id '{line_id[:40]}' – "
+                "clear the id of the row you added"
+            )
+    n = 1
+    for _, line in lines:
+        if not line["id"]:
+            while f"line-{n}" in rows_of:
+                n += 1
+            line["id"] = f"line-{n}"
+            rows_of[line["id"]] = []
+    return [line for _, line in lines]
 
 
 _RANGE = re.compile(r"\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)")

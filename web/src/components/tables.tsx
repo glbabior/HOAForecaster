@@ -2,16 +2,50 @@ import { useState, type ClipboardEvent } from "react";
 
 import { parsePasted } from "../csv";
 import { parseDecimal } from "../decimal";
-import type { ExpenseLine } from "../types";
-import { DecimalInput, YearInput } from "./ui";
+import { isOperating, type ExpenseLine, type Frequency } from "../types";
+import { DecimalInput, OptionalYearInput, YearInput } from "./ui";
 
-const blankLine = (year: number): ExpenseLine => ({
+export const FREQUENCIES: { value: Frequency; label: string }[] = [
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+  { value: "every", label: "Every few years" },
+  { value: "once", label: "Once" },
+];
+
+/** The first `line-N` identifier not yet taken – the same form the server gives lines. */
+export function newLineId(taken: Iterable<string>): string {
+  const used = new Set(taken);
+  let n = 1;
+  while (used.has(`line-${n}`)) n += 1;
+  return `line-${n}`;
+}
+
+const blankLine = (id: string, year: number): ExpenseLine => ({
+  id,
+  frequency: "once",
   year,
   amount: "0",
   description: "",
   nominal: false,
   source: "",
 });
+
+/** The line under another frequency – it keeps its amount, words and years, takes up the
+ * fields the new frequency uses and drops the rest, so nothing stale is saved. */
+export function withFrequency(line: ExpenseLine, frequency: Frequency, year: number): ExpenseLine {
+  const { id, amount, description, source } = line;
+  const common = { id, frequency, amount, description, source };
+  if (isOperating(frequency))
+    return {
+      ...common,
+      year: line.year,
+      end_year: line.end_year ?? null,
+      inflation: line.inflation ?? null,
+    };
+  const reserve = { ...common, year: line.year ?? year, nominal: line.nominal ?? false };
+  if (frequency === "once") return reserve;
+  return { ...reserve, interval: line.interval ?? 5, end_year: line.end_year ?? null };
+}
 
 let counter = 0;
 const newId = (): string => `row-${(counter += 1)}`;
@@ -31,10 +65,15 @@ export function useRowIds(length: number) {
   };
 }
 
-/** Pasted cells as expense lines – year, amount, description, then optionally "yes"/"no"
- * for already-in-that-year's-dollars and a source. Header rows and bad rows are reported. */
-export function linesFromPaste(text: string): { lines: ExpenseLine[]; skipped: number } {
+/** Pasted cells as once expense lines – year, amount, description, then optionally "yes"/"no"
+ * for already-in-that-year's-dollars and a source. Header rows and bad rows are reported.
+ * Each line gets an identifier not in `taken`. */
+export function linesFromPaste(
+  text: string,
+  taken: string[] = [],
+): { lines: ExpenseLine[]; skipped: number } {
   const lines: ExpenseLine[] = [];
+  const ids = [...taken];
   let skipped = 0;
   for (const cells of parsePasted(text)) {
     const [yearText = "", amountText = "", description = "", nominal = "", source = ""] = cells;
@@ -43,7 +82,11 @@ export function linesFromPaste(text: string): { lines: ExpenseLine[]; skipped: n
       skipped += 1;
       continue;
     }
+    const id = newLineId(ids);
+    ids.push(id);
     lines.push({
+      id,
+      frequency: "once",
       year: Number(yearText),
       amount,
       description,
@@ -74,7 +117,10 @@ export function ExpenseTable({
     const text = e.clipboardData.getData("text/plain");
     if (!text.includes("\t")) return; // a single value – let the cell take it
     e.preventDefault();
-    const { lines: pasted, skipped } = linesFromPaste(text);
+    const { lines: pasted, skipped } = linesFromPaste(
+      text,
+      lines.map((l) => l.id),
+    );
     rows.added(pasted.length);
     onChange([...lines, ...pasted]);
     setNotice(
@@ -86,6 +132,7 @@ export function ExpenseTable({
   }
 
   function sortByYear() {
+    // lines without a year – monthly and yearly lines from the start – come first
     const order = lines
       .map((_, i) => i)
       .sort((a, b) => (lines[a]?.year ?? 0) - (lines[b]?.year ?? 0));
@@ -96,18 +143,25 @@ export function ExpenseTable({
   return (
     <div>
       <p className="hint">
-        Amounts are in the expense base year's dollars and grow with inflation, unless marked as
-        already in that year's dollars. Paste rows from a spreadsheet – year, amount, description,
-        yes/no, source – into the table to add them.
+        Monthly and yearly expenses are operating costs, paid from dues – each grows from its first
+        year (blank – the start year) at its own inflation rate, or the operating rate when that is
+        blank. Once and every-few-years expenses come out of reserves; their amounts are in the
+        expense base year's dollars and grow with reserve inflation, unless marked as already in
+        that year's dollars. Paste rows from a spreadsheet – year, amount, description, yes/no,
+        source – to add them as one-off expenses.
       </p>
       <div className="table-scroll">
-        <table className="edit-table" onPaste={paste}>
-          <caption className="visually-hidden">Reserve expenses</caption>
+        <table className="edit-table expenses" onPaste={paste}>
+          <caption className="visually-hidden">Expenses</caption>
           <thead>
             <tr>
-              <th scope="col">Year</th>
+              <th scope="col">How often</th>
+              <th scope="col">Year, or first year</th>
+              <th scope="col">Last year</th>
+              <th scope="col">Every … years</th>
               <th scope="col">Amount</th>
               <th scope="col">Description</th>
+              <th scope="col">Own inflation</th>
               <th scope="col">Already in that year's dollars</th>
               <th scope="col">Source</th>
               <th scope="col">
@@ -116,66 +170,20 @@ export function ExpenseTable({
             </tr>
           </thead>
           <tbody>
-            {lines.map((line, i) => {
-              const what = line.description
-                ? `expense ${i + 1} (${line.description})`
-                : `expense ${i + 1}`;
-              return (
-                <tr key={rows.ids[i]}>
-                  <td>
-                    <YearInput
-                      label={`Year of expense ${i + 1}`}
-                      name={`Year of ${what}`}
-                      value={line.year}
-                      onChange={(year) => update(i, { year })}
-                    />
-                  </td>
-                  <td>
-                    <DecimalInput
-                      label={`Amount of expense ${i + 1}`}
-                      name={`Amount of ${what}`}
-                      value={line.amount}
-                      onChange={(v) => v !== null && update(i, { amount: v })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      aria-label={`Description of expense ${i + 1}`}
-                      value={line.description}
-                      onChange={(e) => update(i, { description: e.target.value })}
-                    />
-                  </td>
-                  <td className="center">
-                    <input
-                      type="checkbox"
-                      aria-label={`Expense ${i + 1} is already in that year's dollars`}
-                      checked={line.nominal}
-                      onChange={(e) => update(i, { nominal: e.target.checked })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      aria-label={`Source of expense ${i + 1}`}
-                      value={line.source}
-                      onChange={(e) => update(i, { source: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="small"
-                      aria-label={`Remove expense ${i + 1}`}
-                      onClick={() => {
-                        rows.removed(i);
-                        onChange(lines.filter((_, j) => j !== i));
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {lines.map((line, i) => (
+              <ExpenseRow
+                key={rows.ids[i]}
+                line={line}
+                index={i}
+                defaultYear={defaultYear}
+                onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
+                onUpdate={(change) => update(i, change)}
+                onRemove={() => {
+                  rows.removed(i);
+                  onChange(lines.filter((_, j) => j !== i));
+                }}
+              />
+            ))}
           </tbody>
         </table>
       </div>
@@ -184,7 +192,7 @@ export function ExpenseTable({
           type="button"
           onClick={() => {
             rows.added();
-            onChange([...lines, blankLine(defaultYear)]);
+            onChange([...lines, blankLine(newLineId(lines.map((l) => l.id)), defaultYear)]);
           }}
         >
           Add expense
@@ -195,6 +203,138 @@ export function ExpenseTable({
         <span role="status">{notice}</span>
       </div>
     </div>
+  );
+}
+
+/** One expense's inputs – only the ones its frequency uses are shown. */
+function ExpenseRow({
+  line,
+  index,
+  defaultYear,
+  onChange,
+  onUpdate,
+  onRemove,
+}: {
+  line: ExpenseLine;
+  index: number;
+  defaultYear: number;
+  onChange: (line: ExpenseLine) => void;
+  onUpdate: (change: Partial<ExpenseLine>) => void;
+  onRemove: () => void;
+}) {
+  const n = index + 1;
+  const what = line.description ? `expense ${n} (${line.description})` : `expense ${n}`;
+  const operating = isOperating(line.frequency);
+  return (
+    <tr>
+      <td>
+        <select
+          aria-label={`How often expense ${n} falls`}
+          value={line.frequency}
+          onChange={(e) => onChange(withFrequency(line, e.target.value as Frequency, defaultYear))}
+        >
+          {FREQUENCIES.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td>
+        {operating ? (
+          <OptionalYearInput
+            label={`First year of expense ${n}`}
+            name={`First year of ${what}`}
+            value={line.year}
+            placeholder="start"
+            onChange={(year) => onUpdate({ year })}
+          />
+        ) : (
+          <YearInput
+            label={`Year of expense ${n}`}
+            name={`Year of ${what}`}
+            value={line.year ?? defaultYear}
+            onChange={(year) => onUpdate({ year })}
+          />
+        )}
+      </td>
+      <td>
+        {line.frequency !== "once" && (
+          <OptionalYearInput
+            label={`Last year of expense ${n}`}
+            name={`Last year of ${what}`}
+            value={line.end_year ?? null}
+            placeholder="end"
+            onChange={(end_year) => onUpdate({ end_year })}
+          />
+        )}
+      </td>
+      <td>
+        {line.frequency === "every" && (
+          <YearInput
+            label={`Years between occurrences of expense ${n}`}
+            name={`Years between occurrences of ${what}`}
+            value={line.interval ?? 5}
+            onChange={(interval) => onUpdate({ interval })}
+          />
+        )}
+      </td>
+      <td>
+        <DecimalInput
+          label={`Amount of expense ${n}${line.frequency === "monthly" ? " a month" : ""}`}
+          name={`Amount of ${what}`}
+          value={line.amount}
+          onChange={(v) => v !== null && onUpdate({ amount: v })}
+        />
+        {line.frequency === "monthly" && <small className="hint"> a month</small>}
+      </td>
+      <td>
+        <input
+          aria-label={`Description of expense ${n}`}
+          value={line.description}
+          onChange={(e) => onUpdate({ description: e.target.value })}
+        />
+      </td>
+      <td>
+        {operating && (
+          <DecimalInput
+            label={`Own inflation rate of expense ${n}`}
+            name={`Own inflation rate of ${what}`}
+            percent
+            allowBlank
+            value={line.inflation ?? null}
+            onChange={(inflation) => onUpdate({ inflation })}
+          />
+        )}
+      </td>
+      <td className="center">
+        {!operating && (
+          <input
+            type="checkbox"
+            aria-label={`Expense ${n} is already in that year's dollars`}
+            checked={line.nominal ?? false}
+            onChange={(e) => onUpdate({ nominal: e.target.checked })}
+          />
+        )}
+      </td>
+      <td>
+        <input
+          aria-label={`Source of expense ${n}`}
+          value={line.source}
+          onChange={(e) => onUpdate({ source: e.target.value })}
+        />
+      </td>
+      <td>
+        <button
+          type="button"
+          className="small"
+          aria-label={`Remove expense ${n}`}
+          onClick={onRemove}
+        >
+          Remove
+        </button>
+      </td>
+    </tr>
   );
 }
 

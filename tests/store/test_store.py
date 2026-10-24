@@ -75,7 +75,7 @@ def test_the_file_is_readable_json_with_decimal_strings(store: ProjectStore) -> 
     saved = store.create(DEMO)
     raw = json.loads(_file(store, saved.id).read_text(encoding="utf-8"))
     assert raw["name"] == DEMO.name
-    assert raw["schema_version"] == 1
+    assert raw["schema_version"] == 2
     assert isinstance(raw["baseline"]["starting_balance"], str)
 
 

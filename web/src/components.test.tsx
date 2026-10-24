@@ -20,7 +20,26 @@ function year(y: number, change: Partial<YearResult> = {}): YearResult {
     total_from_owners: "187200",
     interest: "2775",
     expenses: "14000",
-    expense_lines: [{ description: "Roof", source: "Study", nominal: true, amount: "14000" }],
+    expense_lines: [
+      {
+        id: "roof",
+        frequency: "once",
+        description: "Roof",
+        source: "Study",
+        nominal: true,
+        amount: "14000",
+      },
+    ],
+    operating_lines: [
+      {
+        id: "water",
+        frequency: "monthly",
+        description: "Water",
+        source: "",
+        nominal: false,
+        amount: "150000",
+      },
+    ],
     starting_balance: "185000",
     ending_balance: "210975",
     ffb_next: "634000",
@@ -79,8 +98,19 @@ describe("the plan table", () => {
     const [first] = screen.getAllByRole("button", { name: "$14,000" });
     if (!first) throw new Error("no expense button");
     await userEvent.click(first);
+    expect(screen.getByRole("heading", { name: /Reserve expenses in/ })).toBeTruthy();
     expect(screen.getByText(/Roof/)).toBeTruthy();
     expect(screen.getByText(/Source – Study/)).toBeTruthy();
+    expect(first.title).toBe("$14,000 – Roof"); // hover shows amounts too
+  });
+
+  it("lists a year's operating lines from the operating row", async () => {
+    render(<PlanTable result={result} caption="t" filename="t.csv" />);
+    const [first] = screen.getAllByRole("button", { name: "$150,000" });
+    if (!first) throw new Error("no operating button");
+    await userEvent.click(first);
+    expect(screen.getByRole("heading", { name: /Operating expenses in/ })).toBeTruthy();
+    expect(screen.getByText(/Water \(monthly/)).toBeTruthy();
   });
 });
 

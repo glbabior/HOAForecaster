@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import functools
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -27,13 +28,36 @@ class Rounding(StrEnum):
     NONE = "none"
 
 
+class Frequency(StrEnum):
+    """How often an expense falls (spec 4.1). Monthly and yearly lines are operating
+    expenses, paid from dues; once and every-few-years lines are reserve expenses."""
+
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+    EVERY = "every"  # every `interval` years from `year`
+    ONCE = "once"
+
+    @property
+    def operating(self) -> bool:
+        return self in (Frequency.MONTHLY, Frequency.YEARLY)
+
+
 @dataclass(frozen=True)
 class ExpenseLine:
-    year: int
-    amount: Decimal
+    """One expense. `year` is the year of a once line, the first occurrence of an
+    every-few-years line, or the first year of a monthly or yearly line (None – from the
+    start year). `end_year` is the last year a repeating line applies (None – to the end)."""
+
+    year: int | None
+    amount: Decimal  # per month for monthly lines, per occurrence otherwise
     description: str = ""
-    nominal: bool = False  # True – amount is already in the year's dollars, skip inflation
+    nominal: bool = False  # reserve lines – the amount is already in the year's dollars
     source: str = ""
+    frequency: Frequency = Frequency.ONCE
+    end_year: int | None = None
+    interval: int | None = None  # every-few-years lines only
+    inflation: Decimal | None = None  # operating lines – their own rate; None follows the baseline
+    id: str = ""  # stable, so a scenario can change or leave out this line
 
 
 @dataclass(frozen=True)
@@ -45,8 +69,7 @@ class Baseline:
     expense_inflation: Decimal
     expense_base_year: int
     ffb: dict[int, Decimal]  # Fully Funded Balance at the start of each year, start..end+1
-    operating_start: Decimal  # operating expenses in the start year
-    operating_inflation: Decimal
+    operating_inflation: Decimal  # the rate of operating lines that do not set their own
     interest_rate: Decimal
     units: int
     current_dues: Decimal  # per unit per month
@@ -86,7 +109,7 @@ class Scenario:
     description: str = ""
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -173,6 +196,10 @@ def _opt_dec(value: Any) -> Decimal | None:
     return None if value is None else _dec(value)
 
 
+def _opt_int(value: Any) -> int | None:
+    return None if value is None else _int(value)
+
+
 def _year_map(raw: dict[str, Any]) -> dict[int, Decimal]:
     return {_int(year): _dec(value) for year, value in raw.items()}
 
@@ -181,26 +208,74 @@ def _year_map_out(values: dict[int, Decimal]) -> dict[str, str]:
     return {str(year): str(values[year]) for year in sorted(values)}
 
 
+LINE_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def _line_id(value: Any) -> str:
+    text = _str(value)
+    if not LINE_ID.fullmatch(text):
+        raise ValueError(f"{text[:40]!r} is not a usable expense line identifier")
+    return text
+
+
+def expense_line_from_dict(e: dict[str, Any], line_id: Any) -> ExpenseLine:
+    """A line, keeping only the fields its frequency uses."""
+    frequency = Frequency(e.get("frequency", Frequency.ONCE))
+    return ExpenseLine(
+        id=_line_id(line_id),
+        frequency=frequency,
+        year=_opt_int(e.get("year")),
+        amount=_dec(e["amount"]),
+        description=_str(e.get("description", "")),
+        source=_str(e.get("source", "")),
+        nominal=not frequency.operating and _bool(e.get("nominal", False)),
+        end_year=None if frequency is Frequency.ONCE else _opt_int(e.get("end_year")),
+        interval=_opt_int(e.get("interval")) if frequency is Frequency.EVERY else None,
+        inflation=_opt_dec(e.get("inflation")) if frequency.operating else None,
+    )
+
+
+def expense_line_to_dict(e: ExpenseLine) -> dict[str, Any]:
+    """A line without its identifier – the fields its frequency uses."""
+    out: dict[str, Any] = {
+        "frequency": e.frequency.value,
+        "year": e.year,
+        "amount": str(e.amount),
+        "description": e.description,
+        "source": e.source,
+    }
+    if e.frequency is not Frequency.ONCE:
+        out["end_year"] = e.end_year
+    if e.frequency is Frequency.EVERY:
+        out["interval"] = e.interval
+    if e.frequency.operating:
+        out["inflation"] = None if e.inflation is None else str(e.inflation)
+    else:
+        out["nominal"] = e.nominal
+    return out
+
+
+def _expense_lines(raw: Any) -> tuple[ExpenseLine, ...]:
+    if not isinstance(raw, list):
+        raise TypeError("expense lines should be a list")
+    lines = tuple(expense_line_from_dict(e, e["id"]) for e in raw)
+    ids = [line.id for line in lines]
+    duplicates = sorted(i for i, n in Counter(ids).items() if n > 1)
+    if duplicates:
+        raise ValueError("expense line identifiers must be unique – " + ", ".join(duplicates))
+    return lines
+
+
 @_reading("baseline")
 def baseline_from_dict(d: dict[str, Any]) -> Baseline:
     return Baseline(
         start_year=_int(d["start_year"]),
         end_year=_int(d["end_year"]),
         starting_balance=_dec(d["starting_balance"]),
-        expense_lines=tuple(
-            ExpenseLine(
-                year=_int(e["year"]),
-                amount=_dec(e["amount"]),
-                description=_str(e.get("description", "")),
-                nominal=_bool(e.get("nominal", False)),
-                source=_str(e.get("source", "")),
-            )
-            for e in d.get("expense_lines", [])
-        ),
+        expense_lines=_expense_lines(d.get("expense_lines", [])),
         expense_inflation=_dec(d["expense_inflation"]),
         expense_base_year=_int(d["expense_base_year"]),
         ffb=_year_map(d["ffb"]),
-        operating_start=_dec(d["operating_start"]),
         operating_inflation=_dec(d["operating_inflation"]),
         interest_rate=_dec(d["interest_rate"]),
         units=_int(d["units"]),
@@ -218,20 +293,10 @@ def baseline_to_dict(b: Baseline) -> dict[str, Any]:
         "start_year": b.start_year,
         "end_year": b.end_year,
         "starting_balance": str(b.starting_balance),
-        "expense_lines": [
-            {
-                "year": e.year,
-                "amount": str(e.amount),
-                "description": e.description,
-                "nominal": e.nominal,
-                "source": e.source,
-            }
-            for e in b.expense_lines
-        ],
+        "expense_lines": [{"id": e.id, **expense_line_to_dict(e)} for e in b.expense_lines],
         "expense_inflation": str(b.expense_inflation),
         "expense_base_year": b.expense_base_year,
         "ffb": _year_map_out(b.ffb),
-        "operating_start": str(b.operating_start),
         "operating_inflation": str(b.operating_inflation),
         "interest_rate": str(b.interest_rate),
         "units": b.units,
@@ -286,10 +351,42 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
     }
 
 
+OPERATING_LINE_ID = "operating"
+
+
+def upgrade_v1_baseline(d: Any) -> dict[str, Any]:
+    """A schema 1 baseline in schema 2 form, with the same figures (spec 8.2) – its expense
+    lines become once lines, and its start-year operating expenses one yearly line growing at
+    the operating inflation rate from the start year."""
+    if not isinstance(d, dict):
+        raise TypeError("the baseline should be an object")
+    lines = d.get("expense_lines", [])
+    if not isinstance(lines, list) or not all(isinstance(e, dict) for e in lines):
+        raise TypeError("expense lines should be a list of objects")
+    sources = _sources(d.get("sources", {}))
+    upgraded = [{**e, "id": f"line-{i}", "frequency": "once"} for i, e in enumerate(lines, 1)]
+    if _dec(d["operating_start"]) != 0:
+        operating = {
+            "id": OPERATING_LINE_ID,
+            "frequency": "yearly",
+            "year": None,
+            "amount": d["operating_start"],
+            "description": "Operating expenses",
+            "source": sources.pop("operating_start", ""),
+        }
+        upgraded.insert(0, operating)
+    else:
+        sources.pop("operating_start", None)
+    rest = {k: v for k, v in d.items() if k != "operating_start"}
+    return {**rest, "expense_lines": upgraded, "sources": sources}
+
+
 @_reading("project")
 def project_from_dict(d: dict[str, Any]) -> Project:
     version = _int(d.get("schema_version", SCHEMA_VERSION))
-    if version != SCHEMA_VERSION:
+    if version == 1:
+        d = {**d, "baseline": upgrade_v1_baseline(d["baseline"])}
+    elif version != SCHEMA_VERSION:
         raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
     scenarios = tuple(scenario_from_dict(s) for s in d.get("scenarios", []))
     names = [s.name for s in scenarios]

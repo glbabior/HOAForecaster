@@ -34,8 +34,11 @@ INPUT_ROWS = (
     InputRow("end_year", "End year", "year"),
     InputRow("units", "Number of units", "count"),
     InputRow("current_dues", "Current dues per unit per month", "money"),
-    InputRow("operating_start", "Operating expenses in the start year", "money"),
-    InputRow("operating_inflation", "Operating cost inflation per year", "rate"),
+    InputRow(
+        "operating_inflation",
+        "Operating cost inflation per year (monthly and yearly lines without their own)",
+        "rate",
+    ),
     InputRow("expense_inflation", "Reserve expense inflation per year", "rate"),
     InputRow("expense_base_year", "Expense base year (dollars of the reserve study)", "year"),
     InputRow("interest_rate", "Interest earned on reserves per year", "rate"),
@@ -54,10 +57,37 @@ def input_ref(key: str) -> str:
 
 # ---------------------------------------------------------------- Expenses sheet
 
-EXPENSE_COLUMNS = ("Item", "Amount", "Year", "Already in that year's dollars?")
+
+@dataclass(frozen=True)
+class ExpenseColumn:
+    key: str  # ExpenseLine field
+    heading: str
+
+
+# A–I hold a line's inputs; the year columns follow
+EXPENSE_COLUMNS = (
+    ExpenseColumn("description", "Item"),
+    ExpenseColumn("frequency", "How often"),
+    ExpenseColumn("amount", "Amount (a month, for monthly lines)"),
+    ExpenseColumn("year", "Year, or first year"),
+    ExpenseColumn("end_year", "Last year (blank – to the end)"),
+    ExpenseColumn("interval", "Every … years"),
+    ExpenseColumn("inflation", "Own inflation (blank – Inputs)"),
+    ExpenseColumn("nominal", "Already in that year's dollars?"),
+    ExpenseColumn("id", "Line id"),
+)
+EXPENSE_COL = {c.key: i for i, c in enumerate(EXPENSE_COLUMNS, start=1)}
 FIRST_EXPENSE_ROW = 5
-EXPENSE_YEAR_COL = 5  # column E is the start year; A–D hold the line inputs
-EXPENSE_TOTAL_LABEL = "TOTAL projected reserve expenses"
+EXPENSE_YEAR_COL = len(EXPENSE_COLUMNS) + 1  # the start year
+OPERATING_TOTAL_LABEL = "TOTAL operating expenses (monthly and yearly lines)"
+EXPENSE_TOTAL_LABEL = "TOTAL projected reserve expenses (once and every few years)"
+# how each frequency is written in the How often column
+FREQUENCY_TEXT = {
+    "monthly": "monthly",
+    "yearly": "yearly",
+    "every": "every few years",
+    "once": "once",
+}
 FFB_HEADER_LABEL = "Year"
 FFB_LABEL = "Fully Funded Balance at start of year"
 

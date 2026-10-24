@@ -221,6 +221,50 @@ export function YearInput({
   );
 }
 
+/** A year that may be left blank (null) – an expense's first or last year. Text that is
+ * neither blank nor a year is kept on screen, marked, and reported to the form. */
+export function OptionalYearInput({
+  value,
+  onChange,
+  name,
+  label,
+  placeholder,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+  name: string;
+  label: string;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(value === null ? "" : String(value));
+  const [seen, setSeen] = useState(value);
+  const trimmed = text.trim();
+  const invalid = trimmed !== "" && !/^\d{1,4}$/.test(trimmed);
+  useReportValidity(name, invalid);
+  if (value !== seen) {
+    setSeen(value);
+    setText(value === null ? "" : String(value));
+  }
+  return (
+    <input
+      aria-label={label}
+      inputMode="numeric"
+      placeholder={placeholder}
+      value={text}
+      aria-invalid={invalid || undefined}
+      onChange={(e) => {
+        const next = e.target.value.trim();
+        setText(e.target.value);
+        if (next === "" || /^\d{1,4}$/.test(next)) {
+          const n = next === "" ? null : Number(next);
+          setSeen(n);
+          onChange(n);
+        }
+      }}
+    />
+  );
+}
+
 /** A modal question with a yes and a no. */
 export function Confirm({
   open,

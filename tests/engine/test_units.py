@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,6 +16,7 @@ from hoa_engine import (
     DuesMode,
     DuesPath,
     ExpenseLine,
+    Frequency,
     InvalidInputs,
     ProjectFormatError,
     Rounding,
@@ -40,13 +42,13 @@ def baseline(**changes: object) -> Baseline:
         end_year=2034,
         starting_balance=D(100000),
         expense_lines=(
-            ExpenseLine(2031, D(10000), "Roof", nominal=False),
-            ExpenseLine(2031, D(5000), "Study total", nominal=True),
+            ExpenseLine(2031, D(10000), "Roof", nominal=False, id="roof"),
+            ExpenseLine(2031, D(5000), "Study total", nominal=True, id="study"),
+            ExpenseLine(None, D(12000), "Operating", frequency=Frequency.YEARLY, id="operating"),
         ),
         expense_inflation=D("0.10"),
         expense_base_year=2030,
         ffb={y: D(200000) for y in range(2030, 2036)},
-        operating_start=D(12000),
         operating_inflation=D(0),
         interest_rate=D("0.01"),
         units=10,
@@ -341,8 +343,8 @@ def test_project_files_from_an_unknown_schema_version_are_refused() -> None:
     raw["schema_version"] = 99
     with pytest.raises(ProjectFormatError, match="schema version 99 is not supported"):
         project_from_dict(raw)
-    raw["schema_version"] = 1
-    assert project_to_dict(project_from_dict(raw))["schema_version"] == 1
+    raw["schema_version"] = 2
+    assert project_to_dict(project_from_dict(raw))["schema_version"] == 2
 
 
 @pytest.mark.parametrize(
@@ -369,4 +371,170 @@ def test_sources_must_be_notes() -> None:
     raw = baseline_to_dict(baseline())
     raw["sources"] = ["a list"]
     with pytest.raises(ProjectFormatError, match="sources should be a set of notes"):
+        baseline_from_dict(raw)
+
+
+# ---------------------------------------------------------------- expense frequencies (4.1)
+
+
+def lines_only(*lines: ExpenseLine, **changes: object) -> Baseline:
+    return baseline(expense_lines=lines, **changes)
+
+
+def test_monthly_lines_are_twelve_months_grown_from_their_first_year_at_their_own_rate() -> None:
+    water = ExpenseLine(2031, D(100), "Water", frequency=Frequency.MONTHLY, inflation=D("0.1"))
+    years = run(lines_only(water, operating_inflation=D("0.5")), rate("0", "0")).years
+    assert [y.operating for y in years] == [0, 1200, D("1320.0"), D("1452.00"), D("1597.200")]
+    assert [(line.description, amount) for line, amount in years[1].operating_lines] == [
+        ("Water", D(1200))
+    ]
+    assert years[1].expense_lines == ()  # operating lines are not reserve expenses
+
+
+def test_yearly_lines_follow_the_operating_rate_from_the_start_year_until_their_last_year() -> None:
+    insurance = ExpenseLine(None, D(1000), "Insurance", frequency=Frequency.YEARLY, end_year=2032)
+    years = run(lines_only(insurance, operating_inflation=D("0.1")), rate("0", "0")).years
+    assert [y.operating for y in years] == [1000, D("1100.0"), D("1210.00"), 0, 0]
+
+
+def test_every_few_years_lines_are_reserve_expenses_on_their_interval() -> None:
+    paint = ExpenseLine(2030, D(1000), "Paint", frequency=Frequency.EVERY, interval=2)
+    years = run(lines_only(paint), rate("200", "0")).years
+    # base year 2030, 10% reserve inflation, 2030 · 2032 · 2034
+    assert [y.expenses for y in years] == [1000, 0, D("1210.00"), 0, D("1464.1000")]
+    assert all(y.operating == 0 for y in years)
+
+
+def test_every_few_years_lines_stop_after_their_last_year_and_may_be_nominal() -> None:
+    paint = ExpenseLine(
+        2031, D(500), "Paint", nominal=True, frequency=Frequency.EVERY, interval=1, end_year=2032
+    )
+    assert [y.expenses for y in run(lines_only(paint), rate("200", "0")).years] == [
+        0,
+        500,
+        500,
+        0,
+        0,
+    ]
+
+
+def test_operating_lines_feed_the_contribution_shortfall_and_vote_budget() -> None:
+    # dues 10 × 100 × 12 = 12 000; operating 1 000 a month = 12 000 – exactly covered
+    rent = ExpenseLine(None, D(1000), "Rent", frequency=Frequency.MONTHLY)
+    year = run(lines_only(rent), rate("100", "0")).years[0]
+    assert (year.operating, year.contribution, year.operating_shortfall) == (12000, 0, False)
+
+
+def test_expense_lines_are_checked() -> None:
+    problems = validate_baseline(
+        lines_only(
+            ExpenseLine(None, D(1), "Roof"),
+            ExpenseLine(2031, D(1), "Paint", frequency=Frequency.EVERY),
+            ExpenseLine(2031, D(1), "Gutters", frequency=Frequency.EVERY, interval=0),
+            ExpenseLine(2032, D(1), "Gas", frequency=Frequency.MONTHLY, end_year=2031),
+            ExpenseLine(None, D(1), "Cover", frequency=Frequency.YEARLY, inflation=D("0.6")),
+            ExpenseLine(None, D(-1), "Fee", frequency=Frequency.YEARLY, id="a"),
+            ExpenseLine(None, D(1), "Fee", frequency=Frequency.YEARLY, id="a"),
+        )
+    )
+    assert problems == [
+        "the expense 'Roof' needs a year",
+        "the expense 'Paint' every few years needs a number of years between occurrences, "
+        "at least 1",
+        "the expense 'Gutters' every few years needs a number of years between occurrences, "
+        "at least 1",
+        "the monthly expense 'Gas' ends before it starts",
+        "the inflation rate of the yearly expense 'Cover' must be between 0% and 50%",
+        "the yearly expense 'Fee' cannot be negative",
+        "two expense lines share an identifier",
+    ]
+
+
+def test_a_line_year_far_from_the_horizon_is_a_problem_not_a_crash() -> None:
+    # 1.5 to the power of a trillion years would overflow every calculation
+    far = ExpenseLine(-(10**12), D(1), "Gas", frequency=Frequency.MONTHLY, inflation=D("0.5"))
+    late = ExpenseLine(2031, D(1), "Gas", frequency=Frequency.EVERY, interval=1, end_year=2085)
+    assert validate_baseline(lines_only(far, late)) == [
+        "the monthly expense 'Gas' has a year outside 1980–2084",
+        "the expense 'Gas' every few years has a year outside 1980–2084",
+    ]
+    with pytest.raises(InvalidInputs):
+        run(lines_only(far), rate("100", "0"))
+
+
+def test_a_line_keeps_only_the_fields_its_frequency_uses() -> None:
+    raw = baseline_to_dict(baseline())
+    raw["expense_lines"][0].update(end_year=2032, interval=3, inflation="0.2")
+    raw["expense_lines"][2].update(nominal=True, interval=3)
+    b = baseline_from_dict(raw)
+    assert b.expense_lines[0] == baseline().expense_lines[0]
+    assert b.expense_lines[2] == baseline().expense_lines[2]
+    assert "nominal" not in baseline_to_dict(b)["expense_lines"][2]
+
+
+@pytest.mark.parametrize(
+    ("ids", "message"),
+    [(["a", "a", "b"], "identifiers must be unique – a"), (["a", "b c", "d"], "not a usable")],
+)
+def test_line_identifiers_must_be_unique_and_plain(ids: list[str], message: str) -> None:
+    raw = baseline_to_dict(baseline())
+    for line, line_id in zip(raw["expense_lines"], ids, strict=True):
+        line["id"] = line_id
+    with pytest.raises(ProjectFormatError, match=message):
+        baseline_from_dict(raw)
+
+
+def _version_1(operating: str) -> dict[str, Any]:
+    """The test baseline as a schema 1 project, before expense frequencies."""
+    raw = baseline_to_dict(baseline())
+    raw["expense_lines"] = [
+        {k: v for k, v in line.items() if k in ("year", "amount", "description", "nominal")}
+        | {"source": ""}
+        for line in raw["expense_lines"][:2]
+    ]
+    raw["operating_start"] = operating
+    raw["sources"] = {"operating_start": "Budget"}
+    scenario = scenario_to_dict(rate("120", "0.05"))
+    return {"schema_version": 1, "name": "P", "baseline": raw, "scenarios": [scenario]}
+
+
+def test_a_version_1_project_opens_with_the_same_figures() -> None:
+    project = project_from_dict(_version_1("12000"))
+    b = project.baseline
+    operating = b.expense_lines[0]
+    assert (operating.frequency, operating.year, operating.inflation) == (
+        Frequency.YEARLY,
+        None,
+        None,
+    )
+    assert (operating.amount, operating.source, b.sources) == (D(12000), "Budget", {})
+    assert [line.id for line in b.expense_lines] == ["operating", "line-1", "line-2"]
+    upgraded, expected = run(b, project.scenarios[0]), run(baseline(), project.scenarios[0])
+    assert upgraded.summary == expected.summary
+    assert [(y.operating, y.expenses, y.ending_balance) for y in upgraded.years] == [
+        (y.operating, y.expenses, y.ending_balance) for y in expected.years
+    ]
+    assert project_to_dict(project)["schema_version"] == 2
+
+
+def test_a_version_1_project_without_operating_costs_gets_no_operating_line() -> None:
+    b = project_from_dict(_version_1("0")).baseline
+    assert [line.frequency for line in b.expense_lines] == [Frequency.ONCE, Frequency.ONCE]
+    assert b.sources == {}
+
+
+def test_a_version_1_project_must_have_lines_as_objects() -> None:
+    raw = _version_1("0")
+    raw["baseline"]["expense_lines"] = ["roof"]
+    with pytest.raises(ProjectFormatError, match="list of objects"):
+        project_from_dict(raw)
+    raw["baseline"] = "a baseline"
+    with pytest.raises(ProjectFormatError, match="the baseline should be an object"):
+        project_from_dict(raw)
+
+
+def test_expense_lines_must_be_a_list() -> None:
+    raw = baseline_to_dict(baseline())
+    raw["expense_lines"] = {"roof": {}}
+    with pytest.raises(ProjectFormatError, match="expense lines should be a list"):
         baseline_from_dict(raw)

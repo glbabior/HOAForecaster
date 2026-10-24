@@ -24,7 +24,7 @@ from openpyxl.utils import get_column_letter as col_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hoa_engine.model import Baseline, DuesMode, Project, Rounding, Scenario
+from hoa_engine.model import Baseline, DuesMode, ExpenseLine, Project, Rounding, Scenario
 from hoa_engine.validate import validate_baseline
 from hoa_workbook import charts
 from hoa_workbook.layout import (
@@ -36,6 +36,7 @@ from hoa_workbook.layout import (
     ASSESS_YEAR_COL,
     CHARTS,
     COMPARE,
+    EXPENSE_COL,
     EXPENSE_COLUMNS,
     EXPENSE_TOTAL_LABEL,
     EXPENSE_YEAR_COL,
@@ -44,12 +45,14 @@ from hoa_workbook.layout import (
     FFB_LABEL,
     FIRST_EXPENSE_ROW,
     FIRST_INPUT_ROW,
+    FREQUENCY_TEXT,
     HEADER_ROW,
     INPUT_ROWS,
     INPUTS,
     METHOD,
     MODE_GROWN,
     MODE_TYPED,
+    OPERATING_TOTAL_LABEL,
     PLAN_FIRST_COL,
     PLAN_ROWS,
     ROUND_DOLLAR,
@@ -64,7 +67,7 @@ from hoa_workbook.layout import (
 )
 
 FONT = "Arial"
-BLUE, GREEN, BLACK = "0000FF", "008000", "000000"
+BLUE, GREEN, BLACK, GREY = "0000FF", "008000", "000000", "808080"
 YELLOW = PatternFill("solid", fgColor="FFFF00")
 HEADER_FILL = PatternFill("solid", fgColor="DCE6F0")
 TOTAL_FILL = PatternFill("solid", fgColor="F2F2F2")
@@ -127,8 +130,9 @@ def _comment(cell: Cell, text: str) -> None:
 
 
 ROW_NOTES = {
-    "operating": "Operating expenses in the start year, grown at the operating inflation rate on "
-    "Inputs. Any dues above operating cost go to reserves.",
+    "operating": "The monthly and yearly lines on the Expenses sheet, each grown at its own "
+    "inflation rate or the operating rate on Inputs. Any dues above operating cost go to "
+    "reserves.",
     "contribution": "Total dues less operating expenses, never below zero. A shortfall is flagged "
     "below, not taken from reserves.",
     "pf": "Year-end balance divided by the reserve study's Fully Funded Balance at the start of "
@@ -183,61 +187,138 @@ def _inputs(wb: Workbook, project: Project) -> None:
 @dataclass(frozen=True)
 class _ExpenseRefs:
     year_col: dict[int, str]
+    operating_row: int
     total_row: int
     ffb_col: dict[int, str]
     ffb_row: int
 
 
+@dataclass(frozen=True)
+class _Rates:
+    """The cells an expense line's year formula reads."""
+
+    operating_inflation: str
+    expense_inflation: str
+    base_year: str
+    start_year: str
+
+
+def _expense_inputs(ws: Worksheet, r: int, line: ExpenseLine) -> None:
+    """One line's input cells – blank where its frequency has no use for them."""
+
+    def at(key: str) -> Cell:
+        cell = ws.cell(r, EXPENSE_COL[key])
+        assert isinstance(cell, Cell)  # nothing on these sheets is merged
+        return cell
+
+    _text(at("description"), line.description)
+    _comment(at("description"), line.source)
+    _text(at("frequency"), FREQUENCY_TEXT[line.frequency.value], color=BLUE)
+    at("frequency").fill = YELLOW
+    _input(at("amount"), line.amount, CUR)
+    _input(at("year"), line.year, YEAR)
+    _input(at("end_year"), line.end_year, YEAR)
+    _input(at("interval"), line.interval, "0")
+    _input(at("inflation"), line.inflation, PCT)
+    nominal = at("nominal")
+    nominal.value = None if line.frequency.operating else "yes" if line.nominal else "no"
+    nominal.font, nominal.fill = _font(color=BLUE), YELLOW
+    nominal.alignment = Alignment(horizontal="center")
+    _text(at("id"), line.id, color=GREY, size=8)
+
+
+def _expense_formula(r: int, year: str, rates: _Rates) -> str:
+    """A line's amount in the year whose number is in cell `year` (spec 4.1, section 6)."""
+    c = {key: f"${col_letter(i)}{r}" for key, i in EXPENSE_COL.items()}
+    f, amount, first, last = c["frequency"], c["amount"], c["year"], c["end_year"]
+    t = FREQUENCY_TEXT
+    in_range = f'AND({year}>={first},OR({last}="",{year}<={last}))'
+    reserve = (
+        f'{amount}*IF({c["nominal"]}="yes",1,'
+        f"(1+{rates.expense_inflation})^({year}-{rates.base_year}))"
+    )
+    operating = (
+        f'{amount}*IF({f}="{t["monthly"]}",12,1)'
+        f'*(1+IF({c["inflation"]}="",{rates.operating_inflation},{c["inflation"]}))'
+        f'^({year}-IF({first}="",{rates.start_year},{first}))'
+    )
+    return (
+        f'=IF(OR({f}="{t["monthly"]}",{f}="{t["yearly"]}"),IF({in_range},{operating},0),'
+        f'IF({f}="{t["once"]}",IF({year}={first},{reserve},0),'
+        f"IF(AND({in_range},MOD({year}-{first},{c['interval']})=0),{reserve},0)))"
+    )
+
+
+def _frequency_choice(ws: Worksheet) -> DataValidation:
+    choice = DataValidation(type="list", formula1='"' + ",".join(FREQUENCY_TEXT.values()) + '"')
+    ws.add_data_validation(choice)
+    return choice
+
+
+def _totals(ws: Worksheet, rows: tuple[int, int], year_cols: Sequence[str], at: int) -> None:
+    """The operating total at row `at` and the reserve total two rows below, for each year
+    column – sums of the lines in `rows` by frequency."""
+    first, last = rows
+    freq = col_letter(EXPENSE_COL["frequency"])
+    span = f"${freq}${first}:${freq}${last}"
+    t = FREQUENCY_TEXT
+    for row, kinds in ((at, ("monthly", "yearly")), (at + 2, ("once", "every"))):
+        for c in year_cols:
+            cells = f"{c}{first}:{c}{last}"
+            parts = "+".join(f'SUMIF({span},"{t[k]}",{cells})' for k in kinds)
+            _formula(ws[f"{c}{row}"], f"={parts}", CUR, bold=True)
+            ws[f"{c}{row}"].fill = TOTAL_FILL
+
+
 def _expenses(wb: Workbook, b: Baseline) -> _ExpenseRefs:
     ws = wb.create_sheet(EXPENSES)
     years = list(b.years)
-    _widths(ws, [52, 14, 8, 12] + [12] * (len(years) + 1))
-    _text(ws["A1"], "Projected reserve expenses by year ($)", bold=True, size=13)
+    _widths(ws, [44, 15, 14, 11, 11, 9, 11, 13, 9] + [12] * (len(years) + 1))
+    _text(ws["A1"], "Expenses by year ($)", bold=True, size=13)
     _text(
         ws["A2"],
-        "One row per expense. Amounts are in the expense base year's dollars and grow at the "
-        "reserve expense inflation rate to the year they fall in, unless marked as already in "
-        "that year's dollars. To add an expense, copy a whole row and insert it inside the "
-        "table, so its year formulas come with it.",
+        "One row per expense. Monthly and yearly lines are operating costs paid from dues; they "
+        "grow from their first year (blank – the start year) at their own inflation rate or "
+        "the operating rate on Inputs. Once and every-few-years lines are reserve expenses in "
+        "the expense base year's dollars, grown at the reserve expense inflation rate unless "
+        "marked as already in that year's dollars. To add an expense, copy a whole row and "
+        "insert it inside the table, so its year formulas come with it, and clear its line id.",
         italic=True,
         size=9,
     )
+    ws.row_dimensions[2].height = 36
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
     year_col = {y: col_letter(EXPENSE_YEAR_COL + i) for i, y in enumerate(years)}
-    for col, heading in enumerate(EXPENSE_COLUMNS, start=1):
-        ws.cell(HEADER_ROW, col, heading)
+    for col, column in enumerate(EXPENSE_COLUMNS, start=1):
+        ws.cell(HEADER_ROW, col, column.heading).alignment = Alignment(wrap_text=True)
     for y in years:
         ws[f"{year_col[y]}{HEADER_ROW}"] = y
         ws[f"{year_col[y]}{HEADER_ROW}"].number_format = YEAR
     _header(ws, HEADER_ROW, 1, EXPENSE_YEAR_COL + len(years) - 1)
 
-    inflation, base = input_ref("expense_inflation"), input_ref("expense_base_year")
+    rates = _Rates(
+        input_ref("operating_inflation"),
+        input_ref("expense_inflation"),
+        input_ref("expense_base_year"),
+        input_ref("start_year"),
+    )
+    if b.expense_lines:  # Excel repairs a dropdown that covers no cells
+        _frequency_choice(ws).add(
+            f"{col_letter(EXPENSE_COL['frequency'])}{FIRST_EXPENSE_ROW}:"
+            f"{col_letter(EXPENSE_COL['frequency'])}{FIRST_EXPENSE_ROW + len(b.expense_lines) - 1}"
+        )
     r = FIRST_EXPENSE_ROW
     for line in b.expense_lines:  # the user's order, so a re-import is identical
-        _text(ws.cell(r, 1), line.description)
-        _comment(ws.cell(r, 1), line.source)
-        _input(ws.cell(r, 2), line.amount, CUR)
-        _input(ws.cell(r, 3), line.year, YEAR)
-        ws.cell(r, 4).value = "yes" if line.nominal else "no"
-        ws.cell(r, 4).font, ws.cell(r, 4).fill = _font(color=BLUE), YELLOW
-        ws.cell(r, 4).alignment = Alignment(horizontal="center")
+        _expense_inputs(ws, r, line)
         for y in years:
             c = year_col[y]
-            _formula(
-                ws[f"{c}{r}"],
-                f'=IF({c}${HEADER_ROW}=$C{r},$B{r}*IF($D{r}="yes",1,'
-                f"(1+{inflation})^({c}${HEADER_ROW}-{base})),0)",
-                CUR,
-            )
+            _formula(ws[f"{c}{r}"], _expense_formula(r, f"{c}${HEADER_ROW}", rates), CUR)
         r += 1
     last_line = max(r - 1, FIRST_EXPENSE_ROW)  # an empty table still sums one blank row
-    total_row = last_line + 2
+    operating_row, total_row = last_line + 2, last_line + 4
+    _text(ws.cell(operating_row, 1), OPERATING_TOTAL_LABEL, bold=True)
     _text(ws.cell(total_row, 1), EXPENSE_TOTAL_LABEL, bold=True)
-    for y in years:
-        c = year_col[y]
-        _formula(
-            ws[f"{c}{total_row}"], f"=SUM({c}{FIRST_EXPENSE_ROW}:{c}{last_line})", CUR, bold=True
-        )
-        ws[f"{c}{total_row}"].fill = TOTAL_FILL
+    _totals(ws, (FIRST_EXPENSE_ROW, last_line), list(year_col.values()), operating_row)
 
     ffb_head, ffb_row = total_row + 2, total_row + 3
     _text(ws.cell(ffb_head, 1), FFB_HEADER_LABEL, bold=True)
@@ -253,7 +334,7 @@ def _expenses(wb: Workbook, b: Baseline) -> _ExpenseRefs:
         _input(ws[f"{c}{ffb_row}"], b.ffb[y], CUR)
     _header(ws, ffb_head, 1, EXPENSE_YEAR_COL + len(ffb_col) - 1)
     ws.freeze_panes = ws.cell(FIRST_EXPENSE_ROW, EXPENSE_YEAR_COL)
-    return _ExpenseRefs(year_col, total_row, ffb_col, ffb_row)
+    return _ExpenseRefs(year_col, operating_row, total_row, ffb_col, ffb_row)
 
 
 # ---------------------------------------------------------------- Plan sheets
@@ -286,11 +367,8 @@ def _plan(wb: Workbook, b: Baseline, plan: _Plan, ex: _ExpenseRefs) -> None:
         k: input_ref(k)
         for k in (
             "starting_balance",
-            "start_year",
             "units",
             "current_dues",
-            "operating_start",
-            "operating_inflation",
             "interest_rate",
             "cushion",
             "target",
@@ -358,12 +436,7 @@ def _plan(wb: Workbook, b: Baseline, plan: _Plan, ex: _ExpenseRefs) -> None:
         prior_dues = ref["current_dues"] if i == 0 else P["dues"]
         formulas: dict[str, tuple[str, str, str]] = {
             "total_dues": (f"={D['dues']}*{ref['units']}*12", CUR, BLACK),
-            "operating": (
-                f"={ref['operating_start']}*(1+{ref['operating_inflation']})"
-                f"^({c}${HEADER_ROW}-{ref['start_year']})",
-                CUR,
-                BLACK,
-            ),
+            "operating": (f"={EXPENSES}!{ex.year_col[y]}${ex.operating_row}", CUR, GREEN),
             "contribution": (f"=MAX(0,{D['total_dues']}-{D['operating']})", CUR, BLACK),
             "sa_total": (f"={D['sa']}*{ref['units']}", CUR, BLACK),
             "owners": (f"={D['total_dues']}+{D['sa_total']}", CUR, BLACK),
@@ -622,17 +695,19 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
         ("", False, 10),
         ("How it works", True, 11),
         (
-            "1. Inputs – starting balance, units, current dues, operating cost and its inflation, "
-            "reserve expense inflation, interest, the minimum cushion, the percent-funded target "
-            "and the owner-vote limits.",
+            "1. Inputs – starting balance, units, current dues, operating cost inflation, reserve "
+            "expense inflation, interest, the minimum cushion, the percent-funded target and the "
+            "owner-vote limits.",
             False,
             10,
         ),
         (
-            "2. Expenses – one row per expected reserve expense with its amount and year. Amounts "
-            "grow from the expense base year at the reserve expense inflation rate unless marked "
-            "as already in that year's dollars. Below them is the reserve study's Fully Funded "
-            "Balance for each year.",
+            "2. Expenses – one row per expense and how often it falls. Monthly and yearly lines "
+            "are operating costs paid from dues, each grown at its own inflation rate or the "
+            "operating rate. Once and every-few-years lines are reserve expenses, grown from the "
+            "expense base year at the reserve expense inflation rate unless marked as already in "
+            "that year's dollars. Below them is the reserve study's Fully Funded Balance for each "
+            "year.",
             False,
             10,
         ),

@@ -61,6 +61,9 @@ cd web && npm run build                     # after changing web/src – a runni
 - API results carry money and rates as exact decimal strings; the front end converts to numbers only for display and charts.
 - "Which scenarios will change" (section 7.1) is `POST /api/projects/{id}/baseline-impact` – it runs every scenario against the saved and the edited baseline and compares full results, before anything is saved.
 - The Charts sheet's shared dollar scale is passed in by the caller from the engine's results, snapped to a grid whose lines coincide with 0–100% in 20% steps.
+- Expense lines (spec 4.1) – one list, each line with a `frequency` (`monthly`, `yearly`, `every`, `once`) and an `id` (`[A-Za-z0-9_-]{1,40}`, unique in the baseline). New lines get the first free `line-N`, made by whoever adds them (front end, workbook reader). Reading a line keeps only the fields its frequency uses, so a stale interval or rate never survives a save. A monthly or yearly line's amount is in the dollars of its first year (blank – the start year).
+- Schema 2 – a schema 1 file is upgraded as it is read (`upgrade_v1_baseline`): its lines become once lines `line-1…`, and a non-zero operating figure becomes a yearly line `operating` (first in the list, its source note moved onto it), with the same figures. Saving writes schema 2.
+- Workbook expenses – the Expenses sheet has the line's inputs in A–I (the id in grey in I) and a year formula per line covering all four frequencies, then an operating total and a reserve total; the Plan sheets' operating and reserve rows pull those totals. A row added in Excel with its id cleared gets a new id on import; one copied with its id kept is refused, since which row scenarios mean cannot be told. Exports from before schema 2 cannot be re-imported (their Inputs rows differ).
 
 ### Front-end choices
 
@@ -77,6 +80,7 @@ cd web && npm run build                     # after changing web/src – a runni
 - `shortfall_years` (count of operating-shortfall years) is an extra summary measure alongside the section 6 list, feeding the Compare view.
 - `dues_y9`, `balance_y9` and `pf_y9` are `None` when the horizon is shorter than 9 years.
 - Expense lines and explicit dues outside the horizon are kept and ignored, not errors – shortening the horizon must never discard data. Pinned dues and assessments outside the horizon are errors, since they belong to a scenario's intent for those years.
+- An expense line's year or last year must fall within 50 years of the horizon (start − 50 to end + 50) – further out is a typo, and growth over that span would overflow. Within that window, lines outside the horizon are kept and ignored as above.
 - The expense base year must fall between 50 years before the start year and the end year; a line dated before the base year is deflated by the same formula.
 - The percent-funded target must be above 0% and at most 100%.
 - A governance limit that is missing or `null` in a project file means no limit, and is written back as `null`. The spec's 20% / 5% defaults are what a new project starts with.

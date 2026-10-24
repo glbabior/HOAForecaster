@@ -42,11 +42,21 @@ const baseline: Baseline = {
   start_year: 2027,
   end_year: 2031,
   starting_balance: "100000",
-  expense_lines: [],
+  expense_lines: [
+    {
+      id: "operating",
+      frequency: "yearly",
+      year: null,
+      end_year: null,
+      inflation: null,
+      amount: "50000",
+      description: "Operating",
+      source: "",
+    },
+  ],
   expense_inflation: "0.03",
   expense_base_year: 2026,
   ffb: Object.fromEntries(years(2027, 2032).map((y) => [String(y), String(y * 100)])),
-  operating_start: "50000",
   operating_inflation: "0.03",
   interest_rate: "0.02",
   units: 10,
@@ -79,7 +89,7 @@ function stored(project: Project, revision = 1): StoredProject {
 }
 
 const project: Project = {
-  schema_version: 1,
+  schema_version: 2,
   name: "Demo",
   notes: "",
   baseline,
@@ -214,6 +224,40 @@ describe("the baseline editor", () => {
     expect(
       (screen.getByRole("button", { name: "Save baseline" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("edits an expense's frequency, own rate and years, and saves only what it uses", async () => {
+    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    const how = await screen.findByRole("combobox", { name: "How often expense 1 falls" });
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Own inflation rate of expense 1" }),
+      "6",
+    );
+    await userEvent.type(screen.getByRole("textbox", { name: "Last year of expense 1" }), "2030");
+    await userEvent.selectOptions(how, "monthly");
+    expect(screen.getByRole("textbox", { name: "Amount of expense 1 a month" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Add expense" }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "How often expense 2 falls" }),
+      "every",
+    );
+    expect(screen.queryByRole("textbox", { name: "Own inflation rate of expense 2" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).baseline.expense_lines;
+    expect(saved[0]).toMatchObject({ frequency: "monthly", inflation: "0.06", end_year: 2030 });
+    expect(saved[1]).toEqual({
+      id: "line-1",
+      frequency: "every",
+      year: 2027,
+      interval: 5,
+      end_year: null,
+      amount: "0",
+      description: "",
+      nominal: false,
+      source: "",
+    });
   });
 
   it("confirms against the baseline being saved and then leaves for the project page", async () => {
