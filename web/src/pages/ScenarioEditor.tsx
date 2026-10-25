@@ -245,7 +245,11 @@ function ScenarioForm({
   const cannotSave = !name || duplicate || invalid.length > 0;
   // an adopted plan is shown on the baseline it was frozen with, never today's
   const shownBaseline = original.adoption?.baseline ?? stored.project.baseline;
-  const changes = changeCount(shownBaseline, form.changes);
+  const changes = changeCount(
+    shownBaseline,
+    form.changes,
+    original.adoption ? stored.project.baseline : undefined,
+  );
   const adoption = original.adoption ?? null; // an adopted plan is read-only (spec 5.2)
   const current = currentAdoption(stored.project.scenarios);
   const isCurrent = current?.name === original.name;
@@ -720,6 +724,7 @@ function ScenarioForm({
           <BaselineChanges
             baseline={shownBaseline}
             frozen={adoption !== null}
+            today={stored.project.baseline}
             changes={form.changes}
             onChange={setChanges}
           />

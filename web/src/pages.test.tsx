@@ -397,6 +397,40 @@ describe("adopted plans", () => {
     expect(screen.queryByRole("button", { name: /Restore/ })).toBeNull();
   });
 
+  it("names the lines an adopted plan left out, though its frozen baseline lacks them", async () => {
+    const frozenWithout = { ...baseline, expense_lines: [] };
+    const leaving = {
+      ...adopted,
+      changes: { ...scenario.changes, expense_lines: { operating: null } },
+      adoption: { ...adoption, baseline: frozenWithout },
+    };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [leaving] }));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    expect(await screen.findByText(/left out when the plan was adopted/)).toBeTruthy();
+    expect(screen.getByText("Operating")).toBeTruthy(); // named from today's baseline
+    expect(screen.getByRole("group", { name: /Changes to the baseline \(1\)/ })).toBeTruthy();
+  });
+
+  it("shows no leave-out of a line today's baseline does not have", async () => {
+    const leaving = {
+      ...adopted,
+      changes: { ...scenario.changes, expense_lines: { gone: null } },
+      adoption: { ...adoption, baseline: { ...baseline, expense_lines: [] } },
+    };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [leaving] }));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    expect(await screen.findByRole("group", { name: "Changes to the baseline" })).toBeTruthy();
+    expect(screen.queryByText(/left out when the plan was adopted/)).toBeNull();
+  });
+
+  it("shows and counts no stale leave-out on an ordinary scenario", async () => {
+    const stale = { ...scenario, changes: { ...scenario.changes, expense_lines: { gone: null } } };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [stale] }));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    expect(await screen.findByRole("group", { name: "Changes to the baseline" })).toBeTruthy();
+    expect(screen.queryByText(/Left out/)).toBeNull();
+  });
+
   it("offers no un-adopt on an earlier adopted plan", async () => {
     const later = { ...scenario, name: "Plan B", adoption: { ...adoption, sequence: 2 } };
     mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [adopted, later] }));

@@ -54,11 +54,16 @@ const without = <T,>(record: Record<string, T>, key: string): Record<string, T> 
 
 /** How many of its own values the editor shows the scenario setting – for the section's
  * heading. A leave-out of a line the baseline no longer has, or a Fully Funded Balance outside
- * the scenario's years, is kept but not shown, so not counted. */
-export function changeCount(baseline: Baseline, changes: Changes): number {
+ * the scenario's years, is kept but not shown, so not counted. An adopted plan's frozen baseline
+ * no longer has the lines it left out, so for it `today` is passed – a leave-out of a line today's
+ * baseline still has is shown, and counted. */
+export function changeCount(baseline: Baseline, changes: Changes, today?: Baseline): number {
   const known = new Set(baseline.expense_lines.map((l) => l.id));
+  const named = new Set(today?.expense_lines.map((l) => l.id));
   const own = applyChanges(baseline, changes);
-  const lines = Object.entries(changes.expense_lines).filter(([id, l]) => l || known.has(id));
+  const lines = Object.entries(changes.expense_lines).filter(
+    ([id, l]) => l || known.has(id) || named.has(id),
+  );
   const ffb = Object.keys(changes.ffb).filter(
     (y) => Number(y) >= own.start_year && Number(y) <= own.end_year + 1,
   );
@@ -109,11 +114,14 @@ export function BaselineChanges({
   changes,
   onChange,
   frozen = false,
+  today,
 }: {
   baseline: Baseline;
   changes: Changes;
   onChange: (changes: Changes) => void;
   frozen?: boolean;
+  /** today's baseline – to name the lines an adopted plan left out */
+  today?: Baseline;
 }) {
   const own = applyChanges(baseline, changes);
   const set = (part: Partial<Changes>) => onChange({ ...changes, ...part });
@@ -206,7 +214,14 @@ export function BaselineChanges({
           })}
         </tbody>
       </table>
-      <LineChanges baseline={baseline} own={own} changes={changes} onChange={onChange} />
+      <LineChanges
+        baseline={baseline}
+        own={own}
+        changes={changes}
+        onChange={onChange}
+        frozen={frozen}
+        today={today}
+      />
       <FfbChanges baseline={baseline} own={own} changes={changes} onChange={onChange} />
     </>
   );
@@ -230,11 +245,15 @@ function LineChanges({
   own,
   changes,
   onChange,
+  frozen,
+  today,
 }: {
   baseline: Baseline;
   own: Baseline;
   changes: Changes;
   onChange: (changes: Changes) => void;
+  frozen: boolean;
+  today?: Baseline;
 }) {
   const lines = changes.expense_lines;
   const setLine = (id: string, line: ExpenseLine | null) => {
@@ -251,6 +270,11 @@ function LineChanges({
   const restore = (id: string) => onChange({ ...changes, expense_lines: without(lines, id) });
   const known = new Set(baseline.expense_lines.map((l) => l.id));
   const ownLines = own.expense_lines.filter((l) => !known.has(l.id));
+  // an adopted plan's frozen baseline no longer has the lines it left out – show those today's
+  // baseline still has, as it describes them now
+  const leftOut = frozen
+    ? (today?.expense_lines ?? []).filter((l) => lines[l.id] === null && !known.has(l.id))
+    : [];
 
   return (
     <div className="table-scroll">
@@ -348,6 +372,15 @@ function LineChanges({
               />
             );
           })}
+          {leftOut.map((line) => (
+            <tr key={line.id} className="left-out">
+              <td>Left out</td>
+              <td colSpan={10}>
+                <s>{line.description || "(no description)"}</s> – {describe(line)}, as today's
+                baseline has it – left out when the plan was adopted
+              </td>
+            </tr>
+          ))}
           {ownLines.map((line, j) => (
             <ExpenseRow
               key={line.id}
