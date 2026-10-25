@@ -13,6 +13,7 @@ import {
   plausibleHorizon,
   reshapeHorizon,
   reshapeScenario,
+  startFrom,
 } from "./template";
 import type { Baseline, Scenario } from "./types";
 
@@ -221,6 +222,65 @@ describe("a scenario's changes to the baseline", () => {
     expect(horizonOf(baseline, s)).toEqual([2027, 2028, 2029, 2030, 2031]);
     const typing = { ...s, changes: { ...noChanges(), values: { end_year: 2 } } };
     expect(horizonOf(baseline, typing)).toEqual([]);
+  });
+});
+
+describe("starting a scenario from another", () => {
+  const baseline = {
+    start_year: 2028,
+    end_year: 2032,
+    ffb: {},
+    expense_lines: [],
+  } as unknown as Baseline;
+  const typed: Scenario = {
+    name: "Adopted",
+    description: "As voted",
+    dues: { mode: "explicit", explicit: { "2027": "500", "2028": "510" } },
+    assessments: [{ year: 2029, amount: "100", note: "" }],
+    rounding: "none",
+    changes: { values: { interest_rate: "0.04" }, sources: {}, expense_lines: {}, ffb: {} },
+    adoption: { date: "2026-11-03", note: "", sequence: 1, baseline },
+  };
+
+  it("copies its inputs and changes but not its adoption, on today's years", () => {
+    const seeded = startFrom(typed, "New scenario", baseline);
+    expect(seeded.adoption).toBeNull();
+    expect([seeded.name, seeded.description, seeded.rounding]).toEqual([
+      "New scenario",
+      "As voted",
+      "none",
+    ]);
+    expect(seeded.changes.values).toEqual({ interest_rate: "0.04" });
+    expect(seeded.dues).toEqual({
+      mode: "explicit",
+      explicit: {
+        "2027": "500",
+        "2028": "510",
+        "2029": "510",
+        "2030": "510",
+        "2031": "510",
+        "2032": "510",
+      },
+    });
+    seeded.assessments.push({ year: 2030, amount: "1", note: "" });
+    expect(typed.assessments).toHaveLength(1); // a copy, not the source's own lists
+  });
+
+  it("keeps assessments and pinned years outside today's years, for the editor to list", () => {
+    const early = {
+      ...typed,
+      dues: {
+        mode: "rate" as const,
+        first_value: "500",
+        annual_increase: "0.03",
+        overrides: { "2027": "480" },
+      },
+      assessments: [{ year: 2027, amount: "100", note: "" }],
+    };
+    const seeded = startFrom(early, "New scenario", baseline);
+    // nothing is dropped silently – the server names each one as a problem to fix
+    expect(seeded.assessments.map((a) => a.year)).toEqual([2027]);
+    expect(seeded.dues).toMatchObject({ overrides: { "2027": "480" } });
   });
 });
 

@@ -21,6 +21,23 @@ export function blankScenario(name: string, baseline: Baseline): Scenario {
   };
 }
 
+/** A new scenario started from a saved one (spec 7.2) – its dues, assessments, rounding,
+ * description and changes to the baseline, but not its adoption: it runs on today's baseline,
+ * with typed dues stretched to cover the years it now runs over. */
+export function startFrom(source: Scenario, name: string, baseline: Baseline): Scenario {
+  const seeded: Scenario = {
+    name,
+    description: source.description,
+    dues: structuredClone(source.dues),
+    assessments: structuredClone(source.assessments),
+    rounding: source.rounding,
+    changes: structuredClone(source.changes),
+    adoption: null,
+  };
+  const { start_year: start, end_year: end } = applyChanges(baseline, seeded.changes);
+  return plausibleHorizon(start, end) ? reshapeScenario(seeded, start, end) : seeded;
+}
+
 /** The baseline as a scenario sees it (spec 5.1) – for showing it; the server works out the
  * figures. Mirrors `apply_changes` in src/hoa_engine/model.py. */
 export function applyChanges(baseline: Baseline, changes: Changes): Baseline {

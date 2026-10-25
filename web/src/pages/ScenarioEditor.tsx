@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
 import { ApiError, api } from "../api";
@@ -37,6 +37,7 @@ import {
   noChanges,
   plausibleHorizon,
   reshapeScenario,
+  startFrom,
 } from "../template";
 import type { Assessment, Changes, Draft, Scenario, ScenarioResult, StoredProject } from "../types";
 
@@ -60,29 +61,35 @@ function uniqueName(base: string, taken: string[]): string {
 
 export function ScenarioEditor() {
   const { name: routeName } = useParams();
+  const [query] = useSearchParams();
+  const from = query.get("from");
   const { id, stored, error, setStored } = useProject();
   if (!stored) return <Loading error={error} />;
   const isNew = routeName === undefined;
   const existing = stored.project.scenarios.find((s) => s.name === routeName);
   if (!isNew && !existing) return <p>There is no scenario called “{routeName}” in this project.</p>;
+  // a new scenario starts blank, or from the saved scenario named in ?from= (spec 7.2)
+  const source = isNew ? stored.project.scenarios.find((s) => s.name === from) : undefined;
+  const fresh = uniqueName(
+    "New scenario",
+    stored.project.scenarios.map((s) => s.name),
+  );
   const original =
     existing ??
-    blankScenario(
-      uniqueName(
-        "New scenario",
-        stored.project.scenarios.map((s) => s.name),
-      ),
-      stored.project.baseline,
-    );
-  // a fresh form for every saved revision and scenario – no copying state about in effects
+    (source
+      ? startFrom(source, fresh, stored.project.baseline)
+      : blankScenario(fresh, stored.project.baseline));
+  // a fresh form for every saved revision, scenario and starting point – no copying state
+  // about in effects
   return (
     <ScenarioForm
-      key={`${stored.revision}:${routeName ?? ""}`}
+      key={`${stored.revision}:${routeName ?? ""}:${source?.name ?? ""}`}
       id={id}
       stored={stored}
       setStored={setStored}
       routeName={routeName}
       original={original}
+      startedFrom={source?.name ?? null}
     />
   );
 }
@@ -93,12 +100,14 @@ function ScenarioForm({
   setStored,
   routeName,
   original,
+  startedFrom,
 }: {
   id: string;
   stored: StoredProject;
   setStored: (s: StoredProject) => void;
   routeName: string | undefined;
   original: Scenario;
+  startedFrom: string | null;
 }) {
   const navigate = useNavigate();
   const isNew = routeName === undefined;
@@ -112,6 +121,7 @@ function ScenarioForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adopting, setAdopting] = useState<{ date: string; note: string } | null>(null);
   const [confirmUnadopt, setConfirmUnadopt] = useState(false);
+  const [replacing, setReplacing] = useState<string | null>(null); // a starting point to go to
   const { invalid, Provider } = useInvalidFields();
   const assessmentRows = useRowIds(form.assessments.length);
 
@@ -237,7 +247,19 @@ function ScenarioForm({
   const shownBaseline = original.adoption?.baseline ?? stored.project.baseline;
   const changes = changeCount(shownBaseline, form.changes);
   const adoption = original.adoption ?? null; // an adopted plan is read-only (spec 5.2)
-  const isCurrent = currentAdoption(stored.project.scenarios)?.name === original.name;
+  const current = currentAdoption(stored.project.scenarios);
+  const isCurrent = current?.name === original.name;
+  // the adopted plan first, then the rest in their order
+  const startingPoints = [...stored.project.scenarios].sort(
+    (a, b) => Number(b === current) - Number(a === current),
+  );
+
+  /** Start from another scenario – after asking, when there are edits to lose. */
+  function chooseStart(name: string) {
+    const to = `/projects/${id}/scenarios/new` + (name ? `?from=${encodeURIComponent(name)}` : "");
+    if (dirty) setReplacing(to);
+    else navigate(to, { replace: true });
+  }
 
   async function adopt() {
     setAdopting(null);
@@ -322,6 +344,33 @@ function ScenarioForm({
             if (!cannotSave && !adoption) void save(false);
           }}
         >
+          {isNew && (
+            <Field
+              label="Start from"
+              hint="Copies its dues, assessments, rounding, description and changes to the baseline – it then runs on today's baseline. Choosing replaces what is typed below."
+            >
+              {(fid, d) => (
+                <select
+                  id={fid}
+                  aria-describedby={d}
+                  value={startedFrom ?? ""}
+                  onChange={(e) => chooseStart(e.target.value)}
+                >
+                  <option value="">A blank scenario</option>
+                  {startingPoints.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.name}
+                      {s.adoption
+                        ? s === current
+                          ? " (the adopted plan)"
+                          : " (an earlier adopted plan)"
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
           <fieldset className="plain" disabled={adoption !== null}>
             <Field label="Name" error={duplicate ? "Another scenario already has this name" : null}>
               {(fid, d) => (
@@ -581,19 +630,6 @@ function ScenarioForm({
                 Add assessment
               </button>
             </fieldset>
-
-            <fieldset>
-              <legend>
-                Changes to the baseline
-                {changes > 0 ? ` (${changes})` : ""}
-              </legend>
-              <BaselineChanges
-                baseline={shownBaseline}
-                frozen={adoption !== null}
-                changes={form.changes}
-                onChange={setChanges}
-              />
-            </fieldset>
           </fieldset>
 
           <div className="sticky-actions">
@@ -674,6 +710,22 @@ function ScenarioForm({
         </section>
       </div>
 
+      {/* full width below the results – its tables are wider than the inputs column */}
+      <section className="panel changes-panel">
+        <fieldset disabled={adoption !== null}>
+          <legend>
+            Changes to the baseline
+            {changes > 0 ? ` (${changes})` : ""}
+          </legend>
+          <BaselineChanges
+            baseline={shownBaseline}
+            frozen={adoption !== null}
+            changes={form.changes}
+            onChange={setChanges}
+          />
+        </fieldset>
+      </section>
+
       <Confirm
         open={confirmDelete}
         title={`Delete ${original.name}?`}
@@ -713,6 +765,18 @@ function ScenarioForm({
             onChange={(e) => adopting && setAdopting({ ...adopting, note: e.target.value })}
           />
         </label>
+      </Confirm>
+      <Confirm
+        open={replacing !== null}
+        title="Replace what you typed?"
+        confirmLabel="Replace"
+        onCancel={() => setReplacing(null)}
+        onConfirm={() => {
+          if (replacing) navigate(replacing, { replace: true });
+          setReplacing(null);
+        }}
+      >
+        <p>The new scenario starts again from your choice, and what you typed is lost.</p>
       </Confirm>
       <Confirm
         open={confirmUnadopt}

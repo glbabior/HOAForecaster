@@ -75,6 +75,7 @@ cd web && npm run build                     # after changing web/src – a runni
 - A field holding text that is not a usable number or year is never saved as its last good value – the form lists it and refuses to save.
 - Changing the horizon reshapes the tables only once it is 5–30 years, and never discards an entry; typed dues are stretched to a new horizon with the nearest figure, and the baseline confirmation is judged on the scenarios exactly as they will be saved.
 - "Meets target?" shows yes in green and no plainly – not reaching the target is normal for years and is not an alarm.
+- Starting a scenario from another (spec 7.2) is the new-scenario screen with `?from=<name>` – its "Start from" choice changes the address, so each starting point gets a fresh form (choosing replaces what is typed). `startFrom` copies dues, assessments, rounding, description and changes, never the adoption, and stretches typed dues to the years it now runs over on today's baseline. Assessments and pinned years that fall outside the new scenario's years are kept, not dropped – the editor lists each as a problem to fix, so nothing disappears silently. Choosing a starting point with unsaved edits asks first. The "Changes to the baseline" section sits full width below the results, since its tables are wider than the inputs column.
 
 ### Engine choices the spec leaves open
 

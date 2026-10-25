@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -284,6 +284,50 @@ describe("the scenario editor", () => {
     await userEvent.clear(end);
     await userEvent.type(end, "2033");
     expect(screen.getByRole("textbox", { name: "Dues in 2033" })).toBeTruthy();
+  });
+});
+
+describe("starting a new scenario from another", () => {
+  it("copies the chosen scenario's inputs and saves a new, unadopted scenario", async () => {
+    const own: Scenario = {
+      ...scenario,
+      description: "Own rate",
+      changes: { ...scenario.changes, values: { interest_rate: "0.04" } },
+      adoption: { date: "2026-11-03", note: "", sequence: 1, baseline },
+    };
+    mocked.getProject.mockImplementation(async () => stored({ ...project, scenarios: [own] }));
+    start("/projects/abcdefabcdef/scenarios/new", <ScenarioEditor />);
+    const choice = await screen.findByRole("combobox", { name: "Start from" });
+    expect(screen.getByRole("option", { name: "Plan A (the adopted plan)" })).toBeTruthy();
+    await userEvent.selectOptions(choice, "Plan A");
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("textbox", { name: "Description" }) as HTMLTextAreaElement).value,
+      ).toBe("Own rate"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).scenarios[1];
+    expect(saved?.name).toBe("New scenario");
+    expect(saved?.adoption).toBeNull();
+    expect(saved?.changes.values).toEqual({ interest_rate: "0.04" });
+  });
+
+  it("asks before a new starting point replaces what was typed", async () => {
+    start("/projects/abcdefabcdef/scenarios/new", <ScenarioEditor />);
+    await userEvent.type(await screen.findByRole("textbox", { name: "Description" }), "mine");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Start from" }), "Plan A");
+    const dialog = screen.getByRole("dialog", { name: "Replace what you typed?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(
+      (screen.getByRole("textbox", { name: "Description" }) as HTMLTextAreaElement).value,
+    ).toBe("mine");
+  });
+
+  it("starts from the scenario named in the address", async () => {
+    start("/projects/abcdefabcdef/scenarios/new?from=Plan%20A", <ScenarioEditor />);
+    const choice = await screen.findByRole("combobox", { name: "Start from" });
+    expect((choice as HTMLSelectElement).value).toBe("Plan A");
   });
 });
 
