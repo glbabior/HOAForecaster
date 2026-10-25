@@ -102,14 +102,18 @@ function SourceNote({
   );
 }
 
+/** `frozen` – an adopted plan, shown on the baseline it was frozen with: the figures it ran on,
+ * with its own changes marked. */
 export function BaselineChanges({
   baseline,
   changes,
   onChange,
+  frozen = false,
 }: {
   baseline: Baseline;
   changes: Changes;
   onChange: (changes: Changes) => void;
+  frozen?: boolean;
 }) {
   const own = applyChanges(baseline, changes);
   const set = (part: Partial<Changes>) => onChange({ ...changes, ...part });
@@ -125,15 +129,16 @@ export function BaselineChanges({
   return (
     <>
       <p className="hint">
-        Everything here follows the baseline until this scenario sets its own value – a later edit
-        to the baseline then reaches this scenario everywhere except those values.
+        {frozen
+          ? "As adopted – the baseline this plan was frozen with. Highlighted values are the plan's own changes; later baseline edits do not reach it."
+          : "Everything here follows the baseline until this scenario sets its own value – a later edit to the baseline then reaches this scenario everywhere except those values."}
       </p>
       <table className="edit-table changes">
         <caption>Assumptions</caption>
         <thead>
           <tr>
             <th scope="col">Assumption</th>
-            <th scope="col">Baseline</th>
+            <th scope="col">{frozen ? "As adopted" : "Baseline"}</th>
             <th scope="col">This scenario</th>
             <th scope="col">Source</th>
           </tr>

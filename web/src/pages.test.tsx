@@ -20,6 +20,8 @@ vi.mock("./api", async (importOriginal) => {
       discardDraft: vi.fn(),
       run: vi.fn(),
       baselineImpact: vi.fn(),
+      adopt: vi.fn(),
+      unadopt: vi.fn(),
     },
   };
 });
@@ -33,6 +35,8 @@ const mocked = api as unknown as {
   discardDraft: Mock;
   run: Mock;
   baselineImpact: Mock;
+  adopt: Mock;
+  unadopt: Mock;
 };
 
 const years = (from: number, to: number) =>
@@ -280,6 +284,81 @@ describe("the scenario editor", () => {
     await userEvent.clear(end);
     await userEvent.type(end, "2033");
     expect(screen.getByRole("textbox", { name: "Dues in 2033" })).toBeTruthy();
+  });
+});
+
+describe("adopted plans", () => {
+  const adoption = { date: "2026-11-03", note: "Board vote", sequence: 1, baseline };
+  const adopted: Scenario = { ...scenario, adoption };
+
+  it("adopts a saved scenario with a date and a note", async () => {
+    mocked.adopt.mockImplementation(async () => stored({ ...project, scenarios: [adopted] }, 2));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    await userEvent.click(await screen.findByRole("button", { name: "Adopt…" }));
+    const note = screen.getByRole("textbox", { name: /Note/ });
+    await userEvent.type(note, "Board vote");
+    await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
+    await waitFor(() => expect(mocked.adopt).toHaveBeenCalled());
+    const [, name, date, typed, revision] = mocked.adopt.mock.calls[0] ?? [];
+    expect([name, typed, revision]).toEqual(["Plan A", "Board vote", 1]);
+    expect(date).toMatch(/^\d{4}-\d\d-\d\d$/);
+    expect(await screen.findByText(/The adopted plan/)).toBeTruthy();
+  });
+
+  it("asks for a save before adopting edited inputs", async () => {
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    await userEvent.type(await screen.findByRole("textbox", { name: "Description" }), "x");
+    expect((screen.getByRole("button", { name: "Adopt…" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("opens an adopted plan read-only, with a way to revise it and to un-adopt it", async () => {
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [adopted] }));
+    mocked.unadopt.mockResolvedValue(stored(project, 2));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    expect(await screen.findByText(/adopted November 3, 2026\. Board vote/)).toBeTruthy();
+    // disabled through its fieldset, which the element's own property does not show
+    expect(screen.getByRole("textbox", { name: "Name" }).matches(":disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Start a new scenario from it" }).getAttribute("href"),
+    ).toBe("/projects/abcdefabcdef/scenarios/new?from=Plan%20A");
+    await userEvent.click(screen.getByRole("button", { name: "Un-adopt…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Un-adopt" }));
+    await waitFor(() => expect(mocked.unadopt).toHaveBeenCalledWith("abcdefabcdef", 1));
+  });
+
+  it("shows an adopted plan on its frozen baseline and offers no draft", async () => {
+    const frozen = {
+      ...adopted,
+      adoption: { ...adoption, baseline: { ...baseline, starting_balance: "50000" } },
+    };
+    const draft = {
+      saved: "2026-11-01T10:00:00+00:00",
+      base_revision: 1,
+      edits: {
+        kind: "scenario",
+        original: "Plan A",
+        scenario: { ...scenario, description: "old" },
+      },
+    };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [frozen] }));
+    mocked.getDrafts.mockResolvedValue({ drafts: { "scenario:Plan A": draft } });
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    const row = await screen.findByRole("row", { name: /Starting reserve balance/ });
+    expect(row.textContent).toContain("$50,000"); // not today's $100,000
+    expect(screen.getByRole("columnheader", { name: "As adopted" })).toBeTruthy();
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(screen.queryByRole("button", { name: /Restore/ })).toBeNull();
+  });
+
+  it("offers no un-adopt on an earlier adopted plan", async () => {
+    const later = { ...scenario, name: "Plan B", adoption: { ...adoption, sequence: 2 } };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [adopted, later] }));
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    expect(await screen.findByText(/An earlier adopted plan/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Un-adopt…" })).toBeNull();
   });
 });
 

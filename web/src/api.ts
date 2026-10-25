@@ -97,6 +97,18 @@ export const api = {
       `${projectUrl(id)}/baseline-impact`,
       { method: "POST", body: json({ baseline, scenarios }), signal },
     ),
+  /** Adopt a saved scenario as the board's plan (spec 5.2). */
+  adopt: (id: string, name: string, date: string, note: string, baseRevision: number) =>
+    call<StoredProject>(`${projectUrl(id)}/adopt`, {
+      method: "POST",
+      body: json({ name, date, note, base_revision: baseRevision }),
+    }),
+  /** Un-adopt the current adopted plan. */
+  unadopt: (id: string, baseRevision: number) =>
+    call<StoredProject>(`${projectUrl(id)}/unadopt`, {
+      method: "POST",
+      body: json({ base_revision: baseRevision }),
+    }),
   run: (baseline: Baseline, scenario: Scenario, signal?: AbortSignal) =>
     call<ScenarioResult>("/api/run", {
       method: "POST",

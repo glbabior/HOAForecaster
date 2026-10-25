@@ -221,11 +221,13 @@ def test_baseline_impact_names_the_scenarios_that_would_change(
     moved = client.post(
         f"/api/projects/{demo_id}/baseline-impact", json={"baseline": more_units}
     ).json()
-    assert sorted(moved["changed"]) == sorted(s.name for s in DEMO.scenarios)
+    # an adopted plan keeps its frozen baseline, so it never changes
+    working = [s.name for s in DEMO.scenarios if s.adoption is None]
+    assert sorted(moved["changed"]) == sorted(working)
 
     shorter = {**DEMO_RAW["baseline"], "end_year": DEMO.baseline.start_year + 4}
     cut = client.post(f"/api/projects/{demo_id}/baseline-impact", json={"baseline": shorter}).json()
-    assert set(cut["changed"]) | set(cut["invalid"]) == {s.name for s in DEMO.scenarios}
+    assert set(cut["changed"]) | set(cut["invalid"]) == set(working)
 
 
 def test_baseline_impact_refuses_a_broken_baseline(client: TestClient, demo_id: str) -> None:
@@ -260,7 +262,7 @@ def test_baseline_impact_counts_a_scenario_that_now_runs_as_changed(client: Test
     fixed = client.post(
         f"/api/projects/{created['id']}/baseline-impact", json={"baseline": DEMO_RAW["baseline"]}
     ).json()
-    assert len(fixed["changed"]) == len(DEMO.scenarios)
+    assert len(fixed["changed"]) == len([s for s in DEMO.scenarios if s.adoption is None])
 
 
 # ---------------------------------------------------------------- drafts
@@ -491,3 +493,54 @@ def test_a_streamed_upload_over_the_limit_is_cut_off(tmp_path: Path) -> None:
     with client:  # also runs the app's startup and shutdown
         response = client.post("/api/import/project", content=chunks())
     assert response.status_code == 413
+
+
+# ---------------------------------------------------------------- adopted plans (spec 5.2)
+
+
+def test_adopting_and_un_adopting_a_plan(client: TestClient, demo_id: str) -> None:
+    body = {"name": "Dues only", "date": "2026-11-03", "note": "Vote", "base_revision": 1}
+    adopted = client.post(f"/api/projects/{demo_id}/adopt", json=body)
+    assert adopted.status_code == 200
+    plan = adopted.json()["project"]["scenarios"][0]["adoption"]
+    # the demo already has an adopted plan, so this one is adopted second
+    assert (plan["date"], plan["note"], plan["sequence"]) == ("2026-11-03", "Vote", 2)
+    again = client.post(f"/api/projects/{demo_id}/adopt", json={**body, "base_revision": 2})
+    assert again.status_code == 409 and "already an adopted plan" in again.json()["message"]
+    project = adopted.json()["project"]
+    project["scenarios"][0]["description"] = "changed"
+    edit = client.put(f"/api/projects/{demo_id}", json={"project": project, "base_revision": 2})
+    assert edit.status_code == 409 and "cannot be changed" in edit.json()["message"]
+    back = client.post(f"/api/projects/{demo_id}/unadopt", json={"base_revision": 2})
+    assert back.json()["project"]["scenarios"][0]["adoption"] is None
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"date": "the 3rd"}, "not a date"),
+        ({"date": "2026-W45-2"}, "not a date"),
+        ({"date": None}, "needs the scenario's name, a date and a note"),
+        ({"note": "x" * 2001}, "too long or holds control characters"),
+        ({"note": "bell\x07"}, "too long or holds control characters"),
+    ],
+)
+def test_adoption_requests_are_checked(
+    client: TestClient, demo_id: str, change: dict[str, object], message: str
+) -> None:
+    body = {"name": "Dues only", "date": "2026-11-03", "note": "", "base_revision": 1, **change}
+    response = client.post(f"/api/projects/{demo_id}/adopt", json=body)
+    assert response.status_code == 422 and message in response.json()["message"]
+
+
+def test_an_adopted_plan_still_has_figures_when_the_baseline_has_problems(
+    client: TestClient, demo_id: str
+) -> None:
+    body = {"name": "Dues only", "date": "2026-11-03", "note": "", "base_revision": 1}
+    project = client.post(f"/api/projects/{demo_id}/adopt", json=body).json()["project"]
+    project["baseline"]["units"] = 0
+    client.put(f"/api/projects/{demo_id}", json={"project": project, "base_revision": 2})
+    results = client.get(f"/api/projects/{demo_id}/results").json()
+    assert results["baseline_problems"] == ["there must be at least one unit"]
+    assert "result" in results["scenarios"]["Dues only"]
+    assert "problems" in results["scenarios"]["Two-part assessment"]

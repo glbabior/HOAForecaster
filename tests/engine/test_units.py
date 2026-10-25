@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from hoa_engine import (
+    Adoption,
     Assessment,
     Baseline,
     Changes,
@@ -33,6 +35,7 @@ from hoa_engine import (
     scenario_to_dict,
 )
 from hoa_engine.dues import resolve_dues
+from hoa_engine.model import current_adoption, frozen_baseline
 from hoa_engine.validate import validate_baseline, validate_run, validate_scenario
 
 D = Decimal
@@ -679,3 +682,64 @@ def test_absurd_numbers_of_lines_are_refused() -> None:
     ]
     s = changed(expense_lines={line.id: line for line in many})
     assert validate_run(baseline(), s) == ["the scenario changes more than 1,000 expense lines"]
+
+
+# ---------------------------------------------------------------- adopted plans (5.2)
+
+
+def adopted(s: Scenario, sequence: int = 1, b: Baseline | None = None) -> Scenario:
+    frozen = frozen_baseline(b or baseline(), s)
+    return replace(s, adoption=Adoption(date(2026, 11, 3), "Vote", sequence, frozen))
+
+
+def test_an_adopted_plan_runs_on_its_frozen_baseline_never_todays() -> None:
+    plan = adopted(changed(values={"interest_rate": D("0.05")}, expense_lines={"roof": None}))
+    later = baseline(interest_rate=D("0.2"), units=99, expense_lines=())
+    assert run(later, plan).summary == run(baseline(), replace(plan, adoption=None)).summary
+    # applying its changes to the frozen copy again changes nothing
+    assert baseline_for(later, plan) == plan.adoption.baseline  # type: ignore[union-attr]  # adopted above
+
+
+def test_the_frozen_copy_keeps_the_fully_funded_balance_the_plan_uses() -> None:
+    b = baseline(ffb={y: D(1) for y in range(2020, 2040)})
+    assert sorted(frozen_baseline(b, rate("1", "0")).ffb) == list(range(2030, 2036))
+
+
+def test_adoptions_round_trip_and_the_latest_is_current() -> None:
+    first, second = adopted(rate("1", "0"), 1), replace(adopted(rate("2", "0"), 2), name="T")
+    project = Project("P", baseline(), (second, first, replace(rate("3", "0"), name="U")))
+    again = project_from_dict(project_to_dict(project))
+    assert again == project
+    assert current_adoption(again.scenarios) == second
+    assert current_adoption((rate("1", "0"),)) is None
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"sequence": 0}, "order must be 1 to 10,000"),
+        ({"sequence": 10_001}, "order must be 1 to 10,000"),
+        ({"note": "x" * 2001}, "at most 2,000 characters"),
+        ({"date": "20261103"}, "not a date written YYYY-MM-DD"),
+        ({"date": "soon"}, "not a date written YYYY-MM-DD"),
+        ("adopted", "adoption should be an object"),
+    ],
+)
+def test_unusable_adoptions_are_refused(change: object, message: str) -> None:
+    raw = scenario_to_dict(adopted(rate("1", "0")))
+    raw["adoption"] = {**raw["adoption"], **change} if isinstance(change, dict) else change
+    with pytest.raises(ProjectFormatError, match=message):
+        scenario_from_dict(raw)
+
+
+def test_two_plans_cannot_share_an_adoption_order() -> None:
+    plans = (adopted(rate("1", "0")), replace(adopted(rate("2", "0")), name="T"))
+    with pytest.raises(ProjectFormatError, match="same adoption order"):
+        project_from_dict(project_to_dict(Project("P", baseline(), plans)))
+
+
+def test_an_adopted_plan_keeps_a_leave_out_the_baseline_no_longer_needs() -> None:
+    plan = adopted(changed(expense_lines={"roof": None}))
+    gone = baseline(expense_lines=baseline().expense_lines[1:])
+    raw = project_to_dict(Project("P", gone, (plan,)))
+    assert project_from_dict(raw).scenarios[0] == plan  # a record, kept as adopted

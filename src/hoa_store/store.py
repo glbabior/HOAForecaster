@@ -21,12 +21,22 @@ import secrets
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from hoa_engine.model import Project, ProjectFormatError, project_from_dict, project_to_dict
+from hoa_engine.model import (
+    MAX_ADOPTIONS,
+    Adoption,
+    Project,
+    ProjectFormatError,
+    current_adoption,
+    frozen_baseline,
+    project_from_dict,
+    project_to_dict,
+)
+from hoa_engine.validate import validate_run
 
 ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 SCREEN_PATTERN = re.compile(r"^(baseline|new-scenario|scenario:[^\x00-\x1f\x7f]{1,200})$")
@@ -49,6 +59,29 @@ class Conflict(StoreError):
 
 class BadProjectFile(StoreError):
     pass
+
+
+class ReadOnly(StoreError):
+    """An adopted plan cannot be changed, renamed or deleted (spec 5.2)."""
+
+
+class Unusable(StoreError):
+    """A scenario that cannot be worked out cannot be adopted."""
+
+
+def _keeps_adopted_plans(before: Project, after: Project) -> None:
+    """Refuse a save that would change an adopted plan, or adopt or un-adopt one – only
+    `adopt` and `unadopt` do that (spec 5.2)."""
+    kept = {s.name: s for s in after.scenarios}
+    for s in before.scenarios:
+        if s.adoption is not None and kept.get(s.name) != s:
+            raise ReadOnly(
+                f"{s.name} is an adopted plan and cannot be changed, renamed or deleted – start a "
+                "new scenario from it instead"
+            )
+    was = {s.name for s in before.scenarios if s.adoption is not None}
+    if any(s.adoption is not None and s.name not in was for s in after.scenarios):
+        raise ReadOnly("a scenario is adopted with Adopt, not by saving it")
 
 
 Times = dict[str, str]  # {"created": ISO 8601, "modified": ISO 8601}, UTC
@@ -280,38 +313,84 @@ class ProjectStore:
             )
             return self.get(project_id)
 
-    def save(self, project_id: str, project: Project, base_revision: int) -> StoredProject:
-        """Replace a project. Refused if it was saved again since `base_revision` was read."""
-        with self._lock:
-            current = self.get(project_id)
-            if current.revision != base_revision:
-                raise Conflict(
-                    "the project was saved elsewhere since you opened it – reload to see the "
-                    "newer version before saving"
-                )
-            now = _now()
-            before = {s.name: s for s in current.project.scenarios}
-            scenario_times = {}
-            for s in project.scenarios:
-                old = current.scenario_times.get(s.name)
-                if old is None:  # new, or renamed – a rename starts a new history
-                    scenario_times[s.name] = {"created": now, "modified": now}
-                else:
-                    changed = before[s.name] != s
-                    scenario_times[s.name] = {**old, "modified": now} if changed else old
-            baseline_times = current.baseline_times
-            if current.project.baseline != project.baseline:
-                baseline_times = {**baseline_times, "modified": now}
-            self._write(
-                project_id,
-                project,
-                revision=current.revision + 1,
-                times={**current.times, "modified": now},
-                baseline_times=baseline_times,
-                scenario_times=scenario_times,
+    def _current(self, project_id: str, base_revision: int) -> StoredProject:
+        current = self.get(project_id)
+        if current.revision != base_revision:
+            raise Conflict(
+                "the project was saved elsewhere since you opened it – reload to see the "
+                "newer version before saving"
             )
-            # other screens' drafts stay; they now show as begun before this save
-            return self.get(project_id)
+        return current
+
+    def save(self, project_id: str, project: Project, base_revision: int) -> StoredProject:
+        """Replace a project. Refused if it was saved again since `base_revision` was read, or if
+        it would change an adopted plan – those change only by adopting and un-adopting."""
+        with self._lock:
+            current = self._current(project_id, base_revision)
+            _keeps_adopted_plans(current.project, project)
+            return self._replace(current, project)
+
+    def adopt(
+        self, project_id: str, name: str, adopted_on: date, note: str, base_revision: int
+    ) -> StoredProject:
+        """Adopt a saved scenario as the board's plan (spec 5.2) – frozen with the baseline as it
+        sees it now, and the current adopted plan from now on."""
+        with self._lock:
+            current = self._current(project_id, base_revision)
+            project = current.project
+            s = next((s for s in project.scenarios if s.name == name), None)
+            if s is None:
+                raise NotFound("there is no scenario of that name – save it first")
+            if s.adoption is not None:
+                raise ReadOnly(f"{name} is already an adopted plan")
+            if validate_run(project.baseline, s):
+                raise Unusable(f"{name} has problems in its inputs – fix them before adopting it")
+            order = max((x.adoption.sequence for x in project.scenarios if x.adoption), default=0)
+            if order >= MAX_ADOPTIONS:
+                raise Unusable("the project has as many adopted plans as it can hold")
+            adoption = Adoption(adopted_on, note, order + 1, frozen_baseline(project.baseline, s))
+            adopted = replace(s, adoption=adoption)
+            scenarios = tuple(adopted if x is s else x for x in project.scenarios)
+            return self._replace(current, replace(project, scenarios=scenarios))
+
+    def unadopt(self, project_id: str, base_revision: int) -> StoredProject:
+        """Un-adopt the current adopted plan (spec 5.2) – it is an ordinary scenario again, and
+        the plan adopted before it is current."""
+        with self._lock:
+            current = self._current(project_id, base_revision)
+            project = current.project
+            plan = current_adoption(project.scenarios)
+            if plan is None:
+                raise NotFound("the project has no adopted plan")
+            back = replace(plan, adoption=None)
+            scenarios = tuple(back if x is plan else x for x in project.scenarios)
+            return self._replace(current, replace(project, scenarios=scenarios))
+
+    def _replace(self, current: StoredProject, project: Project) -> StoredProject:
+        """Write `project` over `current` – the caller holds the lock and has checked it."""
+        now = _now()
+        before = {s.name: s for s in current.project.scenarios}
+        scenario_times = {}
+        for s in project.scenarios:
+            old = current.scenario_times.get(s.name)
+            if old is None:  # new, or renamed – a rename starts a new history
+                scenario_times[s.name] = {"created": now, "modified": now}
+            else:
+                changed = before[s.name] != s
+                scenario_times[s.name] = {**old, "modified": now} if changed else old
+        baseline_times = current.baseline_times
+        if current.project.baseline != project.baseline:
+            baseline_times = {**baseline_times, "modified": now}
+        self._write(
+            current.id,
+            project,
+            revision=current.revision + 1,
+            times={**current.times, "modified": now},
+            baseline_times=baseline_times,
+            scenario_times=scenario_times,
+        )
+        # other screens' drafts stay; they now show as begun before this save
+        return self.get(current.id)
 
     def delete(self, project_id: str) -> None:
         """Move a project to the trash folder; its draft is discarded."""
@@ -346,7 +425,13 @@ class ProjectStore:
             "baseline_times": baseline_times,
             "scenario_times": scenario_times,
         }
-        _atomic_write(self._path(self.projects, project_id), _dump(payload))
+        data = _dump(payload)
+        if len(data) > MAX_PROJECT_BYTES:  # it could never be opened again
+            raise BadProjectFile(
+                "the project would be larger than 5 MB – too large to save; remove some "
+                "scenarios or expense lines first"
+            )
+        _atomic_write(self._path(self.projects, project_id), data)
 
     # ------------------------------------------------------------ export and import
 

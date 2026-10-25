@@ -84,6 +84,16 @@ export interface Changes {
   ffb: Record<string, Dec>;
 }
 
+/** The board's adoption of a scenario (spec 5.2). */
+export interface Adoption {
+  date: string; // YYYY-MM-DD, as entered
+  note: string;
+  /** adoption order – the highest is the current adopted plan */
+  sequence: number;
+  /** the baseline as the plan saw it when adopted, its changes already applied */
+  baseline: Baseline;
+}
+
 export interface Scenario {
   name: string;
   description: string;
@@ -91,6 +101,8 @@ export interface Scenario {
   assessments: Assessment[];
   rounding: "dollar" | "none";
   changes: Changes;
+  /** set once the board has adopted it – then read-only, run on its frozen baseline */
+  adoption?: Adoption | null;
 }
 
 export interface Project {

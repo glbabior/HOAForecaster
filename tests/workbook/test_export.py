@@ -8,6 +8,7 @@ import re
 import subprocess
 import zipfile
 from dataclasses import fields, replace
+from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -21,6 +22,7 @@ from openpyxl.comments import Comment
 from openpyxl.formula.translate import Translator
 
 from hoa_engine import (
+    Adoption,
     Assessment,
     Changes,
     DuesMode,
@@ -34,6 +36,7 @@ from hoa_engine import (
     project_to_dict,
     run,
 )
+from hoa_engine.model import frozen_baseline
 from hoa_workbook import read as reader
 from hoa_workbook.charts import shared_grid
 from hoa_workbook.export import build_workbook, export_workbook
@@ -46,6 +49,7 @@ from hoa_workbook.layout import (
     EXPENSE_YEAR_COL,
     INPUT_ROWS,
     LEAVE_OUT_COL,
+    MARK_COL,
     ROW,
     SOURCE_COL,
     VALUE_COL,
@@ -151,7 +155,28 @@ def _changed_project() -> Project:
             }
         ),
     )
-    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short))
+    # adopted a year ago against a different baseline, and an earlier plan before that
+    older = replace(
+        b,
+        starting_balance=D(160000),
+        interest_rate=D("0.012"),
+        expense_lines=b.expense_lines[:-1],
+        ffb={y: v - 20000 for y, v in b.ffb.items()},
+        sources={**b.sources, "ffb": "Fictional older study"},
+    )
+    adopted = replace(
+        own,
+        name="Adopted plan",
+        adoption=Adoption(
+            date(2026, 11, 3), "Fictional board vote", 2, frozen_baseline(older, own)
+        ),
+    )
+    first = replace(
+        later,
+        name="Earlier plan",
+        adoption=Adoption(date(2025, 6, 1), "", 1, frozen_baseline(older, later)),
+    )
+    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short, adopted, first))
 
 
 def _projects() -> list[Any]:
@@ -450,6 +475,55 @@ def test_a_huge_horizon_of_a_scenario_is_refused_before_it_is_walked() -> None:
     inputs = _set(lambda wb: wb["Inputs"].cell(8, 2), 10**12)
     with pytest.raises(WorkbookFormatError, match="Inputs – the horizon must be 5–30"):
         read_workbook(_broken(inputs))
+
+
+def test_an_adopted_plan_is_written_frozen_and_read_back_whole() -> None:
+    wb = build_workbook(_changed_project())
+    ws = wb["Adopted plan"]
+    assert ws.protection.sheet  # a reminder that it is read-only
+    assert str(ws["A3"].value).startswith("Adopted plan – adopted November 3, 2026")
+    interest = _plan_cell("Adopted plan", "Interest earned on reserves per year")(wb)
+    assert interest.value == 0.03  # typed, not linked to Inputs
+    mark = _plan_cell("Adopted plan", "Interest earned on reserves per year", MARK_COL)(wb)
+    assert mark.value == "value"
+
+
+def test_an_adoption_date_excel_turned_into_a_date_is_read() -> None:
+    edit = _set(_plan_cell("Adopted plan", "Adopted on"), datetime(2026, 11, 4))
+    project = read_workbook(_broken(edit, _changed_project()))
+    plan = next(s for s in project.scenarios if s.name == "Adopted plan")
+    assert plan.adoption is not None and plan.adoption.adopted_on == date(2026, 11, 4)
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (_set(_plan_cell("Adopted plan", "Adopted on"), 5), "adoption date should be written"),
+        (
+            _set(_plan_cell("Adopted plan", "Minimum working cushion", MARK_COL), "no value"),
+            "should be blank, value, note or value and note",
+        ),
+        (
+            lambda wb: _relabel("Adopted plan", "Adoption note", "Note")(wb),
+            "missing the row 'Adoption note'",
+        ),
+        (
+            lambda wb: _relabel("Adopted plan", "This plan's own Fully Funded Balance?", "x")(wb),
+            "missing the row 'This plan's own Fully Funded Balance?'",
+        ),
+        (
+            lambda wb: _relabel("Dues only", "TOTAL reserve expenses – this scenario", "x")(wb),
+            "missing the row 'TOTAL reserve expenses",
+        ),
+        (
+            _set(_plan_cell("Adopted plan", "Minimum working cushion"), "=Inputs!$B$15"),
+            "'Minimum working cushion' holds a formula",  # an adopted plan's figures are typed
+        ),
+    ],
+)
+def test_a_damaged_adopted_plan_sheet_is_refused(edit: Any, message: str) -> None:
+    with pytest.raises(WorkbookFormatError, match=re.escape(message)):
+        read_workbook(_broken(edit, _changed_project()))
 
 
 def test_a_scenarios_own_start_year_cannot_be_moved_in_excel() -> None:

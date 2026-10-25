@@ -31,7 +31,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from hoa_app.template import blank_project
 from hoa_engine import InvalidInputs, ProjectFormatError, ScenarioResult, run
 from hoa_engine.model import (
+    MAX_NOTE,
     Project,
+    adoption_date,
     baseline_from_dict,
     project_from_dict,
     project_to_dict,
@@ -43,8 +45,10 @@ from hoa_store.store import (
     Conflict,
     NotFound,
     ProjectStore,
+    ReadOnly,
     StoredProject,
     StoreError,
+    Unusable,
 )
 from hoa_workbook.export import export_workbook
 from hoa_workbook.read import MAX_FILE_BYTES, WorkbookFormatError, read_workbook
@@ -250,7 +254,8 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
 
     @app.exception_handler(StoreError)
     async def store_error(_: Request, e: StoreError) -> JSONResponse:
-        status = {NotFound: 404, Conflict: 409, BadProjectFile: 422}.get(type(e), 503)
+        statuses = {NotFound: 404, Conflict: 409, ReadOnly: 409, BadProjectFile: 422, Unusable: 422}
+        status = statuses.get(type(e), 503)
         return JSONResponse({"message": str(e), "problems": []}, status_code=status)
 
     @app.exception_handler(StarletteHTTPException)
@@ -329,6 +334,30 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
         project = parse_project(body.get("project"))
         return stored_json(store.save(project_id, project, revision(body.get("base_revision"))))
 
+    @app.post("/api/projects/{project_id}/adopt")
+    async def adopt(project_id: str, request: Request) -> dict[str, Any]:
+        """Adopt a saved scenario as the board's plan (spec 5.2)."""
+        body = await body_json(request)
+        name, note, when = body.get("name"), body.get("note", ""), body.get("date")
+        if not isinstance(name, str) or not isinstance(note, str) or not isinstance(when, str):
+            raise ApiError(422, "an adoption needs the scenario's name, a date and a note")
+        try:
+            adopted_on = adoption_date(when)
+        except ValueError:
+            raise ApiError(422, "the adoption date is not a date") from None
+        if len(note) > MAX_NOTE or any(ord(c) < 32 and c not in "\t\n\r" for c in note):
+            raise ApiError(422, "the adoption note is too long or holds control characters")
+        stored = store.adopt(
+            project_id, name, adopted_on, note, revision(body.get("base_revision"))
+        )
+        return stored_json(stored)
+
+    @app.post("/api/projects/{project_id}/unadopt")
+    async def unadopt(project_id: str, request: Request) -> dict[str, Any]:
+        """Un-adopt the current adopted plan (spec 5.2)."""
+        body = await body_json(request)
+        return stored_json(store.unadopt(project_id, revision(body.get("base_revision"))))
+
     @app.delete("/api/projects/{project_id}", status_code=204)
     def delete_project(project_id: str) -> Response:
         store.delete(project_id)
@@ -337,10 +366,10 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
     @app.get("/api/projects/{project_id}/results")
     def project_results(project_id: str) -> dict[str, Any]:
         stored = store.get(project_id)
+        # every scenario still gets its own outcome – an adopted plan runs on its frozen
+        # baseline, whatever is wrong with today's
         problems = validate_baseline(stored.project.baseline)
-        if problems:
-            return {"baseline_problems": problems, "scenarios": {}}
-        return {"baseline_problems": [], "scenarios": _results(stored.project)}
+        return {"baseline_problems": problems, "scenarios": _results(stored.project)}
 
     @app.post("/api/projects/{project_id}/baseline-impact")
     async def baseline_impact(project_id: str, request: Request) -> dict[str, Any]:

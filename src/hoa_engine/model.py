@@ -11,6 +11,7 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, TypeVar
@@ -136,6 +137,18 @@ class Changes:
 
 
 @dataclass(frozen=True)
+class Adoption:
+    """The board's adoption of a scenario (spec 5.2). `baseline` is the frozen copy of the
+    baseline as the plan saw it when adopted – stored with the plan's changes already applied,
+    which applying them again leaves as it is – so the plan's figures never move."""
+
+    adopted_on: date  # as entered – the board's date, not the order of adoption
+    note: str
+    sequence: int  # adoption order; the highest is the current adopted plan
+    baseline: Baseline
+
+
+@dataclass(frozen=True)
 class Scenario:
     name: str
     dues: DuesPath
@@ -143,11 +156,27 @@ class Scenario:
     rounding: Rounding = Rounding.DOLLAR
     description: str = ""
     changes: Changes = field(default_factory=Changes)
+    adoption: Adoption | None = None
 
 
 def baseline_for(b: Baseline, s: Scenario) -> Baseline:
-    """Every input the scenario runs on (spec section 6)."""
-    return apply_changes(b, s.changes)
+    """Every input the scenario runs on (spec section 6) – for an adopted plan its frozen
+    baseline, never today's."""
+    return apply_changes(b if s.adoption is None else s.adoption.baseline, s.changes)
+
+
+def frozen_baseline(b: Baseline, s: Scenario) -> Baseline:
+    """The copy of the baseline a scenario keeps when it is adopted – as it sees it now, with
+    the Fully Funded Balance it uses (its years and one more)."""
+    own = apply_changes(b, s.changes)
+    years = range(own.start_year, own.end_year + 2)
+    return replace(own, ffb={y: v for y, v in own.ffb.items() if y in years})
+
+
+def current_adoption(scenarios: tuple[Scenario, ...]) -> Scenario | None:
+    """The current adopted plan – the one adopted most recently (spec 5.2)."""
+    adopted = [s for s in scenarios if s.adoption is not None]
+    return max(adopted, key=lambda s: s.adoption.sequence if s.adoption else 0, default=None)
 
 
 def apply_changes(b: Baseline, changes: Changes) -> Baseline:
@@ -393,7 +422,48 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
         ),
         rounding=Rounding(d.get("rounding", Rounding.DOLLAR)),
         changes=changes_from_dict(d.get("changes", {})),
+        adoption=_adoption(d.get("adoption")),
     )
+
+
+def _adoption(d: Any) -> Adoption | None:
+    if d is None:
+        return None
+    if not isinstance(d, dict):
+        raise TypeError("an adoption should be an object")
+    sequence = _int(d["sequence"])
+    if not 1 <= sequence <= MAX_ADOPTIONS:
+        raise ValueError(f"an adoption's order must be 1 to {MAX_ADOPTIONS:,}")
+    note = _str(d.get("note", ""))
+    if len(note) > MAX_NOTE:
+        raise ValueError(f"an adoption note may be at most {MAX_NOTE:,} characters")
+    return Adoption(
+        adopted_on=adoption_date(_str(d["date"])),
+        note=note,
+        sequence=sequence,
+        baseline=baseline_from_dict(d["baseline"]),
+    )
+
+
+MAX_NOTE = 2000  # characters in an adoption note
+MAX_ADOPTIONS = 10_000
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def adoption_date(text: str) -> date:
+    """A date written YYYY-MM-DD – the one form the app writes."""
+    if not _ISO_DATE.fullmatch(text):
+        raise ValueError(f"{text[:20]!r} is not a date written YYYY-MM-DD")
+    return date.fromisoformat(text)
+
+
+def adoption_to_dict(a: Adoption) -> dict[str, Any]:
+    return {
+        "date": a.adopted_on.isoformat(),
+        "note": a.note,
+        "sequence": a.sequence,
+        "baseline": baseline_to_dict(a.baseline),
+    }
 
 
 def _changed_value(key: str, value: Any) -> Decimal | int | None:
@@ -456,6 +526,7 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
         ],
         "rounding": s.rounding.value,
         "changes": changes_to_dict(s.changes),
+        "adoption": None if s.adoption is None else adoption_to_dict(s.adoption),
     }
 
 
@@ -503,6 +574,9 @@ def project_from_dict(d: dict[str, Any]) -> Project:
         raise ValueError(
             "scenario names must be unique – " + ", ".join(repr(n) for n in duplicates)
         )
+    orders = [s.adoption.sequence for s in scenarios if s.adoption is not None]
+    if len(set(orders)) != len(orders):
+        raise ValueError("two adopted plans have the same adoption order")
     baseline = baseline_from_dict(d["baseline"])
     return Project(
         name=_str(d["name"]),
@@ -515,6 +589,8 @@ def project_from_dict(d: dict[str, Any]) -> Project:
 def without_stale_leave_outs(s: Scenario, b: Baseline) -> Scenario:
     """The scenario without leave-outs of lines the baseline no longer has (spec 5.1) – they
     do nothing, and a later line given the same id must not be left out by them."""
+    if s.adoption is not None:
+        return s  # a record of a decision – kept exactly as adopted
     known = {line.id for line in b.expense_lines}
     lines = {i: line for i, line in s.changes.expense_lines.items() if line or i in known}
     if len(lines) == len(s.changes.expense_lines):

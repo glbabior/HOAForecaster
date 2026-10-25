@@ -590,3 +590,41 @@ dialog::backdrop {
     position: static;
   }
 }
+
+/* Adopted plans (spec 5.2) and a scenario's own changes to the baseline (spec 5.1) */
+fieldset.plain {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.badge {
+  display: inline-block;
+  margin: 2px 0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--good-bg);
+  color: var(--good-text);
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.panel.adopted {
+  border-left: 4px solid var(--good-text);
+}
+
+tr.own th,
+tr.own td {
+  background: var(--good-bg);
+}
+
+tr.left-out td {
+  color: var(--muted);
+}
+
+.own-value {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}

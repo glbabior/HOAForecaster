@@ -45,10 +45,22 @@ export function applyChanges(baseline: Baseline, changes: Changes): Baseline {
   };
 }
 
+/** Every input a scenario runs on – an adopted plan's frozen baseline, never today's. Mirrors
+ * `baseline_for` in src/hoa_engine/model.py. */
+export const baselineFor = (baseline: Baseline, scenario: Scenario): Baseline =>
+  applyChanges(scenario.adoption?.baseline ?? baseline, scenario.changes);
+
+/** The current adopted plan – the one adopted most recently (spec 5.2). */
+export function currentAdoption(scenarios: Scenario[]): Scenario | undefined {
+  return scenarios
+    .filter((s) => s.adoption)
+    .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0))[0];
+}
+
 /** The years a scenario runs over – its own horizon, or the baseline's; none while it is not a
  * usable horizon (a year half typed). */
 export function horizonOf(baseline: Baseline, scenario: Scenario): number[] {
-  const { start_year: start, end_year: end } = applyChanges(baseline, scenario.changes);
+  const { start_year: start, end_year: end } = baselineFor(baseline, scenario);
   if (!plausibleHorizon(start, end)) return [];
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }

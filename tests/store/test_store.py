@@ -7,18 +7,22 @@ import os
 import threading
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from hoa_engine import project_from_dict
+from hoa_engine import project_from_dict, run
+from hoa_engine.model import current_adoption
 from hoa_store import store as store_module
 from hoa_store.store import (
     BadProjectFile,
     Conflict,
     NotFound,
     ProjectStore,
+    ReadOnly,
     StoreError,
+    Unusable,
     default_root,
     parse_project_file,
 )
@@ -84,9 +88,15 @@ def test_the_file_is_readable_json_with_decimal_strings(store: ProjectStore) -> 
 
 def test_saving_stamps_only_what_changed(store: ProjectStore, clock: list[str]) -> None:
     saved = store.create(DEMO)
-    first, second, *_ = DEMO.scenarios
+    first, second, *rest = DEMO.scenarios
     project = replace(
-        DEMO, scenarios=(replace(first, description="Revised"), second, replace(first, name="New"))
+        DEMO,
+        scenarios=(
+            replace(first, description="Revised"),
+            second,
+            *rest,
+            replace(first, name="New"),
+        ),
     )
     again = store.save(saved.id, project, base_revision=1)
     created, saved_at = saved.times["created"], again.times["modified"]
@@ -449,3 +459,113 @@ def test_hoa_data_dir_overrides_the_default_as_an_absolute_path(
 ) -> None:
     monkeypatch.setenv("HOA_DATA_DIR", os.path.join("some", "folder"))
     assert default_root() == Path("some", "folder").resolve()
+
+
+# ---------------------------------------------------------------- adopted plans (spec 5.2)
+
+
+def _adopted(store: ProjectStore) -> tuple[str, int]:
+    created = store.create(DEMO)
+    stored = store.adopt(created.id, "Dues only", date(2026, 11, 3), "Vote", created.revision)
+    return created.id, stored.revision
+
+
+def test_adopting_freezes_the_plan_with_the_baseline_it_runs_on(store: ProjectStore) -> None:
+    pid, revision = _adopted(store)
+    stored = store.get(pid)
+    plan = stored.project.scenarios[0]
+    assert plan.adoption is not None
+    assert (plan.adoption.adopted_on, plan.adoption.note, plan.adoption.sequence) == (
+        date(2026, 11, 3),
+        "Vote",
+        2,  # the demo already has an adopted plan
+    )
+    before = run(stored.project.baseline, plan).summary
+    # a later baseline edit – deleting every expense line – leaves the plan's figures alone
+    edited = replace(stored.project, baseline=replace(stored.project.baseline, expense_lines=()))
+    after = store.save(pid, edited, revision)
+    assert run(after.project.baseline, after.project.scenarios[0]).summary == before
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda p: replace(p, scenarios=p.scenarios[1:]),  # deleted
+        lambda p: replace(p, scenarios=(replace(p.scenarios[0], name="Renamed"), *p.scenarios[1:])),
+        lambda p: replace(
+            p, scenarios=(replace(p.scenarios[0], description="x"), *p.scenarios[1:])
+        ),
+        lambda p: replace(p, scenarios=(replace(p.scenarios[0], adoption=None), *p.scenarios[1:])),
+    ],
+)
+def test_a_save_cannot_change_an_adopted_plan(store: ProjectStore, edit: object) -> None:
+    pid, revision = _adopted(store)
+    with pytest.raises(ReadOnly, match="Dues only is an adopted plan"):
+        store.save(pid, edit(store.get(pid).project), revision)  # type: ignore[operator]  # a lambda per case
+
+
+def test_a_save_cannot_adopt_a_scenario(store: ProjectStore) -> None:
+    pid, revision = _adopted(store)
+    project = store.get(pid).project
+    plan = project.scenarios[0]
+    sneaked = replace(project.scenarios[1], adoption=replace(plan.adoption, sequence=2))  # type: ignore[arg-type]  # adoption is set above
+    with pytest.raises(ReadOnly, match="adopted with Adopt"):
+        store.save(
+            pid, replace(project, scenarios=(plan, sneaked, *project.scenarios[2:])), revision
+        )
+
+
+def test_the_latest_adoption_is_current_and_un_adopting_restores_the_one_before(
+    store: ProjectStore,
+) -> None:
+    pid, revision = _adopted(store)
+    stored = store.adopt(pid, "Steady increase", date(2020, 1, 1), "", revision)
+    current = current_adoption(stored.project.scenarios)
+    assert current is not None and current.name == "Steady increase"  # whatever its date
+    stored = store.unadopt(pid, stored.revision)
+    back = next(s for s in stored.project.scenarios if s.name == "Steady increase")
+    assert back.adoption is None
+    assert current_adoption(stored.project.scenarios).name == "Dues only"  # type: ignore[union-attr]  # one is left
+
+
+def test_adoption_refuses_what_it_cannot_adopt(store: ProjectStore) -> None:
+    pid, revision = _adopted(store)
+    with pytest.raises(ReadOnly, match="already an adopted plan"):
+        store.adopt(pid, "Dues only", date(2026, 1, 1), "", revision)
+    with pytest.raises(NotFound, match="save it first"):
+        store.adopt(pid, "Nobody", date(2026, 1, 1), "", revision)
+    project = store.get(pid).project
+    broken = replace(project.scenarios[1], changes=replace(project.scenarios[1].changes, ffb={}))
+    broken = replace(broken, changes=replace(broken.changes, values={"end_year": 2050}))
+    revision = store.save(
+        pid,
+        replace(project, scenarios=(project.scenarios[0], broken, *project.scenarios[2:])),
+        revision,
+    ).revision
+    with pytest.raises(Unusable, match="has problems"):
+        store.adopt(pid, broken.name, date(2026, 1, 1), "", revision)
+
+
+def test_un_adopting_needs_an_adopted_plan(store: ProjectStore) -> None:
+    created = store.create(
+        replace(DEMO, scenarios=tuple(s for s in DEMO.scenarios if not s.adoption))
+    )
+    with pytest.raises(NotFound, match="no adopted plan"):
+        store.unadopt(created.id, created.revision)
+
+
+def test_a_project_too_large_to_open_again_is_never_written(store: ProjectStore) -> None:
+    created = store.create(DEMO)
+    huge = replace(DEMO, notes="x" * (6 * 1024 * 1024))
+    with pytest.raises(BadProjectFile, match="larger than 5 MB"):
+        store.save(created.id, huge, created.revision)
+    assert store.get(created.id).project == DEMO  # still readable, unchanged
+
+
+def test_adoption_stops_at_the_most_adoptions_a_project_can_hold(
+    store: ProjectStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = store.create(DEMO)  # the demo has one adopted plan already
+    monkeypatch.setattr(store_module, "MAX_ADOPTIONS", 1)
+    with pytest.raises(Unusable, match="as many adopted plans as it can hold"):
+        store.adopt(created.id, "Dues only", date(2026, 1, 1), "", created.revision)

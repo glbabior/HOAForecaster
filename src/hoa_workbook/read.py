@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -24,9 +25,13 @@ from openpyxl.worksheet.worksheet import Worksheet
 from hoa_engine.model import LIMITS, Project, ProjectFormatError, project_from_dict
 from hoa_engine.validate import MAX_YEARS, MIN_YEARS, validate_baseline, validate_run
 from hoa_workbook.layout import (
+    ADOPTED_ON_LABEL,
+    ADOPTION_NOTE_LABEL,
+    ADOPTION_ORDER_LABEL,
     ASSESS_AMOUNT_COL,
     ASSESS_NOTE_COL,
     ASSESS_YEAR_COL,
+    ASSUMPTION_MARKS,
     ASSUMPTION_ROWS,
     ASSUMPTIONS_HEADING,
     CHANGE_YEAR_COL,
@@ -37,17 +42,23 @@ from hoa_workbook.layout import (
     EXPENSE_YEAR_COL,
     EXPENSES,
     FFB_LABEL,
+    FFB_NOTE_MARK_COL,
     FREQUENCY_TEXT,
     HEADER_ROW,
     INPUT_ROWS,
     INPUTS,
     LEAVE_OUT_COL,
+    MARK_COL,
     MODE_GROWN,
     MODE_TYPED,
     OPERATING_TOTAL_LABEL,
+    OWN_COL,
+    OWN_HEADING,
     PLAN_FFB_HEADING,
+    PLAN_FFB_OWN_LABEL,
     PLAN_FIRST_COL,
     PLAN_OPERATING_LABEL,
+    PLAN_RESERVE_LABEL,
     PLAN_ROWS,
     RESERVED,
     ROUND_DOLLAR,
@@ -376,6 +387,10 @@ def _sections(ws: Worksheet) -> dict[str, int]:
     if total <= after:
         raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_OPERATING_LABEL}'")
     found[PLAN_OPERATING_LABEL] = total
+    reserve = _first_rows(ws, total).get(PLAN_RESERVE_LABEL)
+    if reserve is None:
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_RESERVE_LABEL}'")
+    found[PLAN_RESERVE_LABEL] = reserve
     return found
 
 
@@ -386,45 +401,102 @@ def _change_ids(ws: Worksheet) -> set[str]:
     return {_text(ws.cell(r, EXPENSE_COL["id"]).value) for r in rows} - {""}
 
 
+def _typed(value: Any, kind: str, key: str, where: str) -> Any:
+    """A scenario's own value for one input, in the project file's form."""
+    if value is None and key in LIMITS:
+        return None  # no limit
+    if kind in ("year", "count"):
+        return _whole(value, where, "a whole number")
+    return _number(value, where)
+
+
+def _adoption(ws: Worksheet, sections: dict[str, int]) -> dict[str, Any] | None:
+    """An adopted plan's date, note and order – the rows below its reserve total."""
+    rows = _first_rows(ws, sections[PLAN_RESERVE_LABEL])
+    if ADOPTED_ON_LABEL not in rows:
+        return None
+    labels = (ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL)
+    missing = [label for label in labels if label not in rows]
+    if missing:
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{missing[0]}'")
+    when, note, order = (ws.cell(rows[label], VALUE_COL).value for label in labels)
+    if isinstance(when, datetime):  # Excel turns a date typed over the text into one
+        when = when.date().isoformat()
+    if not isinstance(when, str):
+        raise WorkbookFormatError(f"{ws.title} – the adoption date should be written as text")
+    return {
+        "date": when,
+        "note": "" if note is None else str(note),
+        "sequence": _whole(order, f"{ws.title} adoption order", "a whole number"),
+    }
+
+
 def _changes(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str, Any]:
-    """The scenario's changes to the baseline (spec 5.1), from the blocks below its charts."""
+    """The scenario's changes to the baseline (spec 5.1), from the blocks below its charts – and
+    for an adopted plan, its adoption and the frozen baseline its sheet holds in full."""
     sections = _sections(ws)
+    adoption = _adoption(ws, sections)
+    frozen = adoption is not None
     rows = _first_rows(ws, sections[ASSUMPTIONS_HEADING])
     values: dict[str, Any] = {}
     sources: dict[str, str] = {}
+    frozen_values: dict[str, Any] = {}
+    frozen_sources: dict[str, str] = {}
     for spec in ASSUMPTION_ROWS:
         r = rows.get(spec.label)
         if r is None or r > sections[PLAN_FFB_HEADING]:
             raise WorkbookFormatError(f"{ws.title} is missing the row '{spec.label}'")
         where = f"{ws.title} '{spec.label}'"
+        value, note = ws.cell(r, VALUE_COL).value, ws.cell(r, SOURCE_COL).value
+        if frozen:  # every figure typed; the mark says which are the plan's own
+            _follows(value, (), where)
+            _follows(note, (), f"{where} source")
+            frozen_values[spec.key] = _typed(value, spec.kind, spec.key, where)
+            if _text(note):
+                frozen_sources[spec.key] = _text(note)
+            mark = _text(ws.cell(r, MARK_COL).value).lower()
+            if mark not in ASSUMPTION_MARKS:
+                raise WorkbookFormatError(
+                    f"{where} – '{OWN_HEADING}' should be blank, value, note or value and note"
+                )
+            if mark in ("value", "value and note"):
+                values[spec.key] = frozen_values[spec.key]
+            if mark in ("note", "value and note") and _text(note):
+                sources[spec.key] = _text(note)
+            continue
         n = cells.inputs[spec.key]
         link = f"=Inputs!B{n}"
         links = (f'=IF(Inputs!B{n}="","",Inputs!B{n})',) if spec.key in LIMITS else (link,)
-        value = ws.cell(r, VALUE_COL).value
         if not _follows(value, links, where):
-            if value is None and spec.key in LIMITS:
-                values[spec.key] = None  # changed to no limit
-            elif spec.kind in ("year", "count"):
-                values[spec.key] = _whole(value, where, "a whole number")
-            else:
-                values[spec.key] = _number(value, where)
-        note = ws.cell(r, SOURCE_COL).value
+            values[spec.key] = _typed(value, spec.kind, spec.key, where)
         note_link = (f'=IF(Inputs!C{n}="","",Inputs!C{n})',)
         if not _follows(note, note_link, f"{where} source") and _text(note):
             sources[spec.key] = _text(note)
-    own = {**baseline, **values}
+    own = frozen_values if frozen else {**baseline, **values}
     horizon = _horizon(own["start_year"], own["end_year"], ws.title)
 
     ffb_row = sections[FFB_LABEL]
-    if _comment(ws.cell(ffb_row, 1)):
-        sources["ffb"] = _comment(ws.cell(ffb_row, 1))
-    ffb = {}
+    note = _comment(ws.cell(ffb_row, 1))
+    marks = ffb_row + 1
+    if frozen and _text(ws.cell(marks, 1).value) != PLAN_FFB_OWN_LABEL:
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_FFB_OWN_LABEL}'")
+    if note and frozen:
+        frozen_sources["ffb"] = note
+    if note and (not frozen or _text(ws.cell(marks, FFB_NOTE_MARK_COL).value).lower() == "note"):
+        sources["ffb"] = note
+    ffb, frozen_ffb = {}, {}
     for c in range(VALUE_COL, ws.max_column + 1):
         year, value = ws.cell(ffb_row - 1, c).value, ws.cell(ffb_row, c).value
         if year is None or value is None:
             continue
         y = _whole(year, f"{ws.title} Fully Funded Balance year")
         where = f"{ws.title} Fully Funded Balance {y}"
+        if frozen:
+            _follows(value, (), where)
+            frozen_ffb[str(y)] = _number(value, where)
+            if _text(ws.cell(marks, c).value).lower() == "yes":
+                ffb[str(y)] = frozen_ffb[str(y)]
+            continue
         ffb_link: tuple[str, ...] = (
             (f"=Expenses!{cells.ffb_col[y]}{cells.ffb_row}",) if y in cells.ffb_col else ()
         )
@@ -435,6 +507,7 @@ def _changes(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str
     total = ws.cell(sections[PLAN_OPERATING_LABEL], CHANGE_YEAR_COL).value
     listed = _summed_rows(total, f"{ws.title} operating total")
     lines, left_out = [], []
+    own_rows: set[int] = set()  # an adopted plan's rows marked as its own
     for r in range(head + 1, sections[PLAN_OPERATING_LABEL]):
         leave = _text(ws.cell(r, LEAVE_OUT_COL).value).lower() == "yes"
         inputs = [ws.cell(r, EXPENSE_COL[key]).value for key in _LINE_INPUTS]
@@ -458,15 +531,26 @@ def _changes(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str
             left_out.append((r, {"id": line_id}))
         else:
             lines.append((r, _expense_line(ws, r, where)))
+            if frozen and _text(ws.cell(r, OWN_COL).value).lower() == "yes":
+                own_rows.add(r)
     taken = frozenset(line["id"] for line in baseline["expense_lines"])
     named = _with_ids(lines + left_out, ws.title, taken, "own")
     out_ids = {line["id"] for _, line in left_out}
+    mine = out_ids | {line["id"] for r, line in lines if r in own_rows}
     expense_lines = {
         line["id"]: None if line["id"] in out_ids else {k: v for k, v in line.items() if k != "id"}
         for line in named
+        if not frozen or line["id"] in mine
     }
     changes = {"values": values, "sources": sources, "expense_lines": expense_lines, "ffb": ffb}
-    return {"changes": changes, "horizon": horizon}
+    if adoption is not None:
+        adoption["baseline"] = {
+            **frozen_values,
+            "expense_lines": [line for line in named if line["id"] not in out_ids],
+            "ffb": frozen_ffb,
+            "sources": frozen_sources,
+        }
+    return {"changes": changes, "horizon": horizon, "adoption": adoption}
 
 
 def _scenario(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str, Any]:
@@ -554,6 +638,7 @@ def _scenario(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[st
         "assessments": assessments,
         "rounding": "dollar" if rounding == ROUND_DOLLAR else "none",
         "changes": read["changes"],
+        "adoption": read["adoption"],
     }
 
 

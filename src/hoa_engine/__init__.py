@@ -2,6 +2,7 @@
 
 from hoa_engine.engine import InvalidInputs, ScenarioResult, Summary, YearResult, run
 from hoa_engine.model import (
+    Adoption,
     Assessment,
     Baseline,
     Changes,
@@ -24,6 +25,7 @@ from hoa_engine.model import (
 )
 
 __all__ = [
+    "Adoption",
     "Assessment",
     "Baseline",
     "Changes",

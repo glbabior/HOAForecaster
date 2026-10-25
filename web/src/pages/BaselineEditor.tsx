@@ -95,6 +95,7 @@ export function BaselineEditor() {
  * one's horizon (its own, where it has one). */
 function scenariosFor(stored: StoredProject, baseline: Baseline): Scenario[] {
   return stored.project.scenarios.map((s) => {
+    if (s.adoption) return s; // an adopted plan is read-only and keeps its own years
     const own = applyChanges(baseline, s.changes);
     return plausibleHorizon(own.start_year, own.end_year)
       ? reshapeScenario(s, own.start_year, own.end_year)

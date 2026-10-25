@@ -166,7 +166,8 @@ def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
     for s in project["scenarios"]:
         name = s["name"]
         # a scenario may have a horizon of its own (spec 5.1)
-        own = {**project["baseline"], **s.get("changes", {}).get("values", {})}
+        frozen = (s.get("adoption") or {}).get("baseline")  # an adopted plan's own years
+        own = {**(frozen or project["baseline"]), **s.get("changes", {}).get("values", {})}
         start, end = own["start_year"], own["end_year"]
         scenarios[name] = {
             "years": _plan(_plan_sheet(wb, name), range(start, end + 1)),

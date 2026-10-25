@@ -6,7 +6,8 @@ import { api, saveFile } from "../api";
 import { CsvButton } from "../components/CsvButton";
 import { ScenarioPicker } from "../components/ScenarioPicker";
 import { Confirm, ErrorBanner, Problems } from "../components/ui";
-import { date, money, percent, span } from "../format";
+import { date, longDate, money, percent, span } from "../format";
+import { currentAdoption } from "../template";
 import type { ProjectResults } from "../types";
 
 export function ProjectPage() {
@@ -26,9 +27,19 @@ export function ProjectPage() {
   const { project } = stored;
   const b = project.baseline;
   const names = project.scenarios.map((s) => s.name);
+  // the adopted plan first, then the working scenarios, then earlier adopted plans, latest first
+  const current = currentAdoption(project.scenarios);
+  const earlier = project.scenarios
+    .filter((s) => s.adoption && s !== current)
+    .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0));
+  const listed = [
+    ...(current ? [current] : []),
+    ...project.scenarios.filter((s) => !s.adoption),
+    ...earlier,
+  ];
   const selected = chosen ?? names;
-  // "…" while results load; a dash once it is known they cannot be worked out
-  const pending = results && results.baseline_problems.length ? "–" : "…";
+  // "…" while results load – each scenario then has figures or problems of its own
+  const pending = "…";
 
   async function run(action: () => Promise<void>) {
     setActionError(null);
@@ -85,16 +96,22 @@ export function ProjectPage() {
             </tr>
           </thead>
           <tbody>
-            {project.scenarios.map((s) => {
+            {listed.map((s) => {
               const outcome = results?.scenarios[s.name];
               const r = outcome && "result" in outcome ? outcome.result.summary : null;
               const end = outcome && "result" in outcome ? outcome.result.years.at(-1)?.year : null;
               return (
-                <tr key={s.name}>
+                <tr key={s.name} className={s === current ? "adopted" : undefined}>
                   <th scope="row">
                     <Link to={`/projects/${id}/scenarios/${encodeURIComponent(s.name)}`}>
                       {s.name}
                     </Link>
+                    {s.adoption && (
+                      <div className="badge">
+                        {s === current ? "Adopted plan" : "Earlier adopted plan"} · adopted{" "}
+                        {longDate(s.adoption.date)}
+                      </div>
+                    )}
                     {s.description && <div className="hint">{s.description}</div>}
                   </th>
                   {outcome && "problems" in outcome ? (

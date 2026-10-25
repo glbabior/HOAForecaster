@@ -11,51 +11,51 @@
     "id": "management",
     "frequency": "yearly",
     "year": null,
-    "end_year": null,
-    "inflation": null,
     "amount": "58000",
     "description": "Management, accounting and administration",
-    "source": "Fictional 2027 budget"
+    "source": "Fictional 2027 budget",
+    "end_year": null,
+    "inflation": null
    },
    {
     "id": "utilities",
     "frequency": "monthly",
     "year": null,
-    "end_year": null,
-    "inflation": "0.035",
     "amount": "3100",
     "description": "Common-area water, power and gas",
-    "source": "Fictional 2026 utility bills"
+    "source": "Fictional 2026 utility bills",
+    "end_year": null,
+    "inflation": "0.035"
    },
    {
     "id": "insurance",
     "frequency": "yearly",
     "year": null,
-    "end_year": null,
-    "inflation": "0.045",
     "amount": "41000",
     "description": "Master insurance policy",
-    "source": "Fictional broker quote"
+    "source": "Fictional broker quote",
+    "end_year": null,
+    "inflation": "0.045"
    },
    {
     "id": "landscaping",
     "frequency": "yearly",
     "year": 2027,
-    "end_year": 2033,
-    "inflation": "0.025",
     "amount": "13000",
     "description": "Landscaping contract",
-    "source": "Fictional contract, 2027–2033"
+    "source": "Fictional contract, 2027–2033",
+    "end_year": 2033,
+    "inflation": "0.025"
    },
    {
     "id": "landscaping-renewal",
     "frequency": "yearly",
     "year": 2034,
-    "end_year": null,
-    "inflation": null,
     "amount": "16500",
     "description": "Landscaping contract after renewal",
-    "source": "Placeholder – contract to be re-bid"
+    "source": "Placeholder – contract to be re-bid",
+    "end_year": null,
+    "inflation": null
    },
    {
     "id": "study-2027",
@@ -63,8 +63,8 @@
     "year": 2027,
     "amount": "14000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2028",
@@ -72,8 +72,8 @@
     "year": 2028,
     "amount": "19500",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2029",
@@ -81,8 +81,8 @@
     "year": 2029,
     "amount": "150000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2030",
@@ -90,8 +90,8 @@
     "year": 2030,
     "amount": "11200",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2031",
@@ -99,8 +99,8 @@
     "year": 2031,
     "amount": "27000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2032",
@@ -108,8 +108,8 @@
     "year": 2032,
     "amount": "16800",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2033",
@@ -117,8 +117,8 @@
     "year": 2033,
     "amount": "58000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2034",
@@ -126,8 +126,8 @@
     "year": 2034,
     "amount": "12900",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2035",
@@ -135,8 +135,8 @@
     "year": 2035,
     "amount": "35400",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2036",
@@ -144,8 +144,8 @@
     "year": 2036,
     "amount": "20600",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2037",
@@ -153,8 +153,8 @@
     "year": 2037,
     "amount": "86000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2038",
@@ -162,8 +162,8 @@
     "year": 2038,
     "amount": "15500",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2039",
@@ -171,8 +171,8 @@
     "year": 2039,
     "amount": "30200",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2040",
@@ -180,8 +180,8 @@
     "year": 2040,
     "amount": "18200",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2041",
@@ -189,8 +189,8 @@
     "year": 2041,
     "amount": "46600",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "study-2042",
@@ -198,19 +198,19 @@
     "year": 2042,
     "amount": "23000",
     "description": "Reserve study total, all scheduled components",
-    "nominal": true,
-    "source": "Fictional reserve study, 2026, expense schedule"
+    "source": "Fictional reserve study, 2026, expense schedule",
+    "nominal": true
    },
    {
     "id": "repaint",
     "frequency": "every",
     "year": 2031,
-    "end_year": null,
-    "interval": 8,
     "amount": "85000",
     "description": "Exterior repaint",
-    "nominal": false,
-    "source": "Fictional painter's estimate, 2026 dollars"
+    "source": "Fictional painter's estimate, 2026 dollars",
+    "end_year": null,
+    "interval": 8,
+    "nominal": false
    },
    {
     "id": "railings",
@@ -218,8 +218,8 @@
     "year": 2031,
     "amount": "22000",
     "description": "Balcony railing replacement",
-    "nominal": false,
-    "source": "Fictional contractor estimate, 2026 dollars"
+    "source": "Fictional contractor estimate, 2026 dollars",
+    "nominal": false
    },
    {
     "id": "boiler",
@@ -227,19 +227,19 @@
     "year": 2035,
     "amount": "60000",
     "description": "Boiler replacement",
-    "nominal": false,
-    "source": "Placeholder – no estimate yet"
+    "source": "Placeholder – no estimate yet",
+    "nominal": false
    },
    {
     "id": "gutters",
     "frequency": "every",
     "year": 2028,
-    "end_year": 2040,
-    "interval": 3,
     "amount": "4500",
     "description": "Gutter cleaning and roof sealing",
-    "nominal": false,
-    "source": "Fictional maintenance plan"
+    "source": "Fictional maintenance plan",
+    "end_year": 2040,
+    "interval": 3,
+    "nominal": false
    }
   ],
   "expense_inflation": "0.035",
@@ -293,7 +293,8 @@
     "sources": {},
     "expense_lines": {},
     "ffb": {}
-   }
+   },
+   "adoption": null
   },
   {
    "name": "Two-part assessment",
@@ -324,7 +325,8 @@
     "sources": {},
     "expense_lines": {},
     "ffb": {}
-   }
+   },
+   "adoption": null
   },
   {
    "name": "Hold then catch up",
@@ -363,7 +365,8 @@
     "sources": {},
     "expense_lines": {},
     "ffb": {}
-   }
+   },
+   "adoption": null
   },
   {
    "name": "Steady increase",
@@ -381,7 +384,8 @@
     "sources": {},
     "expense_lines": {},
     "ffb": {}
-   }
+   },
+   "adoption": null
   },
   {
    "name": "Insurance shock",
@@ -406,26 +410,328 @@
      "insurance": {
       "frequency": "yearly",
       "year": null,
-      "end_year": null,
-      "inflation": "0.08",
       "amount": "47000",
       "description": "Master insurance policy after renewal",
-      "source": "Fictional broker warning"
+      "source": "Fictional broker warning",
+      "end_year": null,
+      "inflation": "0.08"
      },
      "boiler": null,
      "pool": {
       "frequency": "every",
       "year": 2030,
-      "end_year": null,
-      "interval": 6,
       "amount": "12000",
       "description": "Pool resurfacing",
-      "nominal": false,
-      "source": "Fictional contractor estimate"
+      "source": "Fictional contractor estimate",
+      "end_year": null,
+      "interval": 6,
+      "nominal": false
      }
     },
     "ffb": {
      "2031": "700000"
+    }
+   },
+   "adoption": null
+  },
+  {
+   "name": "Adopted – two-part assessment",
+   "description": "Adopted at the fictional annual meeting; frozen on that autumn's figures",
+   "dues": {
+    "mode": "rate",
+    "first_value": "700",
+    "annual_increase": "0.035",
+    "overrides": {
+     "2032": "860"
+    }
+   },
+   "assessments": [
+    {
+     "year": 2028,
+     "amount": "5000",
+     "note": "First installment"
+    },
+    {
+     "year": 2029,
+     "amount": "5000",
+     "note": "Second installment"
+    }
+   ],
+   "rounding": "dollar",
+   "changes": {
+    "values": {
+     "interest_rate": "0.02"
+    },
+    "sources": {
+     "interest_rate": "Fictional bank offer, autumn 2026"
+    },
+    "expense_lines": {
+     "railings": null
+    },
+    "ffb": {
+     "2030": "650000"
+    }
+   },
+   "adoption": {
+    "date": "2026-10-14",
+    "note": "Fictional annual meeting, motion carried",
+    "sequence": 1,
+    "baseline": {
+     "start_year": 2027,
+     "end_year": 2042,
+     "starting_balance": "172000",
+     "expense_lines": [
+      {
+       "id": "management",
+       "frequency": "yearly",
+       "year": null,
+       "amount": "58000",
+       "description": "Management, accounting and administration",
+       "source": "Fictional 2027 budget",
+       "end_year": null,
+       "inflation": null
+      },
+      {
+       "id": "utilities",
+       "frequency": "monthly",
+       "year": null,
+       "amount": "3100",
+       "description": "Common-area water, power and gas",
+       "source": "Fictional 2026 utility bills",
+       "end_year": null,
+       "inflation": "0.035"
+      },
+      {
+       "id": "insurance",
+       "frequency": "yearly",
+       "year": null,
+       "amount": "41000",
+       "description": "Master insurance policy",
+       "source": "Fictional broker quote",
+       "end_year": null,
+       "inflation": "0.045"
+      },
+      {
+       "id": "landscaping",
+       "frequency": "yearly",
+       "year": 2027,
+       "amount": "13000",
+       "description": "Landscaping contract",
+       "source": "Fictional contract, 2027–2033",
+       "end_year": 2033,
+       "inflation": "0.025"
+      },
+      {
+       "id": "landscaping-renewal",
+       "frequency": "yearly",
+       "year": 2034,
+       "amount": "16500",
+       "description": "Landscaping contract after renewal",
+       "source": "Placeholder – contract to be re-bid",
+       "end_year": null,
+       "inflation": null
+      },
+      {
+       "id": "study-2027",
+       "frequency": "once",
+       "year": 2027,
+       "amount": "14000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2028",
+       "frequency": "once",
+       "year": 2028,
+       "amount": "19500",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2029",
+       "frequency": "once",
+       "year": 2029,
+       "amount": "150000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2030",
+       "frequency": "once",
+       "year": 2030,
+       "amount": "11200",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2031",
+       "frequency": "once",
+       "year": 2031,
+       "amount": "27000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2032",
+       "frequency": "once",
+       "year": 2032,
+       "amount": "16800",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2033",
+       "frequency": "once",
+       "year": 2033,
+       "amount": "58000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2034",
+       "frequency": "once",
+       "year": 2034,
+       "amount": "12900",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2035",
+       "frequency": "once",
+       "year": 2035,
+       "amount": "35400",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2036",
+       "frequency": "once",
+       "year": 2036,
+       "amount": "20600",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2037",
+       "frequency": "once",
+       "year": 2037,
+       "amount": "86000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2038",
+       "frequency": "once",
+       "year": 2038,
+       "amount": "15500",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2039",
+       "frequency": "once",
+       "year": 2039,
+       "amount": "30200",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2040",
+       "frequency": "once",
+       "year": 2040,
+       "amount": "18200",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2041",
+       "frequency": "once",
+       "year": 2041,
+       "amount": "46600",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "study-2042",
+       "frequency": "once",
+       "year": 2042,
+       "amount": "23000",
+       "description": "Reserve study total, all scheduled components",
+       "source": "Fictional reserve study, 2026, expense schedule",
+       "nominal": true
+      },
+      {
+       "id": "repaint",
+       "frequency": "every",
+       "year": 2031,
+       "amount": "85000",
+       "description": "Exterior repaint",
+       "source": "Fictional painter's estimate, 2026 dollars",
+       "end_year": null,
+       "interval": 8,
+       "nominal": false
+      },
+      {
+       "id": "gutters",
+       "frequency": "every",
+       "year": 2028,
+       "amount": "4500",
+       "description": "Gutter cleaning and roof sealing",
+       "source": "Fictional maintenance plan",
+       "end_year": 2040,
+       "interval": 3,
+       "nominal": false
+      }
+     ],
+     "expense_inflation": "0.035",
+     "expense_base_year": 2026,
+     "ffb": {
+      "2027": "595000",
+      "2028": "619000",
+      "2029": "644000",
+      "2030": "650000",
+      "2031": "697000",
+      "2032": "725000",
+      "2033": "755000",
+      "2034": "786000",
+      "2035": "818000",
+      "2036": "851000",
+      "2037": "886000",
+      "2038": "922000",
+      "2039": "959000",
+      "2040": "998000",
+      "2041": "1039000",
+      "2042": "1081000",
+      "2043": "1125000"
+     },
+     "operating_inflation": "0.04",
+     "interest_rate": "0.02",
+     "units": 24,
+     "current_dues": "560",
+     "cushion": "75000",
+     "target": "0.6",
+     "max_dues_increase": "0.20",
+     "max_assessment_share": "0.05",
+     "sources": {
+      "starting_balance": "Fictional balance sheet, September 2026",
+      "current_dues": "Fictional 2026 budget",
+      "interest_rate": "Fictional bank offer, autumn 2026"
+     }
     }
    }
   }

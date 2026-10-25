@@ -161,7 +161,22 @@ CHANGES_HEADING = (
 )
 LEAVE_OUT_COL = len(EXPENSE_COLUMNS) + 1
 LEAVE_OUT_HEADING = "Leave out?"
-CHANGE_YEAR_COL = LEAVE_OUT_COL + 1  # the start year, in the changes table
+# An adopted plan's sheet holds its frozen baseline in full, so it marks which values, notes,
+# lines and years are the plan's own changes – the rest is the baseline as it was adopted.
+OWN_COL = LEAVE_OUT_COL + 1
+OWN_HEADING = "This plan's own?"
+MARK_COL = SOURCE_COL + 1  # the assumptions' mark – one of ASSUMPTION_MARKS
+ASSUMPTION_MARKS = ("", "value", "note", "value and note")
+FFB_NOTE_MARK_COL = 2  # on the Fully Funded Balance mark row – "note" when the note is its own
+PLAN_FFB_OWN_LABEL = "This plan's own Fully Funded Balance?"  # the row below FFB_LABEL
+# the start year, in the changes table – after the mark column on every Plan sheet (blank on an
+# ordinary scenario's), so all Plan sheets share one layout
+CHANGE_YEAR_COL = OWN_COL + 1
+ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL = (
+    "Adopted on",
+    "Adoption note",
+    "Adoption order (the highest is the current plan)",
+)  # below the reserve total, on an adopted plan's sheet only
 CHANGE_SPARE_ROWS = 3
 PLAN_OPERATING_LABEL = "TOTAL operating expenses – this scenario"
 PLAN_RESERVE_LABEL = "TOTAL reserve expenses – this scenario"

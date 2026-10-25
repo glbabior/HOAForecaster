@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
 import { ApiError, api } from "../api";
@@ -26,11 +26,13 @@ import {
   useInvalidFields,
 } from "../components/ui";
 import { roundCents } from "../decimal";
-import { dues as duesText } from "../format";
+import { dues as duesText, longDate, today } from "../format";
 import { useDebounced, useDraftAutosave, useUnsavedGuard } from "../hooks";
 import {
   applyChanges,
+  baselineFor,
   blankScenario,
+  currentAdoption,
   horizonOf,
   noChanges,
   plausibleHorizon,
@@ -108,6 +110,8 @@ function ScenarioForm({
   const [problems, setProblems] = useState<string[]>([]);
   const [saveError, setSaveError] = useState<unknown>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [adopting, setAdopting] = useState<{ date: string; note: string } | null>(null);
+  const [confirmUnadopt, setConfirmUnadopt] = useState(false);
   const { invalid, Provider } = useInvalidFields();
   const assessmentRows = useRowIds(form.assessments.length);
 
@@ -149,7 +153,7 @@ function ScenarioForm({
     return () => controller.abort();
   }, [settled, stored.project.baseline]);
 
-  const b = applyChanges(stored.project.baseline, form.changes); // as this scenario sees it
+  const b = baselineFor(stored.project.baseline, form); // as this scenario sees it
   const years = horizonOf(stored.project.baseline, form);
   const resolved = new Map(result?.years.map((y) => [y.year, y.dues]) ?? []);
   const others = stored.project.scenarios.filter((s) => s.name !== (isNew ? null : routeName));
@@ -229,13 +233,44 @@ function ScenarioForm({
   }
 
   const cannotSave = !name || duplicate || invalid.length > 0;
-  const changes = changeCount(stored.project.baseline, form.changes);
+  // an adopted plan is shown on the baseline it was frozen with, never today's
+  const shownBaseline = original.adoption?.baseline ?? stored.project.baseline;
+  const changes = changeCount(shownBaseline, form.changes);
+  const adoption = original.adoption ?? null; // an adopted plan is read-only (spec 5.2)
+  const isCurrent = currentAdoption(stored.project.scenarios)?.name === original.name;
+
+  async function adopt() {
+    setAdopting(null);
+    if (!adopting) return;
+    try {
+      const saved = await api.adopt(
+        id,
+        original.name,
+        adopting.date,
+        adopting.note,
+        stored.revision,
+      );
+      void api.discardDraft(id, screen).catch(() => undefined); // it can no longer be edited
+      setStored(saved);
+    } catch (e) {
+      setSaveError(e);
+    }
+  }
+
+  async function unadopt() {
+    setConfirmUnadopt(false);
+    try {
+      setStored(await api.unadopt(id, stored.revision));
+    } catch (e) {
+      setSaveError(e);
+    }
+  }
 
   return (
     <Provider>
       <ProjectNav stored={stored} here={isNew ? "New scenario" : original.name} />
       <h1>{isNew ? "New scenario" : original.name}</h1>
-      {draft && draft.edits.kind === "scenario" && (
+      {draft && draft.edits.kind === "scenario" && !original.adoption && (
         <DraftBanner
           draft={draft}
           revision={stored.revision}
@@ -253,306 +288,359 @@ function ScenarioForm({
         />
       )}
       <ErrorBanner error={saveError} />
+      {adoption && (
+        <section className="panel adopted" aria-label="Adopted plan">
+          <p>
+            <strong>{isCurrent ? "The adopted plan" : "An earlier adopted plan"}</strong> – adopted{" "}
+            {longDate(adoption.date)}.{adoption.note && ` ${adoption.note}`}
+          </p>
+          <p className="hint">
+            Its figures are frozen with the baseline it was adopted against, so later baseline edits
+            do not change them. It is read-only – start a new scenario from it to revise it.
+          </p>
+          <div className="row-actions">
+            <Link
+              className="button"
+              to={`/projects/${id}/scenarios/new?from=${encodeURIComponent(original.name)}`}
+            >
+              Start a new scenario from it
+            </Link>
+            {isCurrent && (
+              <button type="button" onClick={() => setConfirmUnadopt(true)}>
+                Un-adopt…
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <div className="split">
         <form
           className="editor inputs"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!cannotSave) void save(false);
+            if (!cannotSave && !adoption) void save(false);
           }}
         >
-          <Field label="Name" error={duplicate ? "Another scenario already has this name" : null}>
-            {(fid, d) => (
-              <input
-                id={fid}
-                aria-describedby={d}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            )}
-          </Field>
-          <Field label="Description">
-            {(fid) => (
-              <textarea
-                id={fid}
-                rows={2}
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            )}
-          </Field>
+          <fieldset className="plain" disabled={adoption !== null}>
+            <Field label="Name" error={duplicate ? "Another scenario already has this name" : null}>
+              {(fid, d) => (
+                <input
+                  id={fid}
+                  aria-describedby={d}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              )}
+            </Field>
+            <Field label="Description">
+              {(fid) => (
+                <textarea
+                  id={fid}
+                  rows={2}
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+              )}
+            </Field>
 
-          <fieldset>
-            <legend>Dues per unit per month</legend>
-            <label>
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "rate"}
-                onChange={() => changeMode("rate")}
-              />{" "}
-              A first-year figure, then a yearly increase
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "pinned"}
-                onChange={() => changeMode("pinned")}
-              />{" "}
-              The same, with some years pinned to a figure
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="mode"
-                checked={mode === "explicit"}
-                onChange={() => changeMode("explicit")}
-              />{" "}
-              Typed for each year
-            </label>
+            <fieldset>
+              <legend>Dues per unit per month</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="mode"
+                  checked={mode === "rate"}
+                  onChange={() => changeMode("rate")}
+                />{" "}
+                A first-year figure, then a yearly increase
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="mode"
+                  checked={mode === "pinned"}
+                  onChange={() => changeMode("pinned")}
+                />{" "}
+                The same, with some years pinned to a figure
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="mode"
+                  checked={mode === "explicit"}
+                  onChange={() => changeMode("explicit")}
+                />{" "}
+                Typed for each year
+              </label>
 
-            {form.dues.mode === "rate" && (
-              <div className="grid-2">
-                <Field label={`Dues in ${b.start_year}`}>
-                  {(fid) => (
-                    <DecimalInput
-                      id={fid}
-                      name={`Dues in ${b.start_year}`}
-                      value={form.dues.mode === "rate" ? form.dues.first_value : null}
-                      onChange={(v) =>
-                        v !== null &&
-                        form.dues.mode === "rate" &&
-                        setForm({ ...form, dues: { ...form.dues, first_value: v } })
-                      }
-                    />
-                  )}
-                </Field>
-                <Field label="Yearly increase">
-                  {(fid) => (
-                    <DecimalInput
-                      id={fid}
-                      name="Yearly increase"
-                      percent
-                      value={form.dues.mode === "rate" ? form.dues.annual_increase : null}
-                      onChange={(v) =>
-                        v !== null &&
-                        form.dues.mode === "rate" &&
-                        setForm({ ...form, dues: { ...form.dues, annual_increase: v } })
-                      }
-                    />
-                  )}
-                </Field>
-              </div>
-            )}
-
-            <table className="edit-table dues-table">
-              <caption>
-                Dues each year
-                {mode === "pinned" ? " – pin a year to a figure; later years grow from it" : ""}
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Year</th>
-                  {mode !== "rate" && (
-                    <th scope="col">{mode === "explicit" ? "Dues" : "Pinned"}</th>
-                  )}
-                  <th scope="col" className="num">
-                    Resolved
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {years.map((y) => {
-                  const key = String(y);
-                  return (
-                    <tr key={y}>
-                      <th scope="row">{y}</th>
-                      {form.dues.mode === "explicit" && (
-                        <td>
-                          <DecimalInput
-                            label={`Dues in ${y}`}
-                            name={`Dues in ${y}`}
-                            value={form.dues.explicit[key] ?? null}
-                            onChange={(v) =>
-                              v !== null &&
-                              form.dues.mode === "explicit" &&
-                              setForm({
-                                ...form,
-                                dues: {
-                                  mode: "explicit",
-                                  explicit: { ...form.dues.explicit, [key]: v },
-                                },
-                              })
-                            }
-                          />
-                        </td>
-                      )}
-                      {form.dues.mode === "rate" && mode === "pinned" && (
-                        <td>
-                          <DecimalInput
-                            label={`Pinned dues in ${y}`}
-                            name={`Pinned dues in ${y}`}
-                            allowBlank
-                            value={form.dues.overrides[key] ?? null}
-                            onChange={(v) => {
-                              if (form.dues.mode !== "rate") return;
-                              const overrides = Object.fromEntries(
-                                Object.entries(form.dues.overrides).filter(
-                                  ([year]) => year !== key,
-                                ),
-                              );
-                              if (v !== null) overrides[key] = v;
-                              setForm({ ...form, dues: { ...form.dues, overrides } });
-                            }}
-                          />
-                        </td>
-                      )}
-                      <td className="num">{duesText(resolved.get(y))}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {form.dues.mode === "rate" && (
-              <Field label="Rounding of grown dues">
-                {(fid) => (
-                  <select
-                    id={fid}
-                    value={form.rounding}
-                    onChange={(e) =>
-                      setForm({ ...form, rounding: e.target.value as Scenario["rounding"] })
-                    }
-                  >
-                    <option value="dollar">Whole dollars</option>
-                    <option value="none">None – keep cents</option>
-                  </select>
-                )}
-              </Field>
-            )}
-          </fieldset>
-
-          <fieldset>
-            <legend>Special assessments</legend>
-            <p className="hint">Per unit. Several installments are separate rows.</p>
-            <table className="edit-table">
-              <caption className="visually-hidden">Special assessments</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Year</th>
-                  <th scope="col">Per unit</th>
-                  <th scope="col">Note</th>
-                  <th scope="col">
-                    <span className="visually-hidden">Remove</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.assessments.map((a, i) => (
-                  <tr key={assessmentRows.ids[i]}>
-                    <td>
-                      <YearInput
-                        label={`Year of assessment ${i + 1}`}
-                        name={`Year of assessment ${i + 1}`}
-                        value={a.year}
-                        onChange={(year) =>
-                          setAssessments(
-                            form.assessments.map((x, j) => (j === i ? { ...x, year } : x)),
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
+              {form.dues.mode === "rate" && (
+                <div className="grid-2">
+                  <Field label={`Dues in ${b.start_year}`}>
+                    {(fid) => (
                       <DecimalInput
-                        label={`Amount of assessment ${i + 1}`}
-                        name={`Amount of assessment ${i + 1}`}
-                        value={a.amount}
+                        id={fid}
+                        name={`Dues in ${b.start_year}`}
+                        value={form.dues.mode === "rate" ? form.dues.first_value : null}
                         onChange={(v) =>
                           v !== null &&
-                          setAssessments(
-                            form.assessments.map((x, j) => (j === i ? { ...x, amount: v } : x)),
-                          )
+                          form.dues.mode === "rate" &&
+                          setForm({ ...form, dues: { ...form.dues, first_value: v } })
                         }
                       />
-                    </td>
-                    <td>
-                      <input
-                        aria-label={`Note for assessment ${i + 1}`}
-                        value={a.note}
-                        onChange={(e) =>
-                          setAssessments(
-                            form.assessments.map((x, j) =>
-                              j === i ? { ...x, note: e.target.value } : x,
-                            ),
-                          )
+                    )}
+                  </Field>
+                  <Field label="Yearly increase">
+                    {(fid) => (
+                      <DecimalInput
+                        id={fid}
+                        name="Yearly increase"
+                        percent
+                        value={form.dues.mode === "rate" ? form.dues.annual_increase : null}
+                        onChange={(v) =>
+                          v !== null &&
+                          form.dues.mode === "rate" &&
+                          setForm({ ...form, dues: { ...form.dues, annual_increase: v } })
                         }
                       />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="small"
-                        aria-label={`Remove assessment ${i + 1}`}
-                        onClick={() => {
-                          assessmentRows.removed(i);
-                          setAssessments(form.assessments.filter((_, j) => j !== i));
-                        }}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button
-              type="button"
-              onClick={() => {
-                assessmentRows.added();
-                setAssessments([
-                  ...form.assessments,
-                  { year: b.start_year, amount: "0", note: "" },
-                ]);
-              }}
-            >
-              Add assessment
-            </button>
-          </fieldset>
+                    )}
+                  </Field>
+                </div>
+              )}
 
-          <fieldset>
-            <legend>
-              Changes to the baseline
-              {changes > 0 ? ` (${changes})` : ""}
-            </legend>
-            <BaselineChanges
-              baseline={stored.project.baseline}
-              changes={form.changes}
-              onChange={setChanges}
-            />
+              <table className="edit-table dues-table">
+                <caption>
+                  Dues each year
+                  {mode === "pinned" ? " – pin a year to a figure; later years grow from it" : ""}
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    {mode !== "rate" && (
+                      <th scope="col">{mode === "explicit" ? "Dues" : "Pinned"}</th>
+                    )}
+                    <th scope="col" className="num">
+                      Resolved
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {years.map((y) => {
+                    const key = String(y);
+                    return (
+                      <tr key={y}>
+                        <th scope="row">{y}</th>
+                        {form.dues.mode === "explicit" && (
+                          <td>
+                            <DecimalInput
+                              label={`Dues in ${y}`}
+                              name={`Dues in ${y}`}
+                              value={form.dues.explicit[key] ?? null}
+                              onChange={(v) =>
+                                v !== null &&
+                                form.dues.mode === "explicit" &&
+                                setForm({
+                                  ...form,
+                                  dues: {
+                                    mode: "explicit",
+                                    explicit: { ...form.dues.explicit, [key]: v },
+                                  },
+                                })
+                              }
+                            />
+                          </td>
+                        )}
+                        {form.dues.mode === "rate" && mode === "pinned" && (
+                          <td>
+                            <DecimalInput
+                              label={`Pinned dues in ${y}`}
+                              name={`Pinned dues in ${y}`}
+                              allowBlank
+                              value={form.dues.overrides[key] ?? null}
+                              onChange={(v) => {
+                                if (form.dues.mode !== "rate") return;
+                                const overrides = Object.fromEntries(
+                                  Object.entries(form.dues.overrides).filter(
+                                    ([year]) => year !== key,
+                                  ),
+                                );
+                                if (v !== null) overrides[key] = v;
+                                setForm({ ...form, dues: { ...form.dues, overrides } });
+                              }}
+                            />
+                          </td>
+                        )}
+                        <td className="num">{duesText(resolved.get(y))}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {form.dues.mode === "rate" && (
+                <Field label="Rounding of grown dues">
+                  {(fid) => (
+                    <select
+                      id={fid}
+                      value={form.rounding}
+                      onChange={(e) =>
+                        setForm({ ...form, rounding: e.target.value as Scenario["rounding"] })
+                      }
+                    >
+                      <option value="dollar">Whole dollars</option>
+                      <option value="none">None – keep cents</option>
+                    </select>
+                  )}
+                </Field>
+              )}
+            </fieldset>
+
+            <fieldset>
+              <legend>Special assessments</legend>
+              <p className="hint">Per unit. Several installments are separate rows.</p>
+              <table className="edit-table">
+                <caption className="visually-hidden">Special assessments</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Year</th>
+                    <th scope="col">Per unit</th>
+                    <th scope="col">Note</th>
+                    <th scope="col">
+                      <span className="visually-hidden">Remove</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.assessments.map((a, i) => (
+                    <tr key={assessmentRows.ids[i]}>
+                      <td>
+                        <YearInput
+                          label={`Year of assessment ${i + 1}`}
+                          name={`Year of assessment ${i + 1}`}
+                          value={a.year}
+                          onChange={(year) =>
+                            setAssessments(
+                              form.assessments.map((x, j) => (j === i ? { ...x, year } : x)),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <DecimalInput
+                          label={`Amount of assessment ${i + 1}`}
+                          name={`Amount of assessment ${i + 1}`}
+                          value={a.amount}
+                          onChange={(v) =>
+                            v !== null &&
+                            setAssessments(
+                              form.assessments.map((x, j) => (j === i ? { ...x, amount: v } : x)),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`Note for assessment ${i + 1}`}
+                          value={a.note}
+                          onChange={(e) =>
+                            setAssessments(
+                              form.assessments.map((x, j) =>
+                                j === i ? { ...x, note: e.target.value } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="small"
+                          aria-label={`Remove assessment ${i + 1}`}
+                          onClick={() => {
+                            assessmentRows.removed(i);
+                            setAssessments(form.assessments.filter((_, j) => j !== i));
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button
+                type="button"
+                onClick={() => {
+                  assessmentRows.added();
+                  setAssessments([
+                    ...form.assessments,
+                    { year: b.start_year, amount: "0", note: "" },
+                  ]);
+                }}
+              >
+                Add assessment
+              </button>
+            </fieldset>
+
+            <fieldset>
+              <legend>
+                Changes to the baseline
+                {changes > 0 ? ` (${changes})` : ""}
+              </legend>
+              <BaselineChanges
+                baseline={shownBaseline}
+                frozen={adoption !== null}
+                changes={form.changes}
+                onChange={setChanges}
+              />
+            </fieldset>
           </fieldset>
 
           <div className="sticky-actions">
-            <InvalidNotice fields={invalid} />
-            <button type="submit" className="primary" disabled={(!dirty && !isNew) || cannotSave}>
-              Save
-            </button>
-            <button type="button" disabled={cannotSave} onClick={() => void save(true)}>
-              Save as copy
-            </button>
-            {!isNew && (
-              <button type="button" onClick={() => setConfirmDelete(true)}>
-                Delete…
-              </button>
+            {adoption ? (
+              <>
+                <button type="button" onClick={() => window.print()}>
+                  Print
+                </button>
+                <button type="button" onClick={() => navigate(`/projects/${id}`)}>
+                  Back to the project
+                </button>
+              </>
+            ) : (
+              <>
+                <InvalidNotice fields={invalid} />
+                <button
+                  type="submit"
+                  className="primary"
+                  disabled={(!dirty && !isNew) || cannotSave}
+                >
+                  Save
+                </button>
+                <button type="button" disabled={cannotSave} onClick={() => void save(true)}>
+                  Save as copy
+                </button>
+                {!isNew && (
+                  <button type="button" onClick={() => setConfirmDelete(true)}>
+                    Delete…
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={isNew || dirty}
+                  title={isNew || dirty ? "Save the scenario first" : undefined}
+                  onClick={() => setAdopting({ date: today(), note: "" })}
+                >
+                  Adopt…
+                </button>
+                <button type="button" onClick={() => window.print()}>
+                  Print
+                </button>
+                <button type="button" onClick={() => navigate(`/projects/${id}`)}>
+                  Cancel
+                </button>
+                <DraftStatus status={status} />
+              </>
             )}
-            <button type="button" onClick={() => window.print()}>
-              Print
-            </button>
-            <button type="button" onClick={() => navigate(`/projects/${id}`)}>
-              Cancel
-            </button>
-            <DraftStatus status={status} />
           </div>
         </form>
 
@@ -594,6 +682,49 @@ function ScenarioForm({
         onConfirm={() => void remove()}
       >
         <p>The scenario is removed from the project when you confirm.</p>
+      </Confirm>
+      <Confirm
+        open={adopting !== null}
+        title={`Adopt ${original.name}?`}
+        confirmLabel="Adopt"
+        onCancel={() => setAdopting(null)}
+        onConfirm={() => void adopt()}
+      >
+        <p>
+          It becomes the adopted plan – read-only, with its figures frozen on today's baseline.
+          {currentAdoption(stored.project.scenarios)
+            ? ` ${currentAdoption(stored.project.scenarios)?.name} stays as an earlier adopted plan.`
+            : ""}
+        </p>
+        <label className="field">
+          <span>Adopted on</span>
+          <input
+            type="date"
+            required
+            value={adopting?.date ?? ""}
+            onChange={(e) => adopting && setAdopting({ ...adopting, date: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span>Note – the meeting and vote, for example</span>
+          <textarea
+            rows={2}
+            value={adopting?.note ?? ""}
+            onChange={(e) => adopting && setAdopting({ ...adopting, note: e.target.value })}
+          />
+        </label>
+      </Confirm>
+      <Confirm
+        open={confirmUnadopt}
+        title={`Un-adopt ${original.name}?`}
+        confirmLabel="Un-adopt"
+        onCancel={() => setConfirmUnadopt(false)}
+        onConfirm={() => void unadopt()}
+      >
+        <p>
+          It becomes an ordinary scenario again, running on today's baseline, and the plan adopted
+          before it – if any – becomes the adopted plan. Use this only to correct a mistake.
+        </p>
       </Confirm>
       <Confirm
         open={blocker.state === "blocked"}
