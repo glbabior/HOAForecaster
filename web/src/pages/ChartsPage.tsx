@@ -30,6 +30,11 @@ export function ChartsPage() {
     r.years.flatMap((y) => [num(y.expenses), num(y.total_from_owners), num(y.ending_balance)]),
   );
   const grid = values.length ? sharedGrid(Math.min(...values), Math.max(...values)) : undefined;
+  const allYears = shown.flatMap(([, r]) => r.years.map((y) => y.year));
+  const spans = new Set(shown.map(([, r]) => `${r.years[0]?.year}–${r.years.at(-1)?.year}`));
+  // one year axis across the stack when the scenarios cover different years (spec 7.5)
+  const years: [number, number] | undefined =
+    spans.size > 1 ? [Math.min(...allYears), Math.max(...allYears)] : undefined;
 
   return (
     <>
@@ -55,7 +60,7 @@ export function ChartsPage() {
           filename={`${n} - balance.png`}
           legend={BALANCE_LEGEND}
         >
-          <BalanceChart result={r} grid={grid} />
+          <BalanceChart result={r} grid={grid} years={years} />
         </ChartFrame>
       ))}
       {shown.length === 0 && <p>Choose at least one scenario.</p>}

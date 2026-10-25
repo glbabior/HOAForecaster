@@ -5,7 +5,15 @@ import { csvCell, parsePasted, toCsv } from "./csv";
 import { fromPercent, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
 import { dues, money, percent, span } from "./format";
 import { sharedDomain, sharedGrid } from "./scale";
-import { blankScenario, plausibleHorizon, reshapeHorizon, reshapeScenario } from "./template";
+import {
+  applyChanges,
+  blankScenario,
+  horizonOf,
+  noChanges,
+  plausibleHorizon,
+  reshapeHorizon,
+  reshapeScenario,
+} from "./template";
 import type { Baseline, Scenario } from "./types";
 
 describe("exact decimals", () => {
@@ -163,6 +171,56 @@ describe("shared chart scale", () => {
     expect(sharedDomain(-45222, 806568)).toEqual([-200000, 1000000]);
     expect(sharedDomain(0, 1040000)).toEqual([0, 1250000]);
     expect(sharedDomain(0, 0)).toEqual([0, 5]);
+  });
+});
+
+describe("a scenario's changes to the baseline", () => {
+  const line = (id: string, year: number) => ({
+    id,
+    frequency: "once" as const,
+    year,
+    amount: "1",
+    description: id,
+    source: "",
+    nominal: false,
+  });
+  const baseline = {
+    start_year: 2027,
+    end_year: 2031,
+    interest_rate: "0.02",
+    expense_lines: [line("roof", 2028), line("gate", 2029), line("paint", 2030)],
+    ffb: { "2027": "1" },
+    sources: { interest_rate: "Bank" },
+  } as unknown as Baseline;
+
+  it("changes, leaves out and adds lines where the server does", () => {
+    const strip = (l: ReturnType<typeof line>) =>
+      Object.fromEntries(Object.entries(l).filter(([k]) => k !== "id")) as Omit<typeof l, "id">;
+    const [later, pool] = [strip(line("roof", 2031)), strip(line("pool", 2030))];
+    const own = applyChanges(baseline, {
+      values: { interest_rate: "0.05", end_year: 2033 },
+      sources: { interest_rate: "Board" },
+      expense_lines: { roof: later, gate: null, pool, gone: null },
+      ffb: { "2032": "9" },
+    });
+    expect(own.expense_lines.map((l) => `${l.id} ${l.year}`)).toEqual([
+      "roof 2031",
+      "paint 2030",
+      "pool 2030",
+    ]);
+    expect([own.interest_rate, own.end_year, own.sources.interest_rate]).toEqual([
+      "0.05",
+      2033,
+      "Board",
+    ]);
+    expect(own.ffb).toEqual({ "2027": "1", "2032": "9" });
+  });
+
+  it("runs over its own horizon, or none while that is not a usable one", () => {
+    const s = blankScenario("S", baseline);
+    expect(horizonOf(baseline, s)).toEqual([2027, 2028, 2029, 2030, 2031]);
+    const typing = { ...s, changes: { ...noChanges(), values: { end_year: 2 } } };
+    expect(horizonOf(baseline, typing)).toEqual([]);
   });
 });
 

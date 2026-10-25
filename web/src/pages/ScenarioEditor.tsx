@@ -11,6 +11,7 @@ import {
   OwnerCostChart,
   balanceSummary,
 } from "../components/charts";
+import { BaselineChanges, changeCount } from "../components/changes";
 import { DraftBanner, DraftStatus } from "../components/DraftBanner";
 import { PlanTable } from "../components/PlanTable";
 import { useRowIds } from "../components/tables";
@@ -27,8 +28,15 @@ import {
 import { roundCents } from "../decimal";
 import { dues as duesText } from "../format";
 import { useDebounced, useDraftAutosave, useUnsavedGuard } from "../hooks";
-import { blankScenario } from "../template";
-import type { Assessment, Draft, Scenario, ScenarioResult, StoredProject } from "../types";
+import {
+  applyChanges,
+  blankScenario,
+  horizonOf,
+  noChanges,
+  plausibleHorizon,
+  reshapeScenario,
+} from "../template";
+import type { Assessment, Changes, Draft, Scenario, ScenarioResult, StoredProject } from "../types";
 
 type Mode = "explicit" | "rate" | "pinned";
 
@@ -38,6 +46,9 @@ const modeOf = (s: Scenario): Mode =>
     : Object.keys(s.dues.overrides).length
       ? "pinned"
       : "rate";
+
+/** A scenario from a draft saved before scenarios had changes of their own. */
+const restored = (s: Scenario): Scenario => ({ ...s, changes: s.changes ?? noChanges() });
 
 function uniqueName(base: string, taken: string[]): string {
   let name = base;
@@ -138,8 +149,8 @@ function ScenarioForm({
     return () => controller.abort();
   }, [settled, stored.project.baseline]);
 
-  const b = stored.project.baseline;
-  const years = Array.from({ length: b.end_year - b.start_year + 1 }, (_, i) => b.start_year + i);
+  const b = applyChanges(stored.project.baseline, form.changes); // as this scenario sees it
+  const years = horizonOf(stored.project.baseline, form);
   const resolved = new Map(result?.years.map((y) => [y.year, y.dues]) ?? []);
   const others = stored.project.scenarios.filter((s) => s.name !== (isNew ? null : routeName));
   const name = form.name.trim();
@@ -170,6 +181,14 @@ function ScenarioForm({
 
   function setAssessments(assessments: Assessment[]) {
     setForm({ ...form, assessments });
+  }
+
+  /** New changes to the baseline – typed dues are stretched to the scenario's own horizon once
+   * it is a usable one, as the baseline editor does for the baseline's. */
+  function setChanges(changes: Changes) {
+    const next = { ...form, changes };
+    const { start_year: start, end_year: end } = applyChanges(stored.project.baseline, changes);
+    setForm(plausibleHorizon(start, end) ? reshapeScenario(next, start, end) : next);
   }
 
   async function save(asCopy: boolean) {
@@ -210,6 +229,7 @@ function ScenarioForm({
   }
 
   const cannotSave = !name || duplicate || invalid.length > 0;
+  const changes = changeCount(stored.project.baseline, form.changes);
 
   return (
     <Provider>
@@ -221,8 +241,8 @@ function ScenarioForm({
           revision={stored.revision}
           onRestore={() => {
             if (draft.edits.kind === "scenario") {
-              setForm(draft.edits.scenario);
-              setMode(modeOf(draft.edits.scenario));
+              setForm(restored(draft.edits.scenario));
+              setMode(modeOf(restored(draft.edits.scenario)));
             }
             setDraft(null);
           }}
@@ -499,6 +519,18 @@ function ScenarioForm({
             >
               Add assessment
             </button>
+          </fieldset>
+
+          <fieldset>
+            <legend>
+              Changes to the baseline
+              {changes > 0 ? ` (${changes})` : ""}
+            </legend>
+            <BaselineChanges
+              baseline={stored.project.baseline}
+              changes={form.changes}
+              onChange={setChanges}
+            />
           </fieldset>
 
           <div className="sticky-actions">

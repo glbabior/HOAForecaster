@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from hoa_engine.dues import resolve_dues
-from hoa_engine.model import Baseline, ExpenseLine, Frequency, Scenario
-from hoa_engine.validate import validate_baseline, validate_scenario
+from hoa_engine.model import Baseline, ExpenseLine, Frequency, Scenario, baseline_for
+from hoa_engine.validate import validate_run
 
 ZERO = Decimal(0)
 
@@ -223,8 +223,8 @@ def run(baseline: Baseline, scenario: Scenario) -> ScenarioResult:
     """Project one scenario against the baseline. Raises InvalidInputs on bad inputs."""
     # A fixed context, so a caller's decimal settings can never change the figures.
     with localcontext(prec=28, rounding=ROUND_HALF_EVEN):
-        problems = validate_baseline(baseline) + validate_scenario(scenario, baseline)
+        problems = validate_run(baseline, scenario)
         if problems:
             raise InvalidInputs(problems)
-        years = project_years(baseline, scenario)
+        years = project_years(baseline_for(baseline, scenario), scenario)
         return ScenarioResult(years=years, summary=summarise(years))

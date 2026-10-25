@@ -1,28 +1,36 @@
 """Read a workbook in the export layout back into a project (spec section 7.1 import).
 
 Inputs are read from the blue cells – values, never formulas – and located by
-their labels, so rows a board member inserts or moves are tolerated. Everything
-read is passed through the same strict parser as a project file.
+their labels, so rows a board member inserts or moves are tolerated. Each label
+is looked for only in its own part of the sheet, so an expense or note worded
+like a label cannot stand in for it. Everything read is passed through the same
+strict parser as a project file.
 """
 
 from __future__ import annotations
 
 import re
 import zipfile
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import openpyxl
+from openpyxl.utils import get_column_letter as col_letter
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hoa_engine.model import Project, ProjectFormatError, project_from_dict
-from hoa_engine.validate import validate_baseline, validate_scenario
+from hoa_engine.model import LIMITS, Project, ProjectFormatError, project_from_dict
+from hoa_engine.validate import MAX_YEARS, MIN_YEARS, validate_baseline, validate_run
 from hoa_workbook.layout import (
     ASSESS_AMOUNT_COL,
     ASSESS_NOTE_COL,
     ASSESS_YEAR_COL,
+    ASSUMPTION_ROWS,
+    ASSUMPTIONS_HEADING,
+    CHANGE_YEAR_COL,
+    CHANGES_HEADING,
     CHARTS_LABEL,
     EXPENSE_COL,
     EXPENSE_TOTAL_LABEL,
@@ -33,15 +41,20 @@ from hoa_workbook.layout import (
     HEADER_ROW,
     INPUT_ROWS,
     INPUTS,
+    LEAVE_OUT_COL,
     MODE_GROWN,
     MODE_TYPED,
     OPERATING_TOTAL_LABEL,
+    PLAN_FFB_HEADING,
     PLAN_FIRST_COL,
+    PLAN_OPERATING_LABEL,
     PLAN_ROWS,
     RESERVED,
     ROUND_DOLLAR,
     ROUND_NONE,
     ROW,
+    SOURCE_COL,
+    VALUE_COL,
 )
 
 if not openpyxl.DEFUSEDXML:  # pragma: no cover – guards the environment, not the code
@@ -91,9 +104,24 @@ def _comment(cell: Any) -> str:
     return cell.comment.text.strip() if cell.comment else ""
 
 
-def _label_rows(ws: Worksheet) -> dict[str, int]:
+def _labels(ws: Worksheet) -> list[tuple[int, str]]:
     rows = ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=1, values_only=True)
-    return {_text(v): r for r, (v,) in enumerate(rows, start=1) if isinstance(v, str)}
+    return [(r, _text(v)) for r, (v,) in enumerate(rows, start=1) if isinstance(v, str)]
+
+
+def _last_rows(ws: Worksheet) -> dict[str, int]:
+    """Each label's last row – a total sits below every line that might share its words."""
+    return {label: r for r, label in _labels(ws)}
+
+
+def _first_rows(ws: Worksheet, after: int = 0) -> dict[str, int]:
+    """Each label's first row below `after` – a section's labels come before anything a
+    board member typed further down."""
+    out: dict[str, int] = {}
+    for r, label in _labels(ws):
+        if r > after:
+            out.setdefault(label, r)
+    return out
 
 
 def _check_size(wb: Workbook) -> None:
@@ -110,9 +138,29 @@ def _sheet(wb: Workbook, name: str) -> Worksheet:
     return wb[name]
 
 
-def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
+def _horizon(start: int, end: int, where: str) -> range:
+    """The years from start to end – checked before anything walks them."""
+    if not MIN_YEARS <= end - start + 1 <= MAX_YEARS:
+        raise WorkbookFormatError(
+            f"{where} – the horizon must be {MIN_YEARS}–{MAX_YEARS} full years"
+        )
+    return range(start, end + 1)
+
+
+@dataclass(frozen=True)
+class _Cells:
+    """Where the baseline's figures are, as found – the only cells a scenario's link may name."""
+
+    inputs: dict[str, int]  # input key → its row on Inputs
+    ffb_row: int  # on Expenses
+    ffb_col: dict[int, str]  # year → its column on Expenses
+
+
+def _baseline(
+    wb: Workbook, reserved: frozenset[str]
+) -> tuple[dict[str, str], dict[str, Any], _Cells]:
     ws = _sheet(wb, INPUTS)
-    rows = _label_rows(ws)
+    rows = input_rows = _first_rows(ws)
     raw: dict[str, Any] = {"sources": {}}
     text: dict[str, str] = {}
     for spec in INPUT_ROWS:
@@ -127,15 +175,16 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
             raw[spec.key] = _whole(value, where)
         elif spec.kind == "count":
             raw[spec.key] = _whole(value, where, "a whole number")
-        elif value is None and spec.key.startswith("max_"):
+        elif value is None and spec.key in LIMITS:
             raw[spec.key] = None  # a blank governance limit means no limit
         else:
             raw[spec.key] = _number(value, where)
         if _text(ws.cell(r, 3).value):
             raw["sources"][spec.key] = _text(ws.cell(r, 3).value)
+    _horizon(raw["start_year"], raw["end_year"], "Inputs")
 
     ex = _sheet(wb, EXPENSES)
-    rows = _label_rows(ex)
+    rows = _last_rows(ex)
     if not {EXPENSE_TOTAL_LABEL, OPERATING_TOTAL_LABEL, FFB_LABEL} <= rows.keys():
         raise WorkbookFormatError(
             "the Expenses sheet is missing its total or Fully Funded Balance row"
@@ -167,24 +216,33 @@ def _baseline(wb: Workbook) -> tuple[dict[str, str], dict[str, Any]]:
                 "copy a whole existing row to add an expense"
             )
         lines.append((r, _expense_line(ex, r, where)))
-    raw["expense_lines"] = _with_ids(lines, EXPENSES)
+    # a new line must not take an id a scenario already uses for a line of its own, or one
+    # it changed or left out before that line was deleted
+    own = [line["id"] for _, line in lines if line["id"].startswith("own-")]
+    if own:  # those name lines of a scenario's own – a baseline line taking one would swallow it
+        raise WorkbookFormatError(
+            f"the Expenses line id '{own[0][:40]}' is kept for lines of a scenario's own – clear it"
+        )
+    raw["expense_lines"] = _with_ids(lines, EXPENSES, reserved, "line")
 
     ffb_row = rows[FFB_LABEL]
     if _comment(ex.cell(ffb_row, 1)):
         raw["sources"]["ffb"] = _comment(ex.cell(ffb_row, 1))
-    ffb = {}
+    ffb, ffb_col = {}, {}
     for c in range(EXPENSE_YEAR_COL, ex.max_column + 1):
         year, value = ex.cell(ffb_row - 1, c).value, ex.cell(ffb_row, c).value
         if year is None:
             continue
-        ffb[str(_whole(year, "Fully Funded Balance year"))] = _number(
-            value, f"Fully Funded Balance {year}"
-        )
+        y = _whole(year, "Fully Funded Balance year")
+        ffb[str(y)] = _number(value, f"Fully Funded Balance {year}")
+        ffb_col[y] = col_letter(c)
     raw["ffb"] = ffb
-    return text, raw
+    inputs = {spec.key: input_rows[spec.label] for spec in INPUT_ROWS}
+    return text, raw, _Cells(inputs, ffb_row, ffb_col)
 
 
 _FREQUENCY = {text: key for key, text in FREQUENCY_TEXT.items()}
+_LINE_INPUTS = ("frequency", "amount", "year", "end_year", "interval", "inflation", "nominal")
 
 
 def _optional_whole(value: Any, where: str) -> int | None:
@@ -222,10 +280,12 @@ def _expense_line(ws: Worksheet, r: int, where: str) -> dict[str, Any]:
     }
 
 
-def _with_ids(lines: list[tuple[int, dict[str, Any]]], sheet: str) -> list[dict[str, Any]]:
-    """Every line with an identifier of its own. A row added in Excel with its id cleared gets
-    a new one; a row copied with its id kept is refused, since which row is the original –
-    the one scenarios refer to – cannot be told."""
+def _with_ids(
+    lines: list[tuple[int, dict[str, Any]]], sheet: str, taken: frozenset[str], prefix: str
+) -> list[dict[str, Any]]:
+    """Every line with an identifier of its own – a new one is `<prefix>-N`, none of `taken`.
+    A row added in Excel with its id cleared gets a new one; a row copied with its id kept is
+    refused, since which row is the original – the one scenarios refer to – cannot be told."""
     rows_of: dict[str, list[int]] = {}
     for r, line in lines:
         if line["id"]:
@@ -236,17 +296,19 @@ def _with_ids(lines: list[tuple[int, dict[str, Any]]], sheet: str) -> list[dict[
                 f"rows {rows[0]} and {rows[1]} on {sheet} share the line id '{line_id[:40]}' – "
                 "clear the id of the row you added"
             )
+    used = set(rows_of) | taken
     n = 1
     for _, line in lines:
         if not line["id"]:
-            while f"line-{n}" in rows_of:
+            while f"{prefix}-{n}" in used:
                 n += 1
-            line["id"] = f"line-{n}"
-            rows_of[line["id"]] = []
+            line["id"] = f"{prefix}-{n}"
+            used.add(line["id"])
     return [line for _, line in lines]
 
 
-_RANGE = re.compile(r"\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)")
+# the range a SUMIF or SUM adds up – the first argument, on the formula's own sheet
+_SUMMED = re.compile(r"\bSUM(?:IF)?\(\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)")
 # rows whose year cells are always formulas; the dues rows are formulas only for grown dues
 _INPUT_KEYS = {"dues", "grown", "mode", "first", "rate", "pinned", "rounding"}
 _CALCULATED = [k for k in ROW if k not in _INPUT_KEYS]
@@ -258,7 +320,7 @@ def _is_formula(value: Any) -> bool:
 
 def _summed_rows(formula: Any, what: str) -> range:
     """The rows a SUM or SUMIF in the export adds up – the reader takes exactly those."""
-    match = _RANGE.search(formula) if isinstance(formula, str) else None
+    match = _SUMMED.search(formula) if isinstance(formula, str) else None
     if match is None:
         raise WorkbookFormatError(
             f"the {what} formula has been changed – export again from the app"
@@ -266,9 +328,13 @@ def _summed_rows(formula: Any, what: str) -> range:
     return range(int(match[1]), int(match[2]) + 1)
 
 
+# a Plan sheet's name, description and note above its rows, never read as labels
+_TITLE_ROWS = 3
+
+
 def _plan_rows(ws: Worksheet) -> dict[str, int]:
     """Plan rows by label, so a row a board member inserts moves nothing out of reach."""
-    rows = _label_rows(ws)
+    rows = _first_rows(ws, _TITLE_ROWS)
     missing = [label for _, label in PLAN_ROWS.values() if label not in rows]
     if missing:
         raise WorkbookFormatError(f"{ws.title} is missing the row '{missing[0]}'")
@@ -276,10 +342,136 @@ def _plan_rows(ws: Worksheet) -> dict[str, int]:
 
 
 def _is_plan(ws: Worksheet) -> bool:
-    return ws.title not in RESERVED and PLAN_ROWS["mode"][1] in _label_rows(ws)
+    return ws.title not in RESERVED and PLAN_ROWS["mode"][1] in _first_rows(ws, _TITLE_ROWS)
 
 
-def _scenario(ws: Worksheet, horizon: range) -> dict[str, Any]:
+def _plain(formula: str) -> str:
+    return formula.replace("$", "")
+
+
+def _follows(value: Any, links: tuple[str, ...], where: str) -> bool:
+    """Whether a cell of the scenario's own inputs follows the baseline – one of `links`, the
+    formulas the export writes for it (wherever rows have since moved). Any other formula is
+    refused: re-import could not say what it means."""
+    if not _is_formula(value):
+        return False
+    if _plain(value) in links:
+        return True
+    raise WorkbookFormatError(
+        f"{where} holds a formula other than the link to the baseline – type the scenario's "
+        "own figure, or export again from the app"
+    )
+
+
+def _sections(ws: Worksheet) -> dict[str, int]:
+    """The rows of the blocks below a Plan sheet's charts, each found below the one before."""
+    found: dict[str, int] = {}
+    after = next((r for r, label in _labels(ws) if label.startswith(CHARTS_LABEL)), 0)
+    for heading in (ASSUMPTIONS_HEADING, PLAN_FFB_HEADING, FFB_LABEL, CHANGES_HEADING):
+        r = _first_rows(ws, after).get(heading)
+        if r is None:
+            raise WorkbookFormatError(f"{ws.title} is missing the row '{heading}'")
+        found[heading] = after = r
+    total = _last_rows(ws).get(PLAN_OPERATING_LABEL, 0)
+    if total <= after:
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_OPERATING_LABEL}'")
+    found[PLAN_OPERATING_LABEL] = total
+    return found
+
+
+def _change_ids(ws: Worksheet) -> set[str]:
+    """The line ids in a Plan sheet's expense changes table."""
+    sections = _sections(ws)
+    rows = range(sections[CHANGES_HEADING] + 2, sections[PLAN_OPERATING_LABEL])
+    return {_text(ws.cell(r, EXPENSE_COL["id"]).value) for r in rows} - {""}
+
+
+def _changes(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str, Any]:
+    """The scenario's changes to the baseline (spec 5.1), from the blocks below its charts."""
+    sections = _sections(ws)
+    rows = _first_rows(ws, sections[ASSUMPTIONS_HEADING])
+    values: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    for spec in ASSUMPTION_ROWS:
+        r = rows.get(spec.label)
+        if r is None or r > sections[PLAN_FFB_HEADING]:
+            raise WorkbookFormatError(f"{ws.title} is missing the row '{spec.label}'")
+        where = f"{ws.title} '{spec.label}'"
+        n = cells.inputs[spec.key]
+        link = f"=Inputs!B{n}"
+        links = (f'=IF(Inputs!B{n}="","",Inputs!B{n})',) if spec.key in LIMITS else (link,)
+        value = ws.cell(r, VALUE_COL).value
+        if not _follows(value, links, where):
+            if value is None and spec.key in LIMITS:
+                values[spec.key] = None  # changed to no limit
+            elif spec.kind in ("year", "count"):
+                values[spec.key] = _whole(value, where, "a whole number")
+            else:
+                values[spec.key] = _number(value, where)
+        note = ws.cell(r, SOURCE_COL).value
+        note_link = (f'=IF(Inputs!C{n}="","",Inputs!C{n})',)
+        if not _follows(note, note_link, f"{where} source") and _text(note):
+            sources[spec.key] = _text(note)
+    own = {**baseline, **values}
+    horizon = _horizon(own["start_year"], own["end_year"], ws.title)
+
+    ffb_row = sections[FFB_LABEL]
+    if _comment(ws.cell(ffb_row, 1)):
+        sources["ffb"] = _comment(ws.cell(ffb_row, 1))
+    ffb = {}
+    for c in range(VALUE_COL, ws.max_column + 1):
+        year, value = ws.cell(ffb_row - 1, c).value, ws.cell(ffb_row, c).value
+        if year is None or value is None:
+            continue
+        y = _whole(year, f"{ws.title} Fully Funded Balance year")
+        where = f"{ws.title} Fully Funded Balance {y}"
+        ffb_link: tuple[str, ...] = (
+            (f"=Expenses!{cells.ffb_col[y]}{cells.ffb_row}",) if y in cells.ffb_col else ()
+        )
+        if not _follows(value, ffb_link, where):
+            ffb[str(y)] = _number(value, where)
+
+    head = sections[CHANGES_HEADING] + 1
+    total = ws.cell(sections[PLAN_OPERATING_LABEL], CHANGE_YEAR_COL).value
+    listed = _summed_rows(total, f"{ws.title} operating total")
+    lines, left_out = [], []
+    for r in range(head + 1, sections[PLAN_OPERATING_LABEL]):
+        leave = _text(ws.cell(r, LEAVE_OUT_COL).value).lower() == "yes"
+        inputs = [ws.cell(r, EXPENSE_COL[key]).value for key in _LINE_INPUTS]
+        if not leave and all(v is None or v == "" for v in inputs):
+            continue  # a spare row, or a line put back by switching "Leave out?" to no
+        where = f"{ws.title} expense change row {r}"
+        if r not in listed:
+            raise WorkbookFormatError(
+                f"{where} is outside the rows the totals add up – use the spare rows, or insert "
+                "new rows between two rows of the list"
+            )
+        if not _is_formula(ws.cell(r, CHANGE_YEAR_COL).value):
+            raise WorkbookFormatError(
+                f"{where} has no year formulas, so the sheet's totals leave it out – copy a whole "
+                "row of the list to add one"
+            )
+        if leave:
+            line_id = _text(ws.cell(r, EXPENSE_COL["id"]).value)
+            if not line_id:
+                raise WorkbookFormatError(f"{where} leaves out a line but has no line id")
+            left_out.append((r, {"id": line_id}))
+        else:
+            lines.append((r, _expense_line(ws, r, where)))
+    taken = frozenset(line["id"] for line in baseline["expense_lines"])
+    named = _with_ids(lines + left_out, ws.title, taken, "own")
+    out_ids = {line["id"] for _, line in left_out}
+    expense_lines = {
+        line["id"]: None if line["id"] in out_ids else {k: v for k, v in line.items() if k != "id"}
+        for line in named
+    }
+    changes = {"values": values, "sources": sources, "expense_lines": expense_lines, "ffb": ffb}
+    return {"changes": changes, "horizon": horizon}
+
+
+def _scenario(ws: Worksheet, baseline: dict[str, Any], cells: _Cells) -> dict[str, Any]:
+    read = _changes(ws, baseline, cells)
+    horizon = read["horizon"]
     row = _plan_rows(ws)
     years: dict[int, int] = {}
     for c in range(PLAN_FIRST_COL, ws.max_column + 1):
@@ -288,7 +480,7 @@ def _scenario(ws: Worksheet, horizon: range) -> dict[str, Any]:
             years[_whole(v, f"{ws.title} year header")] = c
     if list(years) != list(horizon):
         raise WorkbookFormatError(
-            f"{ws.title} has year columns that no longer match the start and end year on Inputs – "
+            f"{ws.title} has year columns that no longer match its start and end year – "
             "the horizon can only be changed in the app"
         )
     mode = _text(ws.cell(row["mode"], PLAN_FIRST_COL).value)
@@ -361,6 +553,7 @@ def _scenario(ws: Worksheet, horizon: range) -> dict[str, Any]:
         "dues": dues,
         "assessments": assessments,
         "rounding": "dollar" if rounding == ROUND_DOLLAR else "none",
+        "changes": read["changes"],
     }
 
 
@@ -375,16 +568,17 @@ def read_workbook(source: Path | bytes) -> Project:
             "the workbook could not be opened – it may be damaged or not an Excel file"
         ) from None
     _check_size(wb)
-    text, baseline = _baseline(wb)
-    horizon = range(baseline["start_year"], baseline["end_year"] + 1)
-    scenarios = [_scenario(ws, horizon) for ws in wb.worksheets if _is_plan(ws)]
+    plans = [ws for ws in wb.worksheets if _is_plan(ws)]
+    reserved = frozenset(i for ws in plans for i in _change_ids(ws))
+    text, baseline, cells = _baseline(wb, reserved)
+    scenarios = [_scenario(ws, baseline, cells) for ws in plans]
     try:
         project = project_from_dict({**text, "baseline": baseline, "scenarios": scenarios})
     except ProjectFormatError as e:
         raise WorkbookFormatError(str(e)) from None
     problems = validate_baseline(project.baseline)
     for s in project.scenarios if not problems else ():
-        problems += [f"{s.name} – {p}" for p in validate_scenario(s, project.baseline)]
+        problems += [f"{s.name} – {p}" for p in validate_run(project.baseline, s)]
     if problems:
         raise WorkbookFormatError("; ".join(problems))
     return project

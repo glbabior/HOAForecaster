@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from hoa_engine.model import Baseline, DuesMode, ExpenseLine, Frequency, Scenario
+from hoa_engine.model import Baseline, DuesMode, ExpenseLine, Frequency, Scenario, baseline_for
 
 MIN_YEARS, MAX_YEARS = 5, 30
 MAX_RATE = Decimal("0.5")
 MAX_BASE_YEAR_AGE = 50  # a reserve study older than this is a typo
 MAX_LINE_DISTANCE = 50  # an expense year this far before or after the horizon is a typo
+MAX_LINES = 1000  # expense lines in a baseline, or changed in a scenario – far beyond any study
 
 
 def _rate(name: str, value: Decimal | None) -> list[str]:
@@ -54,12 +55,21 @@ def _line(line: ExpenseLine, b: Baseline) -> list[str]:
     return problems
 
 
+def horizon_problem(b: Baseline) -> str | None:
+    """The problem with an impossible horizon – one whose years cannot even be walked."""
+    span = b.end_year - b.start_year + 1
+    if MIN_YEARS <= span <= MAX_YEARS:
+        return None
+    return f"the horizon must be {MIN_YEARS}–{MAX_YEARS} full years, not {span}"
+
+
 def validate_baseline(b: Baseline) -> list[str]:
     problems = []
-    span = b.end_year - b.start_year + 1
-    if not MIN_YEARS <= span <= MAX_YEARS:
-        problems.append(f"the horizon must be {MIN_YEARS}–{MAX_YEARS} full years, not {span}")
-        return problems  # nothing else can be checked over an impossible horizon
+    horizon = horizon_problem(b)
+    if horizon:
+        return [horizon]  # nothing else can be checked over an impossible horizon
+    if len(b.expense_lines) > MAX_LINES:
+        return [f"the baseline has more than {MAX_LINES:,} expense lines"]
     missing = [y for y in range(b.start_year, b.end_year + 2) if y not in b.ffb]
     if missing:
         problems.append("Fully Funded Balance is missing for " + ", ".join(str(y) for y in missing))
@@ -88,6 +98,18 @@ def validate_baseline(b: Baseline) -> list[str]:
     if b.units < 1:
         problems.append("there must be at least one unit")
     return problems
+
+
+def validate_run(b: Baseline, s: Scenario) -> list[str]:
+    """Everything that stops the scenario from running – checked on the baseline as the
+    scenario sees it, its changes applied (spec 5.1)."""
+    if len(s.changes.expense_lines) > MAX_LINES:
+        return [f"the scenario changes more than {MAX_LINES:,} expense lines"]
+    own = baseline_for(b, s)
+    horizon = horizon_problem(own)
+    if horizon:
+        return [horizon]  # its years cannot be walked
+    return validate_baseline(own) + validate_scenario(s, own)
 
 
 def validate_scenario(s: Scenario, b: Baseline) -> list[str]:

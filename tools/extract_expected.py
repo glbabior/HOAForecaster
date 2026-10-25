@@ -75,6 +75,8 @@ def _plan(ws: Any, years: range) -> dict[str, dict[str, Any]]:
         label = ws.cell(r, 1).value
         if not isinstance(label, str):
             continue
+        if label.startswith("Charts – "):
+            break  # the export's own inputs below its charts reuse some of these labels
         key = next((k for prefix, k in PLAN_ROWS if label.startswith(prefix)), None)
         if key is None:
             continue
@@ -84,10 +86,17 @@ def _plan(ws: Any, years: range) -> dict[str, dict[str, Any]]:
     return out
 
 
+def _measure(value: Any) -> str | None:
+    """A summary figure – a dash where a scenario is too short for the measure."""
+    return None if value == "–" else _num(value)
+
+
 def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
     out: dict[str, Any] = {}
     dues_points = iter(["dues_y1", "dues_y4", "dues_y9"])
-    point = {start + 3: "y4", start + 8: "y9", end: "end"}
+    point: dict[int | str, str] = {start + 3: "y4", start + 8: "y9", end: "end"}
+    # when the scenarios cover different years the labels count years of each projection
+    point |= {"year 4": "y4", "year 9": "y9", "the projection": "end"}
     for r in range(5, ws.max_row + 1):
         label = ws.cell(r, 1).value
         if not isinstance(label, str) or label.startswith("Year-end"):
@@ -95,16 +104,22 @@ def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
         v = ws.cell(r, plan_col).value
         # a "start–end" range, else a single trailing year – never a dollar figure in the label
         span = re.search(r"\b((?:19|20)\d\d)–((?:19|20)\d\d)\b", label)
-        single = re.search(r"\b((?:19|20)\d\d)$", label)
-        years = [int(y) for y in span.groups()] if span else [int(single[1])] if single else []
+        single = re.search(r"\b((?:19|20)\d\d|year \d+|the projection)$", label)
+        years: list[int | str] = (
+            [int(y) for y in span.groups()]
+            if span
+            else [int(single[1]) if single[1].isdigit() else single[1]]
+            if single
+            else []
+        )
         if label.startswith("Dues per unit per month"):
-            out[next(dues_points)] = _num(v)
+            out[next(dues_points)] = _measure(v)
         elif label.startswith("Special assessments per unit"):
-            out["total_assessments"] = _num(v)
+            out["total_assessments"] = _measure(v)
         elif label.startswith("Year of lowest"):
             out["lowest_balance_year"] = int(v)
         elif label.startswith("Lowest year-end"):
-            out["lowest_balance"] = _num(v)
+            out["lowest_balance"] = _measure(v)
         elif label.startswith("Years below minimum cushion"):
             out["low_years"] = int(v)
         elif label.startswith("Years needing an owner vote"):
@@ -112,21 +127,21 @@ def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
         elif label.startswith("Years with an operating shortfall"):
             out["shortfall_years"] = int(v)
         elif label.startswith("Reserve balance end of"):
-            out[f"balance_{point[years[0]]}"] = _num(v)
+            out[f"balance_{point[years[0]]}"] = _measure(v)
         elif label.startswith("Percent funded end of"):
-            out[f"pf_{point[years[0]]}"] = _num(v)
+            out[f"pf_{point[years[0]]}"] = _measure(v)
         elif label.startswith("First year percent-funded target"):
             out["first_target_year"] = v if isinstance(v, int | float) else None
         elif label.startswith("Owner outlay per unit"):
-            first = "first" in label or years[1] != end
-            out["outlay_first5" if first else "outlay_total"] = _num(v)
+            first = "first" in label or (len(years) == 2 and years[1] != end)
+            out["outlay_first5" if first else "outlay_total"] = _measure(v)
         elif label.startswith("Extra cost vs"):
-            first = "first" in label or years[1] != end
-            out["extra_first4" if first else "extra_total"] = _num(v)
+            first = "first" in label or (len(years) == 2 and years[1] != end)
+            out["extra_first4" if first else "extra_total"] = _measure(v)
         elif label.startswith("Average owner cost"):
-            out["avg_owner_cost"] = _num(v)
+            out["avg_owner_cost"] = _measure(v)
         elif label.startswith("Average extra cost"):
-            out["avg_extra"] = _num(v)
+            out["avg_extra"] = _measure(v)
     if isinstance(out.get("first_target_year"), float):
         out["first_target_year"] = int(out["first_target_year"])
     return out
@@ -145,12 +160,14 @@ def _plan_sheet(wb: Any, name: str) -> Any:
 
 def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
     wb = openpyxl.load_workbook(workbook, data_only=True)
-    start, end = project["baseline"]["start_year"], project["baseline"]["end_year"]
     compare = wb["Compare"]
     columns = {compare.cell(4, c).value: c for c in range(2, compare.max_column + 1)}
     scenarios = {}
     for s in project["scenarios"]:
         name = s["name"]
+        # a scenario may have a horizon of its own (spec 5.1)
+        own = {**project["baseline"], **s.get("changes", {}).get("values", {})}
+        start, end = own["start_year"], own["end_year"]
         scenarios[name] = {
             "years": _plan(_plan_sheet(wb, name), range(start, end + 1)),
             "summary": _summary(compare, columns[name], start, end),

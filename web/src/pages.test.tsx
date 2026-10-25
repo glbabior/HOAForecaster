@@ -74,6 +74,7 @@ const scenario: Scenario = {
   dues: { mode: "rate", first_value: "600", annual_increase: "0.03", overrides: {} },
   assessments: [],
   rounding: "dollar",
+  changes: { values: {}, sources: {}, expense_lines: {}, ffb: {} },
 };
 
 function stored(project: Project, revision = 1): StoredProject {
@@ -200,6 +201,86 @@ describe("the scenario editor", () => {
     expect(alerts.some((t) => t.includes("not usable") && t.includes("Dues in 2027"))).toBe(true);
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("saves only the changes to the baseline the scenario makes", async () => {
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Set this scenario's own interest earned on reserves",
+      }),
+    );
+    const rate = screen.getByRole("textbox", {
+      name: "This scenario's interest earned on reserves",
+    });
+    await userEvent.clear(rate);
+    await userEvent.type(rate, "4");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Set this scenario's own minimum working cushion" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use the baseline's minimum working cushion" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Leave expense 1 out of this scenario" }),
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", {
+        name: "This scenario's Fully Funded Balance at the start of 2028",
+      }),
+      "1000",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).scenarios[0];
+    expect(saved?.changes).toEqual({
+      values: { interest_rate: "0.04" },
+      sources: {},
+      expense_lines: { operating: null },
+      ffb: { "2028": "1000" },
+    });
+  });
+
+  it("gives a line of the scenario's own an own- id and keeps a note on its own", async () => {
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Add a line of this scenario's own" }),
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Source – this scenario's minimum working cushion" }),
+      "Board policy",
+    );
+    expect(screen.getByRole("group", { name: /Changes to the baseline \(2\)/ })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const changes = (mocked.saveProject.mock.calls[0]?.[1] as Project).scenarios[0]?.changes;
+    expect(Object.keys(changes?.expense_lines ?? {})).toEqual(["own-1"]);
+    expect(changes?.sources).toEqual({ cushion: "Board policy" });
+    expect(changes?.values).toEqual({});
+  });
+
+  it("stretches typed dues to the scenario's own horizon", async () => {
+    const typed: Scenario = {
+      ...scenario,
+      dues: {
+        mode: "explicit",
+        explicit: Object.fromEntries(years(2027, 2031).map((y) => [String(y), "600"])),
+      },
+    };
+    let current = stored({ ...project, scenarios: [typed] });
+    mocked.getProject.mockImplementation(async () => current);
+    mocked.saveProject.mockImplementation(async (_id: string, p: Project, base: number) => {
+      current = stored(p, base + 1);
+      return current;
+    });
+    start("/projects/abcdefabcdef/scenarios/Plan%20A", <ScenarioEditor />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Set this scenario's own end year" }),
+    );
+    const end = screen.getByRole("textbox", { name: "This scenario's end year" });
+    await userEvent.clear(end);
+    await userEvent.type(end, "2033");
+    expect(screen.getByRole("textbox", { name: "Dues in 2033" })).toBeTruthy();
+  });
 });
 
 describe("the baseline editor", () => {
@@ -224,6 +305,21 @@ describe("the baseline editor", () => {
     expect(
       (screen.getByRole("button", { name: "Save baseline" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("never gives a new line an id a scenario already uses", async () => {
+    const leaving = {
+      ...scenario,
+      changes: { ...scenario.changes, expense_lines: { "line-1": null } },
+    };
+    mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [leaving] }));
+    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    await userEvent.click(await screen.findByRole("button", { name: "Add expense" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const lines = (mocked.saveProject.mock.calls[0]?.[1] as Project).baseline.expense_lines;
+    expect(lines.map((l) => l.id)).toEqual(["operating", "line-2"]);
   });
 
   it("edits an expense's frequency, own rate and years, and saves only what it uses", async () => {

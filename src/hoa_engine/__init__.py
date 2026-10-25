@@ -4,6 +4,7 @@ from hoa_engine.engine import InvalidInputs, ScenarioResult, Summary, YearResult
 from hoa_engine.model import (
     Assessment,
     Baseline,
+    Changes,
     DuesMode,
     DuesPath,
     ExpenseLine,
@@ -12,6 +13,8 @@ from hoa_engine.model import (
     ProjectFormatError,
     Rounding,
     Scenario,
+    apply_changes,
+    baseline_for,
     baseline_from_dict,
     baseline_to_dict,
     project_from_dict,
@@ -23,6 +26,7 @@ from hoa_engine.model import (
 __all__ = [
     "Assessment",
     "Baseline",
+    "Changes",
     "DuesMode",
     "DuesPath",
     "ExpenseLine",
@@ -35,6 +39,8 @@ __all__ = [
     "ScenarioResult",
     "Summary",
     "YearResult",
+    "apply_changes",
+    "baseline_for",
     "baseline_from_dict",
     "baseline_to_dict",
     "project_from_dict",

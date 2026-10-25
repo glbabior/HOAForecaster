@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from hoa_engine.model import CHANGEABLE
+
 METHOD, COMPARE, INPUTS, CHARTS, EXPENSES = "Method", "Compare", "Inputs", "Charts", "Expenses"
 SHEET_ORDER = (METHOD, INPUTS, COMPARE, CHARTS, EXPENSES)
 RESERVED = {*SHEET_ORDER, "History"}  # Excel reserves "History"
@@ -103,7 +105,7 @@ PLAN_ROWS: dict[str, tuple[int, str]] = {
     "sa_total": (11, "Special assessment to reserves"),
     "owners": (12, "Total collected from owners (dues + assessment)"),
     "interest": (13, "Interest earned"),
-    "expenses": (14, "Reserve expenses (Expenses sheet)"),
+    "expenses": (14, "Reserve expenses (once and every few years)"),
     "start": (16, "Starting reserve balance"),
     "end": (17, "Ending reserve balance"),
     "ffb": (18, "Fully Funded Balance (start of next year)"),
@@ -118,7 +120,7 @@ PLAN_ROWS: dict[str, tuple[int, str]] = {
     "cum_cost": (28, "Cumulative owner cost per unit"),
     "cum_extra": (29, "Cumulative extra cost vs current dues"),
     "extra": (30, "Extra vs current dues, with assessment (per unit per year)"),
-    "target": (31, "Percent-funded target (Inputs)"),
+    "target": (31, "Percent-funded target (this scenario)"),
     "mode": (33, "How dues are set"),
     "first": (34, "First-year dues (grown dues only)"),
     "rate": (35, "Annual dues increase (grown dues only)"),
@@ -143,6 +145,31 @@ def assess_last_row(n_assessments: int) -> int:
 def plan_chart_row(n_assessments: int) -> int:
     """Top-left row of a Plan sheet's first chart, below the assessment list."""
     return assess_last_row(n_assessments) + 3
+
+
+# Below the charts, the scenario's own inputs (spec 5.1) – each found by its label on import.
+ASSUMPTIONS_HEADING = (
+    "This scenario's assumptions – green follows Inputs, blue on yellow is this scenario's own"
+)
+ASSUMPTION_ROWS = tuple(r for r in INPUT_ROWS if r.key in CHANGEABLE)  # labels as on Inputs
+VALUE_COL, SOURCE_COL = PLAN_FIRST_COL, PLAN_FIRST_COL + 1
+PLAN_FFB_HEADING = "This scenario's Fully Funded Balance – green follows Expenses"
+PLAN_FFB_YEARS_LABEL = "Start of year"  # the year row above FFB_LABEL; years from VALUE_COL
+CHANGES_HEADING = (
+    "This scenario's expense changes – a row per line it changes, leaves out or adds, with the "
+    "same id as the line on Expenses (blank rows are spare)"
+)
+LEAVE_OUT_COL = len(EXPENSE_COLUMNS) + 1
+LEAVE_OUT_HEADING = "Leave out?"
+CHANGE_YEAR_COL = LEAVE_OUT_COL + 1  # the start year, in the changes table
+CHANGE_SPARE_ROWS = 3
+PLAN_OPERATING_LABEL = "TOTAL operating expenses – this scenario"
+PLAN_RESERVE_LABEL = "TOTAL reserve expenses – this scenario"
+
+
+def plan_inputs_row(n_assessments: int) -> int:
+    """The row of the assumptions heading, below the two charts."""
+    return plan_chart_row(n_assessments) + 2 * CHART_HEIGHT_ROWS + 1
 
 
 MODE_TYPED, MODE_GROWN = "typed for each year", "grown from the first year"

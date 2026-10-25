@@ -22,9 +22,11 @@ from openpyxl.formula.translate import Translator
 
 from hoa_engine import (
     Assessment,
+    Changes,
     DuesMode,
     DuesPath,
     ExpenseLine,
+    Frequency,
     Project,
     Rounding,
     Scenario,
@@ -37,11 +39,16 @@ from hoa_workbook.charts import shared_grid
 from hoa_workbook.export import build_workbook, export_workbook
 from hoa_workbook.layout import (
     ASSESS_FIRST_ROW,
+    CHANGE_YEAR_COL,
+    CHANGES_HEADING,
     EXPENSE_COL,
     EXPENSE_TOTAL_LABEL,
     EXPENSE_YEAR_COL,
     INPUT_ROWS,
+    LEAVE_OUT_COL,
     ROW,
+    SOURCE_COL,
+    VALUE_COL,
     quote,
     sheet_names,
 )
@@ -84,8 +91,75 @@ def _short_project() -> Project:
     return Project("=Short demo", b, (typed, grown), notes="@note stays text")
 
 
+def _changed_project() -> Project:
+    """The demo with two scenarios that change the baseline every way spec 5.1 allows – one
+    on its own horizon, so Compare has to line up different years."""
+    b = DEMO.baseline
+    insurance = next(line for line in b.expense_lines if line.id == "insurance")
+    grown = DuesPath(DuesMode.RATE, first_value=D(690), annual_increase=D("0.04"))
+    own = Scenario(
+        "Own assumptions",
+        grown,
+        changes=Changes(
+            values={"interest_rate": D("0.03"), "cushion": D(90000), "max_dues_increase": None},
+            sources={"cushion": "Board policy, fictional", "ffb": "Fictional study update"},
+            expense_lines={
+                "insurance": replace(insurance, inflation=D("0.08"), amount=D(44000)),
+                "study-2029": None,
+                "pool": ExpenseLine(
+                    2030,
+                    D(9000),
+                    "Pool resurfacing",
+                    frequency=Frequency.EVERY,
+                    interval=6,
+                    id="pool",
+                ),
+                "patrol": ExpenseLine(
+                    2030,
+                    D(900),
+                    "Security patrol",
+                    frequency=Frequency.MONTHLY,
+                    end_year=2036,
+                    id="patrol",
+                ),
+            },
+            ffb={2030: D(700000)},
+        ),
+    )
+    later = Scenario(
+        "Later and longer",
+        grown,
+        assessments=(Assessment(2045, D(800), "Late"),),
+        changes=Changes(
+            values={"start_year": 2028, "end_year": 2045, "starting_balance": D(210000)},
+            ffb={2044: D(1190000), 2045: D(1240000), 2046: D(1290000)},
+        ),
+    )
+    short = Scenario(
+        "Short run",
+        grown,
+        changes=Changes(
+            values={
+                "end_year": b.start_year + 5,
+                "units": 26,
+                "current_dues": D("580.50"),
+                "operating_inflation": D("0.035"),
+                "expense_inflation": D("0.04"),
+                "expense_base_year": 2027,
+                "target": D("0.65"),
+                "max_assessment_share": D("0.1"),
+            }
+        ),
+    )
+    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short))
+
+
 def _projects() -> list[Any]:
-    out = [pytest.param(DEMO, id="demo"), pytest.param(_short_project(), id="short")]
+    out = [
+        pytest.param(DEMO, id="demo"),
+        pytest.param(_short_project(), id="short"),
+        pytest.param(_changed_project(), id="changes"),
+    ]
     data_dir = os.environ.get("HOA_PRIVATE_DIR")
     if data_dir:
         out.append(pytest.param(_load(Path(data_dir) / "fixtures" / "project.json"), id="private"))
@@ -135,12 +209,262 @@ def test_export_then_import_gives_the_same_results(project: Project) -> None:
                 vx, vy = getattr(x, field.name), getattr(y, field.name)
                 if isinstance(vx, Decimal):
                     assert abs(vx - vy) < D("1e-8"), (before.name, field.name)
-                elif field.name != "expense_lines":
+                elif field.name not in ("expense_lines", "operating_lines"):
                     assert vx == vy, (before.name, field.name)
 
 
 def test_demo_round_trip_is_identical() -> None:
     assert read_workbook(export_workbook(DEMO)) == DEMO
+
+
+def test_scenario_changes_round_trip_identically() -> None:
+    project = _changed_project()
+    assert read_workbook(export_workbook(project)) == project
+
+
+def _plan_cell(sheet: str, label: str, col: int = VALUE_COL) -> Any:
+    """A cell in a Plan sheet's own inputs, by its row label."""
+
+    def at(wb: openpyxl.Workbook) -> Any:
+        ws = wb[sheet]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        return ws.cell(rows[label], col)
+
+    return at
+
+
+def _set(at: Any, value: Any) -> Any:
+    def edit(wb: openpyxl.Workbook) -> None:
+        at(wb).value = value
+
+    return edit
+
+
+def _changes_after(edit: Any, sheet: str = "Dues only") -> Changes:
+    project = read_workbook(_broken(edit, _changed_project()))
+    return next(s for s in project.scenarios if s.name == sheet).changes
+
+
+def test_typing_over_a_link_in_excel_makes_the_value_the_scenarios_own() -> None:
+    changes = _changes_after(
+        _set(_plan_cell("Dues only", "Interest earned on reserves per year"), 0.04)
+    )
+    assert changes.values == {"interest_rate": D("0.04")}
+    blank = _set(_plan_cell("Dues only", "Largest dues increase without an owner vote"), None)
+    assert _changes_after(blank).values == {"max_dues_increase": None}
+    note = _set(_plan_cell("Dues only", "Minimum working cushion", SOURCE_COL), "Our policy")
+    assert _changes_after(note).sources == {"cushion": "Our policy"}
+
+
+def test_a_formula_other_than_the_link_is_refused() -> None:
+    edit = _set(_plan_cell("Dues only", "Minimum working cushion"), "=Inputs!$B$15*2")
+    with pytest.raises(WorkbookFormatError, match="'Minimum working cushion' holds a formula"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+def test_a_spare_change_row_filled_in_excel_adds_a_line_of_the_scenarios_own() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        r = rows[CHANGES_HEADING] + 2  # the first spare row – Dues only has no changes
+        for key, value in (
+            ("description", "Sign"),
+            ("frequency", "once"),
+            ("amount", 500),
+            ("year", 2030),
+        ):
+            ws.cell(r, EXPENSE_COL[key], value)
+        ws.cell(r + 1, EXPENSE_COL["id"], "insurance")
+        ws.cell(r + 1, LEAVE_OUT_COL, "yes")
+
+    changes = _changes_after(edit)
+    assert changes.expense_lines == {
+        "own-1": ExpenseLine(2030, D(500), "Sign", id="own-1"),
+        "insurance": None,
+    }
+
+
+def test_leaving_out_a_line_needs_its_id() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        ws.cell(rows[CHANGES_HEADING] + 2, LEAVE_OUT_COL, "yes")
+
+    with pytest.raises(WorkbookFormatError, match="leaves out a line but has no line id"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+def test_a_change_row_below_the_list_is_refused() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        r = rows["TOTAL operating expenses – this scenario"] - 1
+        ws.cell(r, EXPENSE_COL["frequency"], "once")
+        ws.cell(r, EXPENSE_COL["amount"], 1)
+
+    with pytest.raises(WorkbookFormatError, match="outside the rows the totals add up"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+def test_a_change_row_typed_without_year_formulas_is_refused() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        r = rows[CHANGES_HEADING] + 2
+        ws.cell(r, EXPENSE_COL["frequency"], "once")
+        ws.cell(r, EXPENSE_COL["amount"], 1)
+        ws.cell(r, CHANGE_YEAR_COL).value = None
+
+    with pytest.raises(WorkbookFormatError, match="has no year formulas"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Interest earned on reserves per year",
+        CHANGES_HEADING,
+        "TOTAL operating expenses – this scenario",
+    ],
+)
+def test_a_scenario_sheet_without_its_own_inputs_is_refused(label: str) -> None:
+    edit = _relabel("Dues only", label, "Something else")
+    with pytest.raises(WorkbookFormatError, match=f"Dues only is missing the row '{label[:20]}"):
+        read_workbook(_broken(edit))
+
+
+def test_a_scenario_on_an_impossible_horizon_is_not_exported() -> None:
+    wide = replace(DEMO.scenarios[0], changes=Changes(values={"end_year": 2100}))
+    with pytest.raises(ValueError, match="Dues only – the horizon must be 5–30 full years"):
+        export_workbook(replace(DEMO, scenarios=(wide,)))
+
+
+def test_measures_a_short_scenario_cannot_have_are_dashes() -> None:
+    wb = build_workbook(_changed_project())
+    ws = wb["Compare"]
+    labels = {ws.cell(r, 1).value: r for r in range(1, ws.max_row + 1)}
+    columns = {ws.cell(4, c).value: c for c in range(2, ws.max_column + 1)}
+    assert ws.cell(labels["Dues per unit per month – year 9"], columns["Short run"]).value == "–"
+    assert ws.cell(labels["Dues per unit per month – year 9"], columns["Dues only"]).value
+
+
+def test_text_worded_like_a_label_never_stands_in_for_it() -> None:
+    """An expense, a left-out line or a note may read "Operating expenses" – the reader looks
+    for each label only in its own part of the sheet."""
+    project = _changed_project()
+    b = project.baseline
+    renamed = tuple(
+        replace(line, description="Interest earned") if line.id == "boiler" else line
+        for line in b.expense_lines
+    )
+    own, *rest = project.scenarios[2:]
+    pool = own.changes.expense_lines["pool"]
+    assert pool is not None
+    worded = replace(
+        own,
+        name="Interest earned",  # a sheet's name and description sit above its rows
+        description="Operating expenses",
+        assessments=(Assessment(2030, D(10), "Start year"),),
+        changes=replace(
+            own.changes,
+            expense_lines={
+                **own.changes.expense_lines,
+                "boiler": None,
+                "pool": replace(pool, description="Operating expenses"),
+            },
+        ),
+    )
+    project = replace(
+        project,
+        baseline=replace(b, expense_lines=renamed),
+        scenarios=(*project.scenarios[:2], worded, *rest),
+    )
+    assert read_workbook(export_workbook(project)) == project
+    named = replace(project, scenarios=(replace(worded, name="How dues are set"),))
+    assert read_workbook(export_workbook(named)) == named
+
+
+def test_a_new_baseline_line_never_takes_an_id_a_scenario_uses() -> None:
+    gate = ExpenseLine(2030, D(100), "Gate", id="line-1")  # the scenario's own, made earlier
+    project = _changed_project()
+    first = replace(project.scenarios[0], changes=Changes(expense_lines={"line-1": gate}))
+    project = replace(project, scenarios=(first, *project.scenarios[1:]))
+    again = read_workbook(_broken(_insert_expense(6, copy_formulas=True), project))
+    new = again.baseline.expense_lines[1]
+    assert (new.description, new.id) == ("New gate", "line-2")
+    assert again.scenarios[0].changes.expense_lines == {"line-1": gate}
+
+
+def test_a_link_copied_onto_the_wrong_row_is_refused() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        interest = _plan_cell("Dues only", "Interest earned on reserves per year")(wb).value
+        _plan_cell("Dues only", "Minimum working cushion")(wb).value = interest
+
+    with pytest.raises(WorkbookFormatError, match="'Minimum working cushion' holds a formula"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+def test_putting_a_left_out_line_back_in_excel_follows_the_baseline() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Own assumptions"]
+        for (cell,) in ws.iter_rows(min_col=LEAVE_OUT_COL, max_col=LEAVE_OUT_COL):
+            if cell.value == "yes":
+                cell.value = "no"
+
+    changes = _changes_after(edit, "Own assumptions")
+    assert "study-2029" not in changes.expense_lines and "pool" in changes.expense_lines
+
+
+@pytest.mark.skipif(not _libreoffice(), reason="LibreOffice not installed")
+def test_a_line_put_back_in_excel_is_back_in_the_workbooks_own_figures(tmp_path: Path) -> None:
+    """What re-import reads must be what the edited workbook calculates (spec 7.6)."""
+
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Own assumptions"]
+        for (cell,) in ws.iter_rows(min_col=LEAVE_OUT_COL, max_col=LEAVE_OUT_COL):
+            if cell.value == "yes":
+                cell.value = "no"  # its id stays, with no inputs
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        spare = rows["TOTAL operating expenses – this scenario"] - 3
+        ws.cell(spare, EXPENSE_COL["id"], "insurance")  # an id typed alone into a spare row
+
+    workbook = tmp_path / "edited.xlsx"
+    workbook.write_bytes(_broken(edit, _changed_project()))
+    project = read_workbook(workbook)
+    recalc.recalc(workbook)
+    expected = extract_expected.extract(workbook, project_to_dict(project))
+    s = next(s for s in project.scenarios if s.name == "Own assumptions")
+    assert not mismatches(run(project.baseline, s), expected["scenarios"][s.name])
+
+
+def test_a_scenarios_own_line_id_typed_on_expenses_is_refused() -> None:
+    edit = _set(lambda wb: wb["Expenses"].cell(5, EXPENSE_COL["id"]), "own-1")
+    with pytest.raises(WorkbookFormatError, match="'own-1' is kept for lines of a scenario's own"):
+        read_workbook(_broken(edit))
+
+
+def test_a_huge_horizon_of_a_scenario_is_refused_before_it_is_walked() -> None:
+    edit = _set(_plan_cell("Dues only", "End year"), 10**12)
+    with pytest.raises(WorkbookFormatError, match="Dues only – the horizon must be 5–30"):
+        read_workbook(_broken(edit))
+    inputs = _set(lambda wb: wb["Inputs"].cell(8, 2), 10**12)
+    with pytest.raises(WorkbookFormatError, match="Inputs – the horizon must be 5–30"):
+        read_workbook(_broken(inputs))
+
+
+def test_a_scenarios_own_start_year_cannot_be_moved_in_excel() -> None:
+    edit = _set(_plan_cell("Later and longer", "Start year"), 2029)
+    with pytest.raises(WorkbookFormatError, match="horizon can only be changed in the app"):
+        read_workbook(_broken(edit, _changed_project()))
+
+
+def test_the_scenarios_fully_funded_balance_is_read_year_by_year() -> None:
+    def edit(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        rows = {c.value: c.row for (c,) in ws.iter_rows(max_col=1) if c.value}
+        ws.cell(rows["Fully Funded Balance at start of year"], VALUE_COL + 1, 650000)
+
+    assert _changes_after(edit).ffb == {2028: D(650000)}
 
 
 def _excel_installed() -> bool:
@@ -156,7 +480,9 @@ def _excel_installed() -> bool:
 
 
 @pytest.mark.skipif(not _excel_installed(), reason="Microsoft Excel not installed")
-@pytest.mark.parametrize("project", [DEMO, _short_project()], ids=["demo", "short"])
+@pytest.mark.parametrize(
+    "project", [DEMO, _short_project(), _changed_project()], ids=["demo", "short", "changes"]
+)
 def test_excel_opens_the_export_without_repair(project: Project, tmp_path: Path) -> None:
     workbook = tmp_path / "export.xlsx"
     export_workbook(project, workbook, dollar_axis=(D(-45222), D(806568)))
@@ -235,7 +561,8 @@ def test_short_horizon_leaves_out_year_nine_measures() -> None:
 def test_every_chart_axis_states_whether_it_is_shown() -> None:
     package = zipfile.ZipFile(BytesIO(export_workbook(DEMO)))
     charts = [n for n in package.namelist() if n.startswith("xl/charts/chart")]
-    assert len(charts) == 2 * 4 + 4  # two per scenario sheet, one per scenario on Charts
+    n = len(DEMO.scenarios)
+    assert len(charts) == 2 * n + n  # two per scenario sheet, one per scenario on Charts
     for name in charts:
         xml = package.read(name).decode()
         assert xml.count("<c:delete") == xml.count("<c:catAx>") + xml.count("<c:valAx>")
@@ -267,8 +594,8 @@ def _retarget_operating_total(wb: openpyxl.Workbook) -> None:
     cell.value = re.sub(r"\$5:", "$6:", cell.value)
 
 
-def _broken(edit: Any) -> bytes:
-    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
+def _broken(edit: Any, project: Project = DEMO) -> bytes:
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(project)))
     edit(wb)
     out = BytesIO()
     wb.save(out)
@@ -337,20 +664,30 @@ def _relabel(sheet: str, old: str, new: str) -> Any:
 
 
 def _excel_insert(ws: Any, at: int) -> None:
-    """Insert a row the way Excel does – shifting rows and stretching every range that
-    spans the insertion point (openpyxl alone moves cells but never rewrites formulas)."""
+    """Insert a row the way Excel does – shifting rows and rewriting every reference to the
+    moved rows, on this sheet and from the others (openpyxl alone never rewrites formulas)."""
     ws.insert_rows(at)
-    for row in ws.iter_rows():  # Excel rewrites references anywhere on the sheet
-        for cell in row:
-            if isinstance(cell.value, str) and cell.value.startswith("="):
+    reference = re.compile(
+        r"(?<![A-Za-z0-9_$.'])((?:'[^']+'|[A-Za-z]+)!)?"  # an optional sheet
+        r"(\$?[A-Z]{1,3}\$?)(\d+)(?::(\$?[A-Z]{1,3}\$?)(\d+))?"  # a cell, or a range
+    )
 
-                def stretch(m: re.Match[str]) -> str:
-                    a, b = int(m[2]), int(m[4])
-                    a += 1 if a >= at else 0
-                    b += 1 if b >= at else 0
-                    return f"{m[1]}{a}:{m[3]}{b}"
+    def moved(n: str) -> int:
+        return int(n) + (1 if int(n) >= at else 0)
 
-                cell.value = re.sub(r"(\$?[A-Z]+\$?)(\d+):(\$?[A-Z]+\$?)(\d+)", stretch, cell.value)
+    for sheet in ws.parent.worksheets:
+
+        def rewrite(m: re.Match[str], on: Any = sheet) -> str:
+            named = m[1][:-1].strip("'") if m[1] else None
+            if (named or on.title) != ws.title:
+                return m[0]  # a reference to another sheet's rows
+            out = f"{m[1] or ''}{m[2]}{moved(m[3])}"
+            return out + (f":{m[4]}{moved(m[5])}" if m[4] else "")
+
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    cell.value = reference.sub(rewrite, cell.value)
 
 
 def _insert_expense(at: int, copy_formulas: bool) -> Any:

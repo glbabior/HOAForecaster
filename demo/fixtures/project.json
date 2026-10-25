@@ -287,7 +287,13 @@
     "overrides": {}
    },
    "assessments": [],
-   "rounding": "dollar"
+   "rounding": "dollar",
+   "changes": {
+    "values": {},
+    "sources": {},
+    "expense_lines": {},
+    "ffb": {}
+   }
   },
   {
    "name": "Two-part assessment",
@@ -312,7 +318,13 @@
      "note": "Second installment"
     }
    ],
-   "rounding": "dollar"
+   "rounding": "dollar",
+   "changes": {
+    "values": {},
+    "sources": {},
+    "expense_lines": {},
+    "ffb": {}
+   }
   },
   {
    "name": "Hold then catch up",
@@ -345,7 +357,13 @@
      "note": ""
     }
    ],
-   "rounding": "dollar"
+   "rounding": "dollar",
+   "changes": {
+    "values": {},
+    "sources": {},
+    "expense_lines": {},
+    "ffb": {}
+   }
   },
   {
    "name": "Steady increase",
@@ -357,7 +375,59 @@
     "overrides": {}
    },
    "assessments": [],
-   "rounding": "none"
+   "rounding": "none",
+   "changes": {
+    "values": {},
+    "sources": {},
+    "expense_lines": {},
+    "ffb": {}
+   }
+  },
+  {
+   "name": "Insurance shock",
+   "description": "Insurance up sharply and a pool to resurface; the boiler waits",
+   "dues": {
+    "mode": "rate",
+    "first_value": "680",
+    "annual_increase": "0.045",
+    "overrides": {}
+   },
+   "assessments": [],
+   "rounding": "dollar",
+   "changes": {
+    "values": {
+     "interest_rate": "0.025",
+     "max_assessment_share": null
+    },
+    "sources": {
+     "interest_rate": "Fictional bank offer"
+    },
+    "expense_lines": {
+     "insurance": {
+      "frequency": "yearly",
+      "year": null,
+      "end_year": null,
+      "inflation": "0.08",
+      "amount": "47000",
+      "description": "Master insurance policy after renewal",
+      "source": "Fictional broker warning"
+     },
+     "boiler": null,
+     "pool": {
+      "frequency": "every",
+      "year": 2030,
+      "end_year": null,
+      "interval": 6,
+      "amount": "12000",
+      "description": "Pool resurfacing",
+      "nominal": false,
+      "source": "Fictional contractor estimate"
+     }
+    },
+    "ffb": {
+     "2031": "700000"
+    }
+   }
   }
  ]
 }

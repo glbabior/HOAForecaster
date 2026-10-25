@@ -183,10 +183,10 @@ def add_plan_charts(ws: Worksheet, name: str, n_years: int, top_row: int) -> Non
 def add_charts_sheet(
     wb: Workbook,
     title: str,
-    plans: list[tuple[str, str]],
-    n_years: int,
+    plans: list[tuple[str, str, int]],
     dollar_axis: tuple[Decimal, Decimal] | None,
 ) -> None:
+    """Chart 1 of each plan – its sheet, name and number of years – stacked on one sheet."""
     ws = wb.create_sheet(title)
     ws.column_dimensions["A"].width = 120
     ws["A1"] = "Scenario comparison – expenses, dues, reserve balance and percent funded"
@@ -199,6 +199,6 @@ def add_charts_sheet(
     )
     ws["A2"].font = Font(name="Arial", italic=True, size=9)
     ws["A2"].alignment = Alignment(wrap_text=True)
-    for i, (sheet, name) in enumerate(plans):
+    for i, (sheet, name, n_years) in enumerate(plans):
         chart = _expenses_chart(wb[sheet], name, n_years, dollar_axis)
         ws.add_chart(chart, f"A{4 + i * CHART_HEIGHT_ROWS}")

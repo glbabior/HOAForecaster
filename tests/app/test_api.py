@@ -238,6 +238,21 @@ def test_baseline_impact_refuses_a_broken_baseline(client: TestClient, demo_id: 
     assert unreadable.status_code == 422
 
 
+def test_baseline_impact_spares_a_scenario_with_its_own_value(client: TestClient) -> None:
+    raw = json.loads(json.dumps(DEMO_RAW))
+    raw["scenarios"][0]["changes"] = {"values": {"interest_rate": "0.03"}}
+    raw["scenarios"][1]["changes"] = {"values": {"end_year": DEMO.baseline.end_year + 1}}
+    created = client.post("/api/projects", json={"project": raw}).json()
+    new_rate = {**DEMO_RAW["baseline"], "interest_rate": "0.02"}
+    impact = client.post(
+        f"/api/projects/{created['id']}/baseline-impact", json={"baseline": new_rate}
+    ).json()
+    first, second = (s["name"] for s in raw["scenarios"][:2])
+    assert first in impact["unchanged"]  # it keeps its own rate
+    # the second runs a year past the baseline and has no Fully Funded Balance for it
+    assert second in impact["invalid"]
+
+
 def test_baseline_impact_counts_a_scenario_that_now_runs_as_changed(client: TestClient) -> None:
     raw = json.loads(json.dumps(DEMO_RAW))
     raw["baseline"]["units"] = 0  # every scenario fails against the saved baseline

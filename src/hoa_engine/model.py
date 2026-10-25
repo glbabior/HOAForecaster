@@ -10,7 +10,7 @@ import functools
 import re
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, TypeVar
@@ -100,6 +100,41 @@ class DuesPath:
     overrides: dict[int, Decimal] = field(default_factory=dict)  # pinned years, RATE mode only
 
 
+# The baseline inputs a scenario can change (spec 5.1), with how each is written.
+YEAR_VALUES = ("start_year", "end_year", "expense_base_year", "units")
+LIMITS = ("max_dues_increase", "max_assessment_share")  # None is "no limit", a change of its own
+CHANGEABLE = (
+    "start_year",
+    "end_year",
+    "starting_balance",
+    "units",
+    "current_dues",
+    "operating_inflation",
+    "expense_inflation",
+    "expense_base_year",
+    "interest_rate",
+    "cushion",
+    "target",
+    *LIMITS,
+)
+
+
+@dataclass(frozen=True)
+class Changes:
+    """A scenario's own values for baseline inputs (spec 5.1) – only what it changes; the rest
+    follows the baseline."""
+
+    values: dict[str, Decimal | int | None] = field(default_factory=dict)  # CHANGEABLE keys
+    sources: dict[str, str] = field(default_factory=dict)
+    # by line id – the scenario's own full copy of a baseline line, a line of its own, or None
+    # to leave a baseline line out
+    expense_lines: dict[str, ExpenseLine | None] = field(default_factory=dict)
+    ffb: dict[int, Decimal] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.values or self.sources or self.expense_lines or self.ffb)
+
+
 @dataclass(frozen=True)
 class Scenario:
     name: str
@@ -107,6 +142,32 @@ class Scenario:
     assessments: tuple[Assessment, ...] = ()
     rounding: Rounding = Rounding.DOLLAR
     description: str = ""
+    changes: Changes = field(default_factory=Changes)
+
+
+def baseline_for(b: Baseline, s: Scenario) -> Baseline:
+    """Every input the scenario runs on (spec section 6)."""
+    return apply_changes(b, s.changes)
+
+
+def apply_changes(b: Baseline, changes: Changes) -> Baseline:
+    """The baseline as one scenario sees it. Changed lines replace their baseline line where it
+    stands; the scenario's own lines follow the baseline's; a change for a line the baseline no
+    longer has stays as the scenario's own line, and leaving out such a line does nothing."""
+    if not changes:
+        return b
+    known = {line.id for line in b.expense_lines}
+    lines = [changes.expense_lines.get(line.id, line) for line in b.expense_lines]
+    lines += [
+        line for i, line in changes.expense_lines.items() if i not in known and line is not None
+    ]
+    return replace(
+        b,
+        **changes.values,  # type: ignore[arg-type]  # each key's type is checked as it is read
+        expense_lines=tuple(line for line in lines if line is not None),
+        ffb={**b.ffb, **changes.ffb},
+        sources={**b.sources, **changes.sources},
+    )
 
 
 SCHEMA_VERSION = 2
@@ -208,7 +269,9 @@ def _year_map_out(values: dict[int, Decimal]) -> dict[str, str]:
     return {str(year): str(values[year]) for year in sorted(values)}
 
 
-LINE_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+# lower case, starting with a letter – so a spreadsheet can never read one as a number or a
+# pattern, and two ids never match by case
+LINE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 
 
 def _line_id(value: Any) -> str:
@@ -329,7 +392,51 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
             for a in d.get("assessments", [])
         ),
         rounding=Rounding(d.get("rounding", Rounding.DOLLAR)),
+        changes=changes_from_dict(d.get("changes", {})),
     )
+
+
+def _changed_value(key: str, value: Any) -> Decimal | int | None:
+    if key not in CHANGEABLE:
+        raise ValueError(f"{key[:40]!r} is not a baseline input a scenario can change")
+    if value is None:
+        if key not in LIMITS:
+            raise ValueError("only a governance limit can be changed to no limit")
+        return None
+    return _int(value) if key in YEAR_VALUES else _dec(value)
+
+
+def changes_from_dict(d: Any) -> Changes:
+    if not isinstance(d, dict):
+        raise TypeError("a scenario's changes should be an object")
+    lines = d.get("expense_lines", {})
+    if not isinstance(lines, dict):
+        raise TypeError("a scenario's expense line changes should be an object")
+    return Changes(
+        values={_str(k): _changed_value(k, v) for k, v in d.get("values", {}).items()},
+        # a blank note is no note – the scenario follows the baseline's
+        sources={k: v for k, v in _sources(d.get("sources", {})).items() if v},
+        expense_lines={
+            _line_id(i): None if e is None else expense_line_from_dict(e, i)
+            for i, e in lines.items()
+        },
+        ffb=_year_map(d.get("ffb", {})),
+    )
+
+
+def changes_to_dict(c: Changes) -> dict[str, Any]:
+    return {
+        "values": {
+            k: None if v is None else v if isinstance(v, int) else str(v)
+            for k, v in c.values.items()
+        },
+        "sources": dict(c.sources),
+        "expense_lines": {
+            i: None if line is None else expense_line_to_dict(line)
+            for i, line in c.expense_lines.items()
+        },
+        "ffb": _year_map_out(c.ffb),
+    }
 
 
 def scenario_to_dict(s: Scenario) -> dict[str, Any]:
@@ -348,6 +455,7 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
             {"year": a.year, "amount": str(a.amount), "note": a.note} for a in s.assessments
         ],
         "rounding": s.rounding.value,
+        "changes": changes_to_dict(s.changes),
     }
 
 
@@ -395,12 +503,23 @@ def project_from_dict(d: dict[str, Any]) -> Project:
         raise ValueError(
             "scenario names must be unique – " + ", ".join(repr(n) for n in duplicates)
         )
+    baseline = baseline_from_dict(d["baseline"])
     return Project(
         name=_str(d["name"]),
         notes=_str(d.get("notes", "")),
-        baseline=baseline_from_dict(d["baseline"]),
-        scenarios=scenarios,
+        baseline=baseline,
+        scenarios=tuple(without_stale_leave_outs(s, baseline) for s in scenarios),
     )
+
+
+def without_stale_leave_outs(s: Scenario, b: Baseline) -> Scenario:
+    """The scenario without leave-outs of lines the baseline no longer has (spec 5.1) – they
+    do nothing, and a later line given the same id must not be left out by them."""
+    known = {line.id for line in b.expense_lines}
+    lines = {i: line for i, line in s.changes.expense_lines.items() if line or i in known}
+    if len(lines) == len(s.changes.expense_lines):
+        return s
+    return replace(s, changes=replace(s.changes, expense_lines=lines))
 
 
 def project_to_dict(p: Project) -> dict[str, Any]:

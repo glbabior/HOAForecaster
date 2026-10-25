@@ -88,6 +88,7 @@ export function ProjectPage() {
             {project.scenarios.map((s) => {
               const outcome = results?.scenarios[s.name];
               const r = outcome && "result" in outcome ? outcome.result.summary : null;
+              const end = outcome && "result" in outcome ? outcome.result.years.at(-1)?.year : null;
               return (
                 <tr key={s.name}>
                   <th scope="row">
@@ -109,7 +110,7 @@ export function ProjectPage() {
                       </td>
                       <td className="num">{r?.low_years ?? pending}</td>
                       <td className="num">{r ? percent(r.pf_end) : pending}</td>
-                      <td>{r ? (r.first_target_year ?? `not by ${b.end_year}`) : pending}</td>
+                      <td>{r ? (r.first_target_year ?? `not by ${end}`) : pending}</td>
                     </>
                   )}
                   <td>{date(stored.scenario_times[s.name]?.modified ?? "")}</td>

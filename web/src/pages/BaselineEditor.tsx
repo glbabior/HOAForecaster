@@ -16,7 +16,7 @@ import {
   useInvalidFields,
 } from "../components/ui";
 import { useDebounced, useDraftAutosave, useUnsavedGuard } from "../hooks";
-import { plausibleHorizon, reshapeHorizon, reshapeScenario } from "../template";
+import { applyChanges, plausibleHorizon, reshapeHorizon, reshapeScenario } from "../template";
 import type { Baseline, Draft, Scenario, StoredProject } from "../types";
 
 interface Form {
@@ -91,11 +91,15 @@ export function BaselineEditor() {
   return <BaselineForm key={stored.revision} id={id} stored={stored} setStored={setStored} />;
 }
 
-/** The scenarios as a save with this baseline stores them – typed dues stretched to cover it. */
+/** The scenarios as a save with this baseline stores them – typed dues stretched to cover each
+ * one's horizon (its own, where it has one). */
 function scenariosFor(stored: StoredProject, baseline: Baseline): Scenario[] {
-  return stored.project.scenarios.map((s) =>
-    reshapeScenario(s, baseline.start_year, baseline.end_year),
-  );
+  return stored.project.scenarios.map((s) => {
+    const own = applyChanges(baseline, s.changes);
+    return plausibleHorizon(own.start_year, own.end_year)
+      ? reshapeScenario(s, own.start_year, own.end_year)
+      : s;
+  });
 }
 
 function problemsOf(e: unknown): string[] {
@@ -354,6 +358,7 @@ function BaselineForm({
           <ExpenseTable
             lines={b.expense_lines}
             defaultYear={b.start_year}
+            reserved={stored.project.scenarios.flatMap((s) => Object.keys(s.changes.expense_lines))}
             onChange={(expense_lines) => set({ expense_lines })}
           />
         </section>

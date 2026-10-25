@@ -1,7 +1,9 @@
 // Shapes for new and reshaped scenarios. New projects come from the server, which holds
 // the spec's defaults (src/hoa_app/template.py).
 
-import type { Baseline, Scenario } from "./types";
+import type { Baseline, Changes, ExpenseLine, Scenario } from "./types";
+
+export const noChanges = (): Changes => ({ values: {}, sources: {}, expense_lines: {}, ffb: {} });
 
 export function blankScenario(name: string, baseline: Baseline): Scenario {
   return {
@@ -15,7 +17,40 @@ export function blankScenario(name: string, baseline: Baseline): Scenario {
     },
     assessments: [],
     rounding: "dollar",
+    changes: noChanges(),
   };
+}
+
+/** The baseline as a scenario sees it (spec 5.1) – for showing it; the server works out the
+ * figures. Mirrors `apply_changes` in src/hoa_engine/model.py. */
+export function applyChanges(baseline: Baseline, changes: Changes): Baseline {
+  const known = new Set(baseline.expense_lines.map((l) => l.id));
+  const own = (id: string): ExpenseLine | null => {
+    const line = changes.expense_lines[id];
+    return line ? { id, ...line } : null;
+  };
+  const lines = baseline.expense_lines.flatMap((l) =>
+    l.id in changes.expense_lines ? (own(l.id) ?? []) : [l],
+  );
+  for (const id of Object.keys(changes.expense_lines)) {
+    const line = own(id);
+    if (!known.has(id) && line) lines.push(line);
+  }
+  return {
+    ...baseline,
+    ...(changes.values as Partial<Baseline>),
+    expense_lines: lines,
+    ffb: { ...baseline.ffb, ...changes.ffb },
+    sources: { ...baseline.sources, ...changes.sources },
+  };
+}
+
+/** The years a scenario runs over – its own horizon, or the baseline's; none while it is not a
+ * usable horizon (a year half typed). */
+export function horizonOf(baseline: Baseline, scenario: Scenario): number[] {
+  const { start_year: start, end_year: end } = applyChanges(baseline, scenario.changes);
+  if (!plausibleHorizon(start, end)) return [];
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }
 
 /** A horizon the editor can act on – 5 to 30 full years (spec 4 #2). While a year is still

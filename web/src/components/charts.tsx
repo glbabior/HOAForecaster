@@ -105,7 +105,16 @@ export function ChartFrame({
 
 /** Chart 1 – expenses, collections and year-end balance on the left; percent funded and the
  * target on the right, 0–100% unless a shared grid extends it below zero. */
-export function BalanceChart({ result, grid }: { result: ScenarioResult; grid?: Grid }) {
+export function BalanceChart({
+  result,
+  grid,
+  years,
+}: {
+  result: ScenarioResult;
+  grid?: Grid;
+  /** the shared year axis of stacked charts, when the scenarios cover different years */
+  years?: [number, number];
+}) {
   const data = result.years.map((y) => ({
     year: y.year,
     expenses: num(y.expenses),
@@ -118,7 +127,11 @@ export function BalanceChart({ result, grid }: { result: ScenarioResult; grid?: 
     <ResponsiveContainer width="100%" height={340}>
       <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
         <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
-        <XAxis dataKey="year" />
+        {years ? (
+          <XAxis dataKey="year" type="number" domain={years} allowDecimals={false} />
+        ) : (
+          <XAxis dataKey="year" />
+        )}
         <YAxis
           yAxisId="money"
           tickFormatter={moneyTick}

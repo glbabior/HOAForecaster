@@ -37,7 +37,7 @@ from hoa_engine.model import (
     project_to_dict,
     scenario_from_dict,
 )
-from hoa_engine.validate import validate_baseline, validate_scenario
+from hoa_engine.validate import validate_baseline, validate_run
 from hoa_store.store import (
     BadProjectFile,
     Conflict,
@@ -369,7 +369,7 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
         unchanged: list[str] = []
         invalid: list[str] = []
         for s in proposed:
-            if validate_scenario(s, baseline):
+            if validate_run(baseline, s):
                 invalid.append(s.name)
                 continue
             after = run(baseline, s)

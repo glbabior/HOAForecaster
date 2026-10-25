@@ -57,12 +57,40 @@ export type DuesPath =
   | { mode: "explicit"; explicit: Record<string, Dec> }
   | { mode: "rate"; first_value: Dec; annual_increase: Dec; overrides: Record<string, Dec> };
 
+/** The baseline inputs a scenario can change for itself (spec 5.1). */
+export type ChangeableKey =
+  | "start_year"
+  | "end_year"
+  | "starting_balance"
+  | "units"
+  | "current_dues"
+  | "operating_inflation"
+  | "expense_inflation"
+  | "expense_base_year"
+  | "interest_rate"
+  | "cushion"
+  | "target"
+  | "max_dues_increase"
+  | "max_assessment_share";
+
+/** A scenario's own values – only what it changes; the rest follows the baseline. */
+export interface Changes {
+  /** years and counts as numbers, money and rates as decimal strings; null for "no limit" */
+  values: Partial<Record<ChangeableKey, Dec | number | null>>;
+  sources: Record<string, string>;
+  /** by line id – its own full copy of a baseline line, a line of its own, or null to leave a
+   * baseline line out */
+  expense_lines: Record<string, Omit<ExpenseLine, "id"> | null>;
+  ffb: Record<string, Dec>;
+}
+
 export interface Scenario {
   name: string;
   description: string;
   dues: DuesPath;
   assessments: Assessment[];
   rounding: "dollar" | "none";
+  changes: Changes;
 }
 
 export interface Project {

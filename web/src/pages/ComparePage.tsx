@@ -19,22 +19,29 @@ interface Measure {
   better?: "higher" | "lower";
 }
 
-function measures(start: number, end: number, years: number): Measure[] {
+/** The summary measures (spec 6). `span` is the horizon every shown scenario shares – the labels
+ * name calendar years only then; otherwise they count years of each projection (spec 7.4). */
+function measures(span: [number, number] | null, years: number): Measure[] {
+  const year = (offset: number) => (span ? String(span[0] + offset) : `year ${offset + 1}`);
+  const first = (n: number) =>
+    span ? `${span[0]}–${span[0] + n - 1}` : n === 5 ? "first five years" : "first four years";
+  const whole = span ? `${span[0]}–${span[1]}` : "whole projection";
+  const last = span ? String(span[1]) : "the projection";
   const list: (Measure | false)[] = [
     {
-      label: `Dues per unit per month – ${start}`,
+      label: `Dues per unit per month – ${year(0)}`,
       value: (s) => s.dues_y1,
       kind: "dues",
       better: "lower",
     },
     {
-      label: `Dues per unit per month – ${start + 3}`,
+      label: `Dues per unit per month – ${year(3)}`,
       value: (s) => s.dues_y4,
       kind: "dues",
       better: "lower",
     },
     years >= 9 && {
-      label: `Dues per unit per month – ${start + 8}`,
+      label: `Dues per unit per month – ${year(8)}`,
       value: (s) => s.dues_y9,
       kind: "dues",
       better: "lower",
@@ -54,62 +61,62 @@ function measures(start: number, end: number, years: number): Measure[] {
     { label: "Year of the lowest balance", value: (s) => s.lowest_balance_year, kind: "year" },
     { label: "Years below the cushion", value: (s) => s.low_years, kind: "count", better: "lower" },
     {
-      label: `Balance end of ${start + 3}`,
+      label: `Balance end of ${year(3)}`,
       value: (s) => s.balance_y4,
       kind: "money",
       better: "higher",
     },
     {
-      label: `Percent funded end of ${start + 3}`,
+      label: `Percent funded end of ${year(3)}`,
       value: (s) => s.pf_y4,
       kind: "percent",
       better: "higher",
     },
     years >= 9 && {
-      label: `Balance end of ${start + 8}`,
+      label: `Balance end of ${year(8)}`,
       value: (s) => s.balance_y9,
       kind: "money",
       better: "higher",
     },
     years >= 9 && {
-      label: `Percent funded end of ${start + 8}`,
+      label: `Percent funded end of ${year(8)}`,
       value: (s) => s.pf_y9,
       kind: "percent",
       better: "higher",
     },
     {
-      label: `Balance end of ${end}`,
+      label: `Balance end of ${last}`,
       value: (s) => s.balance_end,
       kind: "money",
       better: "higher",
     },
     {
-      label: `Percent funded end of ${end}`,
+      label: `Percent funded end of ${last}`,
       value: (s) => s.pf_end,
       kind: "percent",
       better: "higher",
     },
     { label: "First year the target is met", value: (s) => s.first_target_year, kind: "year" },
     {
-      label: `Owner outlay per unit, ${start}–${start + 4}`,
+      label: `Owner outlay per unit, ${first(5)}`,
       value: (s) => s.outlay_first5,
       kind: "money",
       better: "lower",
     },
     {
-      label: `Owner outlay per unit, ${start}–${end}`,
+      label: `Owner outlay per unit, ${whole}`,
       value: (s) => s.outlay_total,
       kind: "money",
       better: "lower",
     },
     {
-      label: `Extra cost vs current dues, ${start}–${start + 3}`,
+      label: `Extra cost vs current dues, ${first(4)}`,
       value: (s) => s.extra_first4,
       kind: "money",
       better: "lower",
     },
     {
-      label: `Extra cost vs current dues, ${start}–${end}`,
+      label: `Extra cost vs current dues, ${whole}`,
       value: (s) => s.extra_total,
       kind: "money",
       better: "lower",
@@ -197,7 +204,6 @@ export function ComparePage() {
   }, [id]);
 
   if (!stored || !results) return <Loading error={error ?? loadError} />;
-  const b = stored.project.baseline;
   const names = stored.project.scenarios.map((s) => s.name);
   const ok: [string, ScenarioResult][] = names.flatMap((n) => {
     const o = results.scenarios[n];
@@ -208,7 +214,16 @@ export function ComparePage() {
   const shown = selected.map(
     (n) => [n, ok.find(([m]) => m === n)?.[1]] as [string, ScenarioResult],
   );
-  const list = measures(b.start_year, b.end_year, b.end_year - b.start_year + 1);
+  // scenarios may run over different years – their own horizon, or an earlier adopted one
+  const spans = new Set(shown.map(([, r]) => `${r.years[0]?.year}–${r.years.at(-1)?.year}`));
+  const shared = spans.size === 1 && shown[0] ? shown[0][1].years : null;
+  const span: [number, number] | null = shared
+    ? [shared[0]?.year ?? 0, shared.at(-1)?.year ?? 0]
+    : null;
+  const list = measures(span, Math.max(0, ...shown.map(([, r]) => r.years.length)));
+  const allYears = [...new Set(shown.flatMap(([, r]) => r.years.map((y) => y.year)))].sort(
+    (x, y) => x - y,
+  );
   const name = stored.project.name;
 
   return (
@@ -266,7 +281,7 @@ export function ComparePage() {
                           const d = diffs && i > 0 ? difference(m.kind, m.better, v, base) : null;
                           return (
                             <td key={n} className="num" data-csv={v === null ? "" : String(v)}>
-                              {show(m.kind, v, b.end_year)}
+                              {show(m.kind, v, r.years.at(-1)?.year ?? 0)}
                               {d && <span className={`diff ${d.className}`}> ({d.text})</span>}
                             </td>
                           );
@@ -304,13 +319,16 @@ export function ComparePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {shown[0]?.[1].years.map((y, row) => (
-                      <tr key={y.year}>
-                        <th scope="row">{y.year}</th>
+                    {allYears.map((year) => (
+                      <tr key={year}>
+                        <th scope="row">{year}</th>
                         {shown.map(([n, r], i) => {
-                          const v = r.years[row]?.[field] ?? null;
-                          const low = field === "ending_balance" && r.years[row]?.low_flag;
-                          const base = shown[0]?.[1].years[row]?.[field] ?? null;
+                          // the same calendar year in each scenario, blank where it has none
+                          const at = r.years.find((y) => y.year === year);
+                          const v = at?.[field] ?? null;
+                          const low = field === "ending_balance" && at?.low_flag;
+                          const first = shown[0]?.[1].years.find((y) => y.year === year);
+                          const base = first?.[field] ?? null;
                           const kind = field === "ending_balance" ? "money" : "percent";
                           const d = diffs && i > 0 ? difference(kind, "higher", v, base) : null;
                           return (

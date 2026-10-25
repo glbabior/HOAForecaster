@@ -13,14 +13,17 @@ import pytest
 from hoa_engine import (
     Assessment,
     Baseline,
+    Changes,
     DuesMode,
     DuesPath,
     ExpenseLine,
     Frequency,
     InvalidInputs,
+    Project,
     ProjectFormatError,
     Rounding,
     Scenario,
+    baseline_for,
     baseline_from_dict,
     baseline_to_dict,
     project_from_dict,
@@ -30,7 +33,7 @@ from hoa_engine import (
     scenario_to_dict,
 )
 from hoa_engine.dues import resolve_dues
-from hoa_engine.validate import validate_baseline, validate_scenario
+from hoa_engine.validate import validate_baseline, validate_run, validate_scenario
 
 D = Decimal
 DEMO = Path(__file__).resolve().parents[2] / "demo" / "fixtures" / "project.json"
@@ -474,7 +477,12 @@ def test_a_line_keeps_only_the_fields_its_frequency_uses() -> None:
 
 @pytest.mark.parametrize(
     ("ids", "message"),
-    [(["a", "a", "b"], "identifiers must be unique – a"), (["a", "b c", "d"], "not a usable")],
+    [
+        (["a", "a", "b"], "identifiers must be unique – a"),
+        (["a", "b c", "d"], "not a usable"),
+        (["a", "Roof", "d"], "not a usable"),  # upper case could match 'roof' in Excel
+        (["a", "12", "d"], "not a usable"),  # Excel could read it as a number
+    ],
 )
 def test_line_identifiers_must_be_unique_and_plain(ids: list[str], message: str) -> None:
     raw = baseline_to_dict(baseline())
@@ -538,3 +546,136 @@ def test_expense_lines_must_be_a_list() -> None:
     raw["expense_lines"] = {"roof": {}}
     with pytest.raises(ProjectFormatError, match="expense lines should be a list"):
         baseline_from_dict(raw)
+
+
+# ---------------------------------------------------------------- changes to the baseline (5.1)
+
+
+def changed(**kw: object) -> Scenario:
+    return replace(rate("200", "0"), changes=Changes(**kw))  # type: ignore[arg-type]
+
+
+def test_a_scenario_runs_on_its_own_values_and_follows_the_baseline_for_the_rest() -> None:
+    s = changed(values={"interest_rate": D("0.05")}, sources={"interest_rate": "Bank"})
+    own = baseline_for(baseline(), s)
+    assert (own.interest_rate, own.sources) == (D("0.05"), {"interest_rate": "Bank"})
+    assert own.cushion == baseline().cushion
+    assert run(baseline(), s).years[0].interest == 5000
+    # a later baseline edit reaches the scenario where it has no value of its own
+    later = baseline(cushion=D(1))
+    assert baseline_for(later, s).cushion == 1 and baseline_for(later, s).interest_rate == D("0.05")
+
+
+def test_a_scenario_can_turn_a_governance_limit_off() -> None:
+    s = changed(values={"max_dues_increase": None})
+    jump = replace(s, dues=replace(s.dues, annual_increase=D("0.5")))
+    assert run(baseline(), jump).summary.vote_years == 0
+    assert run(baseline(), replace(jump, changes=Changes())).summary.vote_years == 5
+
+
+def test_expense_lines_are_changed_left_out_or_added_one_by_one() -> None:
+    roof = ExpenseLine(2032, D(1), "Roof, later", id="roof")
+    gate = ExpenseLine(2033, D(7), "Gate", nominal=True, id="gate")
+    s = changed(expense_lines={"roof": roof, "study": None, "gate": gate, "gone": None})
+    b = baseline()
+    assert [line.id for line in baseline_for(b, s).expense_lines] == ["roof", "operating", "gate"]
+    assert baseline_for(b, s).expense_lines[0] == roof  # a full copy, where it stood
+    # a line added to the baseline later reaches the scenario; one it changed and the baseline
+    # deleted stays as its own
+    fence = ExpenseLine(2031, D(2), "Fence", id="fence")
+    later = replace(b, expense_lines=(*b.expense_lines[1:], fence))
+    assert [line.id for line in baseline_for(later, s).expense_lines] == [
+        "operating",
+        "fence",
+        "roof",
+        "gate",
+    ]
+
+
+def test_the_fully_funded_balance_is_changed_year_by_year() -> None:
+    s = changed(ffb={2031: D(100000)})
+    assert run(baseline(), s).years[0].ffb_next == 100000
+    assert run(baseline(), s).years[1].ffb_next == 200000
+
+
+def test_a_scenario_is_checked_on_its_own_horizon() -> None:
+    longer = changed(values={"end_year": 2036})
+    with pytest.raises(InvalidInputs) as e:
+        run(baseline(), longer)
+    assert e.value.problems == ["Fully Funded Balance is missing for 2036, 2037"]
+    ok = replace(longer, changes=Changes(values={"end_year": 2036}, ffb={2036: D(1), 2037: D(1)}))
+    assert [y.year for y in run(baseline(), ok).years] == list(range(2030, 2037))
+    typed = replace(explicit([100] * 5), changes=Changes(values={"start_year": 2029}))
+    assert "dues are missing for 2029" in validate_run(baseline(), typed)
+
+
+def test_an_impossible_horizon_of_a_scenario_is_reported_alone() -> None:
+    huge = replace(explicit([100] * 5), changes=Changes(values={"end_year": 10**9}))
+    assert validate_run(baseline(), huge) == [
+        f"the horizon must be 5–30 full years, not {10**9 - 2030 + 1}"
+    ]
+
+
+def test_changes_round_trip_through_json() -> None:
+    s = changed(
+        values={"start_year": 2031, "cushion": D("1.5"), "max_assessment_share": None},
+        sources={"cushion": "Board"},
+        expense_lines={
+            "roof": ExpenseLine(2032, D(1), "Roof", id="roof"),
+            "study": None,
+            "pool": ExpenseLine(None, D(3), "Pool", frequency=Frequency.MONTHLY, id="pool"),
+        },
+        ffb={2036: D(5)},
+    )
+    raw = scenario_to_dict(s)
+    assert raw["changes"]["values"] == {
+        "start_year": 2031,
+        "cushion": "1.5",
+        "max_assessment_share": None,
+    }
+    assert scenario_from_dict(raw) == s
+    del raw["changes"]
+    assert scenario_from_dict(raw).changes == Changes()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"values": {"name": "x"}}, "'name' is not a baseline input a scenario can change"),
+        ({"values": {"cushion": None}}, "only a governance limit can be changed to no limit"),
+        ({"values": {"units": "2.5"}}, "bad value"),
+        ({"expense_lines": []}, "expense line changes should be an object"),
+        ({"expense_lines": {"a b": None}}, "not a usable expense line identifier"),
+        ("all", "changes should be an object"),
+    ],
+)
+def test_unusable_changes_are_refused(changes: object, message: str) -> None:
+    raw = scenario_to_dict(rate("1", "0"))
+    raw["changes"] = changes
+    with pytest.raises(ProjectFormatError, match=message):
+        scenario_from_dict(raw)
+
+
+def test_a_blank_source_note_is_no_change() -> None:
+    raw = scenario_to_dict(rate("1", "0"))
+    raw["changes"] = {"sources": {"cushion": ""}}
+    assert scenario_from_dict(raw).changes == Changes()
+
+
+def test_a_leave_out_of_a_deleted_line_is_dropped_when_the_project_is_read() -> None:
+    # a later line given the same id must not be left out by it
+    s = changed(
+        expense_lines={"gone": None, "roof": None, "own": ExpenseLine(2031, D(1), id="own")}
+    )
+    raw = project_to_dict(Project("P", baseline(), (s,)))
+    kept = project_from_dict(raw).scenarios[0].changes.expense_lines
+    assert set(kept) == {"roof", "own"}
+
+
+def test_absurd_numbers_of_lines_are_refused() -> None:
+    many = tuple(ExpenseLine(2031, D(1), id=f"l{i}") for i in range(1001))
+    assert validate_baseline(baseline(expense_lines=many)) == [
+        "the baseline has more than 1,000 expense lines"
+    ]
+    s = changed(expense_lines={line.id: line for line in many})
+    assert validate_run(baseline(), s) == ["the scenario changes more than 1,000 expense lines"]
