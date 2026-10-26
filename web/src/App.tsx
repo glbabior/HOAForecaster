@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Outlet, createBrowserRouter, useParams } from "react-router-dom";
+import { Link, NavLink, Outlet, createBrowserRouter, useParams } from "react-router-dom";
 
 import { api, reloadWhenFresh } from "./api";
 import { Confirm, ErrorBanner } from "./components/ui";
@@ -7,8 +7,10 @@ import { BaselineEditor } from "./pages/BaselineEditor";
 import { ChartsPage } from "./pages/ChartsPage";
 import { ComparePage } from "./pages/ComparePage";
 import { ProjectList } from "./pages/ProjectList";
+import { ExportPage } from "./pages/ExportPage";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ScenarioEditor } from "./pages/ScenarioEditor";
+import { ScenariosPage } from "./pages/ScenariosPage";
 import type { StoredProject } from "./types";
 
 /** Restart the server and reload the page – shown only when the launcher can start a fresh
@@ -124,19 +126,67 @@ export function useProject(): {
   return { id, stored, error, reload, setStored };
 }
 
-/** Breadcrumbs back to the project – every project screen starts with one. */
-export function ProjectNav({ stored, here }: { stored: StoredProject; here?: string }) {
+/** Breadcrumbs back to the project – every project screen starts with one. The screen index
+ * marks the current screen, so the last crumb is plain text. */
+export function ProjectNav({
+  stored,
+  here,
+  within,
+}: {
+  stored: StoredProject;
+  here?: string;
+  within?: { path: string; label: string };
+}) {
+  const project = `/projects/${stored.id}`;
   return (
     <nav aria-label="Breadcrumb" className="crumbs no-print">
-      <Link to="/">Projects</Link> ›{" "}
-      <Link to={`/projects/${stored.id}`}>{stored.project.name}</Link>
-      {here && (
+      <Link to="/">Projects</Link> › <Link to={project}>{stored.project.name}</Link>
+      {within && (
         <>
           {" "}
-          › <span aria-current="page">{here}</span>
+          › <Link to={`${project}/${within.path}`}>{within.label}</Link>
         </>
       )}
+      {here && <> › {here}</>}
     </nav>
+  );
+}
+
+// The project's screens, in the order they are used.
+const SCREENS: { path: string; label: string }[] = [
+  { path: "", label: "Overview" },
+  { path: "baseline", label: "Facts and assumptions" },
+  { path: "expenses", label: "Expenses" },
+  { path: "ffb", label: "Fully Funded Balance" },
+  { path: "scenarios", label: "Scenarios" },
+  { path: "compare", label: "Compare" },
+  { path: "charts", label: "Charts" },
+  { path: "export", label: "Export" },
+];
+
+/** A project's screens – the index on the left, the screen beside it. */
+export function ProjectLayout() {
+  const { id = "" } = useParams();
+  return (
+    <div className="project-layout">
+      <nav className="screen-index no-print" aria-label="Project screens">
+        <ul>
+          {SCREENS.map((s) => (
+            <li key={s.path}>
+              <NavLink
+                to={`/projects/${encodeURIComponent(id)}${s.path ? `/${s.path}` : ""}`}
+                end={s.path === ""}
+              >
+                {s.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="screen">
+        <Outlet />
+      </div>
+    </div>
   );
 }
 
@@ -149,12 +199,24 @@ export const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { path: "/", element: <ProjectList /> },
-      { path: "/projects/:id", element: <ProjectPage /> },
-      { path: "/projects/:id/baseline", element: <BaselineEditor /> },
-      { path: "/projects/:id/scenarios/new", element: <ScenarioEditor /> },
-      { path: "/projects/:id/scenarios/:name", element: <ScenarioEditor /> },
-      { path: "/projects/:id/compare", element: <ComparePage /> },
-      { path: "/projects/:id/charts", element: <ChartsPage /> },
+      {
+        path: "/projects/:id",
+        element: <ProjectLayout />,
+        children: [
+          { index: true, element: <ProjectPage /> },
+          {
+            // one form across the baseline's three screens
+            element: <BaselineEditor />,
+            children: [{ path: "baseline" }, { path: "expenses" }, { path: "ffb" }],
+          },
+          { path: "scenarios", element: <ScenariosPage /> },
+          { path: "scenarios/new", element: <ScenarioEditor /> },
+          { path: "scenarios/:name", element: <ScenarioEditor /> },
+          { path: "compare", element: <ComparePage /> },
+          { path: "charts", element: <ChartsPage /> },
+          { path: "export", element: <ExportPage /> },
+        ],
+      },
       {
         path: "*",
         element: (

@@ -16,10 +16,12 @@ export function useDebounced<T>(value: T, delay: number): T {
 
 /** Ask before leaving a screen with unsaved changes – in the app or by closing the tab.
  * `allowNextNavigation` lets the app's own move after a save or delete through. */
-export function useUnsavedGuard(dirty: boolean) {
+export function useUnsavedGuard(dirty: boolean, sameForm?: (pathname: string) => boolean) {
   const allowed = useRef(false);
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
     if (allowed.current) return false;
+    // a move between screens of the same form keeps the edits on screen – nothing is left
+    if (sameForm?.(currentLocation.pathname) && sameForm(nextLocation.pathname)) return false;
     return dirty && currentLocation.pathname !== nextLocation.pathname;
   });
   useEffect(() => {

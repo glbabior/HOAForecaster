@@ -235,7 +235,7 @@ function ScenarioForm({
       const saved = await api.saveProject(id, { ...stored.project, scenarios }, stored.revision);
       void api.discardDraft(id, screen).catch(() => undefined);
       allowNextNavigation();
-      navigate(`/projects/${id}`);
+      navigate(`/projects/${id}/scenarios`);
       setStored(saved);
     } catch (e) {
       setSaveError(e);
@@ -294,7 +294,11 @@ function ScenarioForm({
 
   return (
     <Provider>
-      <ProjectNav stored={stored} here={isNew ? "New scenario" : original.name} />
+      <ProjectNav
+        stored={stored}
+        within={{ path: "scenarios", label: "Scenarios" }}
+        here={isNew ? "New scenario" : original.name}
+      />
       <h1>{isNew ? "New scenario" : original.name}</h1>
       {draft && draft.edits.kind === "scenario" && !original.adoption && (
         <DraftBanner
@@ -642,7 +646,7 @@ function ScenarioForm({
                 <button type="button" onClick={() => window.print()}>
                   Print
                 </button>
-                <button type="button" onClick={() => navigate(`/projects/${id}`)}>
+                <button type="button" onClick={() => navigate(`/projects/${id}/scenarios`)}>
                   Back to the project
                 </button>
               </>
@@ -675,7 +679,7 @@ function ScenarioForm({
                 <button type="button" onClick={() => window.print()}>
                   Print
                 </button>
-                <button type="button" onClick={() => navigate(`/projects/${id}`)}>
+                <button type="button" onClick={() => navigate(`/projects/${id}/scenarios`)}>
                   Cancel
                 </button>
                 <DraftStatus status={status} />

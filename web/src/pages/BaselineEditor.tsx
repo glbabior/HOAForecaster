@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, matchPath, useLocation, useNavigate } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
 import { ApiError, api } from "../api";
@@ -203,11 +203,41 @@ function FactRow({
   );
 }
 
+/** The baseline's three screens, by the last part of their address – one form and one save
+ * between them. */
+export const BASELINE_SCREENS = {
+  baseline: "Facts and assumptions",
+  expenses: "Expenses",
+  ffb: "Fully Funded Balance",
+} as const;
+type BaselineSection = keyof typeof BASELINE_SCREENS;
+
+function sectionOf(pathname: string): BaselineSection | null {
+  const section = matchPath("/projects/:id/:section", pathname)?.params.section ?? "";
+  return section in BASELINE_SCREENS ? (section as BaselineSection) : null;
+}
+
+/** The layout of the three baseline routes – it stays mounted as they change, so the form and
+ * its edits are kept between them. */
 export function BaselineEditor() {
   const { id, stored, error, setStored } = useProject();
+  const section = sectionOf(useLocation().pathname) ?? "baseline"; // the routes give one
+  const [savedRevision, setSavedRevision] = useState<number | null>(null);
   if (!stored) return <Loading error={error} />;
   // a fresh form for every saved revision – no copying state about in effects
-  return <BaselineForm key={stored.revision} id={id} stored={stored} setStored={setStored} />;
+  return (
+    <BaselineForm
+      key={stored.revision}
+      id={id}
+      stored={stored}
+      setStored={(s) => {
+        setSavedRevision(s.revision);
+        setStored(s);
+      }}
+      section={section}
+      justSaved={savedRevision === stored.revision}
+    />
+  );
 }
 
 /** The scenarios as a save with this baseline stores them – typed dues stretched to cover each
@@ -230,10 +260,14 @@ function BaselineForm({
   id,
   stored,
   setStored,
+  section,
+  justSaved,
 }: {
   id: string;
   stored: StoredProject;
   setStored: (s: StoredProject) => void;
+  section: BaselineSection;
+  justSaved: boolean;
 }) {
   const navigate = useNavigate();
   const original = useMemo<Form>(
@@ -250,7 +284,16 @@ function BaselineForm({
   const [impact, setImpact] = useState<Impact | null>(null);
   const [confirming, setConfirming] = useState<Impact | null>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const { invalid, Provider } = useInvalidFields();
+  // what is half typed, screen by screen – each screen's entries stay in the page while hidden
+  const invalidFacts = useInvalidFields();
+  const invalidExpenses = useInvalidFields();
+  const invalidFfb = useInvalidFields();
+  const invalidOn: Record<BaselineSection, string[]> = {
+    baseline: invalidFacts.invalid,
+    expenses: invalidExpenses.invalid,
+    ffb: invalidFfb.invalid,
+  };
+  const invalid = Object.values(invalidOn).flat();
 
   useEffect(() => {
     api.getDrafts(id).then(
@@ -260,7 +303,12 @@ function BaselineForm({
   }, [id]);
 
   const dirty = JSON.stringify(form) !== JSON.stringify(original);
-  const { blocker, allowNextNavigation } = useUnsavedGuard(dirty);
+  const { blocker } = useUnsavedGuard(
+    dirty,
+    (pathname) =>
+      sectionOf(pathname) !== null &&
+      matchPath("/projects/:id/:section", pathname)?.params.id === id,
+  );
   const status = useDraftAutosave(
     id,
     SCREEN,
@@ -330,21 +378,27 @@ function BaselineForm({
         },
         stored.revision,
       );
-      void api.discardDraft(id, SCREEN).catch(() => undefined);
-      allowNextNavigation();
-      navigate(`/projects/${id}`);
+      await api.discardDraft(id, SCREEN).catch(() => undefined);
+      // stay on this screen, saying where dues and assessments are set next
       setStored(saved);
     } catch (e) {
       setSaveError(e);
     }
   }
 
-  const cannotSave = !dirty || problems.length > 0 || invalid.length > 0 || !form.name.trim();
+  const unnamed = !form.name.trim();
+  const cannotSave = !dirty || problems.length > 0 || invalid.length > 0 || unnamed;
 
   return (
-    <Provider>
-      <ProjectNav stored={stored} here="Baseline" />
-      <h1>Baseline</h1>
+    <>
+      <ProjectNav stored={stored} here={BASELINE_SCREENS[section]} />
+      <h1>{BASELINE_SCREENS[section]}</h1>
+      {justSaved && !dirty && (
+        <p className="saved-note" role="status">
+          Baseline saved. Dues and special assessments are set in each scenario –{" "}
+          <Link to={`/projects/${id}/scenarios`}>go to Scenarios</Link> to build or update one.
+        </p>
+      )}
       {draft && (
         <DraftBanner
           draft={draft}
@@ -371,136 +425,168 @@ function BaselineForm({
           if (!cannotSave) void review();
         }}
       >
-        <section className="panel">
-          <h2>Project</h2>
-          <Field label="Name">
-            {(fid) => (
-              <input
-                id={fid}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            )}
-          </Field>
-          <Field label="Notes">
-            {(fid) => (
-              <textarea
-                id={fid}
-                rows={3}
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              />
-            )}
-          </Field>
-        </section>
-
-        <section className="panel">
-          <h2>Horizon</h2>
-          <div className="grid-2">
-            <Field
-              label="Start year"
-              hint="January 1 of this year. If it is mid-year, start next year with the expected January 1 balance."
-            >
-              {(fid, d) => (
-                <YearInput
-                  id={fid}
-                  name="Start year"
-                  describedBy={d}
-                  value={b.start_year}
-                  onChange={(y) => setHorizon(y, b.end_year)}
-                />
-              )}
-            </Field>
-            <Field label="End year" hint="5 to 30 full years">
-              {(fid, d) => (
-                <YearInput
-                  id={fid}
-                  name="End year"
-                  describedBy={d}
-                  value={b.end_year}
-                  onChange={(y) => setHorizon(b.start_year, y)}
-                />
-              )}
-            </Field>
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>Facts and assumptions</h2>
-          <p className="hint">
-            Beside each figure, a source note says where it came from and when – a document, a page,
-            a date – so anyone reading the plan later can check it. Notes are optional, and each
-            travels into the exported workbook as a comment on that figure.
-          </p>
-          <table className="facts">
-            <caption className="visually-hidden">Facts and assumptions</caption>
-            <thead>
-              <tr>
-                <th scope="col">Figure</th>
-                <th scope="col">Value</th>
-                <th scope="col">Source note – where the figure came from</th>
-              </tr>
-            </thead>
-            {FACTS.map((group) => (
-              <tbody key={group.title}>
-                <tr className="fact-group">
-                  <th scope="rowgroup" colSpan={3}>
-                    {group.title}
-                  </th>
-                </tr>
-                {group.facts.map((fact) => (
-                  <FactRow
-                    key={fact.key}
-                    fact={fact}
-                    baseline={b}
-                    onValue={(value) => set({ [fact.key]: value })}
-                    onSource={(text) => setSource(fact.key, text)}
+        <div hidden={section !== "baseline"}>
+          <invalidFacts.Provider>
+            <section className="panel">
+              <h2>Project</h2>
+              <Field label="Name">
+                {(fid) => (
+                  <input
+                    id={fid}
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
                   />
+                )}
+              </Field>
+              <Field label="Notes">
+                {(fid) => (
+                  <textarea
+                    id={fid}
+                    rows={3}
+                    value={form.notes}
+                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  />
+                )}
+              </Field>
+            </section>
+
+            <section className="panel">
+              <h2>Horizon</h2>
+              <div className="grid-2">
+                <Field
+                  label="Start year"
+                  hint="January 1 of this year. If it is mid-year, start next year with the expected January 1 balance."
+                >
+                  {(fid, d) => (
+                    <YearInput
+                      id={fid}
+                      name="Start year"
+                      describedBy={d}
+                      value={b.start_year}
+                      onChange={(y) => setHorizon(y, b.end_year)}
+                    />
+                  )}
+                </Field>
+                <Field label="End year" hint="5 to 30 full years">
+                  {(fid, d) => (
+                    <YearInput
+                      id={fid}
+                      name="End year"
+                      describedBy={d}
+                      value={b.end_year}
+                      onChange={(y) => setHorizon(b.start_year, y)}
+                    />
+                  )}
+                </Field>
+              </div>
+            </section>
+
+            <section className="panel">
+              <h2>Figures, and where they came from</h2>
+              <p className="hint">
+                Beside each figure, a source note says where it came from and when – a document, a
+                page, a date – so anyone reading the plan later can check it. Notes are optional,
+                and each travels into the exported workbook as a comment on that figure.
+              </p>
+              <table className="facts">
+                <caption className="visually-hidden">Facts and assumptions</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Figure</th>
+                    <th scope="col">Value</th>
+                    <th scope="col">Source note – where the figure came from</th>
+                  </tr>
+                </thead>
+                {FACTS.map((group) => (
+                  <tbody key={group.title}>
+                    <tr className="fact-group">
+                      <th scope="rowgroup" colSpan={3}>
+                        {group.title}
+                      </th>
+                    </tr>
+                    {group.facts.map((fact) => (
+                      <FactRow
+                        key={fact.key}
+                        fact={fact}
+                        baseline={b}
+                        onValue={(value) => set({ [fact.key]: value })}
+                        onSource={(text) => setSource(fact.key, text)}
+                      />
+                    ))}
+                  </tbody>
                 ))}
-              </tbody>
-            ))}
-          </table>
-        </section>
+              </table>
+            </section>
+          </invalidFacts.Provider>
+        </div>
 
-        <section className="panel">
-          <h2>Expenses</h2>
-          <ExpenseTable
-            lines={b.expense_lines}
-            defaultYear={b.start_year}
-            reserved={stored.project.scenarios.flatMap((s) => Object.keys(s.changes.expense_lines))}
-            onChange={(expense_lines) => set({ expense_lines })}
-          />
-        </section>
-
-        <section className="panel">
-          <h2>Fully Funded Balance by year</h2>
-          {plausibleHorizon(b.start_year, b.end_year) ? (
-            <FfbTable
-              years={Array.from(
-                { length: b.end_year - b.start_year + 2 },
-                (_, i) => b.start_year + i,
-              )}
-              values={b.ffb}
-              onChange={(ffb) => set({ ffb })}
-            />
-          ) : (
-            <p className="hint">Set a horizon of 5 to 30 years to see this table.</p>
-          )}
-          <Field label="Source – Fully Funded Balance">
-            {(fid) => (
-              <input
-                id={fid}
-                className="source"
-                value={b.sources.ffb ?? ""}
-                onChange={(e) => setSource("ffb", e.target.value)}
+        <div hidden={section !== "expenses"}>
+          <invalidExpenses.Provider>
+            <section className="panel">
+              <ExpenseTable
+                lines={b.expense_lines}
+                defaultYear={b.start_year}
+                reserved={stored.project.scenarios.flatMap((s) =>
+                  Object.keys(s.changes.expense_lines),
+                )}
+                onChange={(expense_lines) => set({ expense_lines })}
               />
-            )}
-          </Field>
-        </section>
+            </section>
+          </invalidExpenses.Provider>
+        </div>
+
+        <div hidden={section !== "ffb"}>
+          <invalidFfb.Provider>
+            <section className="panel">
+              {plausibleHorizon(b.start_year, b.end_year) ? (
+                <FfbTable
+                  years={Array.from(
+                    { length: b.end_year - b.start_year + 2 },
+                    (_, i) => b.start_year + i,
+                  )}
+                  values={b.ffb}
+                  onChange={(ffb) => set({ ffb })}
+                />
+              ) : (
+                <p className="hint">
+                  Set a start and end year 5 to 30 years apart on{" "}
+                  <Link to={`/projects/${id}/baseline`}>Facts and assumptions</Link> to see this
+                  table.
+                </p>
+              )}
+              <Field label="Source – Fully Funded Balance">
+                {(fid) => (
+                  <input
+                    id={fid}
+                    className="source"
+                    value={b.sources.ffb ?? ""}
+                    onChange={(e) => setSource("ffb", e.target.value)}
+                  />
+                )}
+              </Field>
+            </section>
+          </invalidFfb.Provider>
+        </div>
 
         <div className="sticky-actions">
-          <InvalidNotice fields={invalid} />
+          <InvalidNotice fields={invalidOn[section]} />
+          {(Object.keys(BASELINE_SCREENS) as BaselineSection[])
+            .filter((other) => other !== section && invalidOn[other].length > 0)
+            .map((other) => (
+              <p key={other} className="warning" role="alert">
+                On <Link to={`/projects/${id}/${other}`}>{BASELINE_SCREENS[other]}</Link>,{" "}
+                {invalidOn[other].join(", ")} {invalidOn[other].length === 1 ? "is" : "are"} not a
+                usable number or year yet – fix {invalidOn[other].length === 1 ? "it" : "them"}{" "}
+                before saving.
+              </p>
+            ))}
+          {unnamed && (
+            <p className="warning" role="alert">
+              The project needs a name
+              {section === "baseline" ? "" : " – on Facts and assumptions"}.
+            </p>
+          )}
           <Problems title="Fix these before saving" items={problems} />
           {problems.length === 0 && impact && dirty && (
             <p className="hint">
@@ -559,8 +645,11 @@ function BaselineForm({
         onCancel={() => blocker.reset?.()}
         onConfirm={() => blocker.proceed?.()}
       >
-        <p>Your changes are kept as a draft and offered next time you open the baseline.</p>
+        <p>
+          Your changes on all three baseline screens are kept as a draft and offered next time you
+          open the baseline.
+        </p>
       </Confirm>
-    </Provider>
+    </>
   );
 }

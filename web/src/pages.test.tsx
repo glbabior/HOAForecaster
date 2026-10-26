@@ -1,11 +1,19 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RouterProvider, createMemoryRouter, useLocation } from "react-router-dom";
+import {
+  type RouteObject,
+  RouterProvider,
+  createMemoryRouter,
+  useLocation,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ProjectLayout } from "./App";
 import { ApiError, api } from "./api";
 import { BaselineEditor } from "./pages/BaselineEditor";
+import { ExportPage } from "./pages/ExportPage";
 import { ScenarioEditor } from "./pages/ScenarioEditor";
+import { ScenariosPage } from "./pages/ScenariosPage";
 import type { Baseline, Project, Scenario, StoredProject } from "./types";
 
 vi.mock("./api", async (importOriginal) => {
@@ -22,6 +30,7 @@ vi.mock("./api", async (importOriginal) => {
       baselineImpact: vi.fn(),
       adopt: vi.fn(),
       unadopt: vi.fn(),
+      results: vi.fn(),
     },
   };
 });
@@ -37,6 +46,7 @@ const mocked = api as unknown as {
   baselineImpact: Mock;
   adopt: Mock;
   unadopt: Mock;
+  results: Mock;
 };
 
 const years = (from: number, to: number) =>
@@ -106,40 +116,54 @@ function Where() {
 }
 
 function start(path: string, element: React.ReactNode) {
+  const screens = ["baseline", "expenses", "ffb", "scenarios", "scenarios/new", "scenarios/:name"];
   const router = createMemoryRouter(
     [
       { path: "/projects/:id", element: <Where /> },
-      {
-        path: "/projects/:id/baseline",
+      ...screens.map((screen) => ({
+        path: `/projects/:id/${screen}`,
         element: (
           <>
             {element}
             <Where />
           </>
         ),
-      },
+      })),
+    ],
+    { initialEntries: [path] },
+  );
+  render(<RouterProvider router={router} />);
+}
+
+/** A project's screens as the app has them – the index beside the screen. */
+function startProject(path: string, screens: RouteObject[]) {
+  const router = createMemoryRouter(
+    [
       {
-        path: "/projects/:id/scenarios/new",
+        path: "/projects/:id",
         element: (
           <>
-            {element}
+            <ProjectLayout />
             <Where />
           </>
         ),
-      },
-      {
-        path: "/projects/:id/scenarios/:name",
-        element: (
-          <>
-            {element}
-            <Where />
-          </>
-        ),
+        children: [{ index: true, element: <p>Overview</p> }, ...screens],
       },
     ],
     { initialEntries: [path] },
   );
   render(<RouterProvider router={router} />);
+  return router;
+}
+
+function startBaseline(path: string) {
+  startProject(path, [
+    {
+      element: <BaselineEditor />,
+      children: [{ path: "baseline" }, { path: "expenses" }, { path: "ffb" }],
+    },
+    { path: "scenarios", element: <p>Scenarios</p> },
+  ]);
 }
 
 beforeEach(() => {
@@ -156,6 +180,7 @@ beforeEach(() => {
     new ApiError(422, "the inputs have problems", ["(results not under test)"]),
   );
   mocked.baselineImpact.mockResolvedValue({ changed: [], unchanged: ["Plan A"], invalid: [] });
+  mocked.results.mockResolvedValue({ baseline_problems: [], scenarios: {} });
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -442,20 +467,30 @@ describe("adopted plans", () => {
 
 describe("the baseline editor", () => {
   it("keeps the Fully Funded Balance while the end year is retyped", async () => {
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    startBaseline("/projects/abcdefabcdef/baseline");
     const end = await screen.findByRole("textbox", { name: "End year" });
     await userEvent.clear(end);
     await userEvent.type(end, "2");
     await userEvent.clear(end);
-    await userEvent.type(end, "2031");
-    const ffb2030 = screen.getByRole("textbox", {
+    await userEvent.type(end, "2032");
+    await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).baseline;
+    expect(saved.ffb["2030"]).toBe("203000");
+  });
+
+  it("shows the Fully Funded Balance on its own screen", async () => {
+    startBaseline("/projects/abcdefabcdef/ffb");
+    const ffb2030 = await screen.findByRole("textbox", {
       name: "Fully Funded Balance at the start of 2030",
     });
     expect((ffb2030 as HTMLInputElement).value).toBe("203000");
+    expect(screen.queryByRole("textbox", { name: "End year" })).toBeNull();
   });
 
   it("refuses to save while a figure is not a number, and says which", async () => {
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    startBaseline("/projects/abcdefabcdef/baseline");
     const balance = await screen.findByRole("textbox", { name: "Starting reserve balance" });
     await userEvent.type(balance, "abc");
     expect(screen.getByRole("alert").textContent).toContain("Starting reserve balance");
@@ -470,7 +505,7 @@ describe("the baseline editor", () => {
       changes: { ...scenario.changes, expense_lines: { "line-1": null } },
     };
     mocked.getProject.mockResolvedValue(stored({ ...project, scenarios: [leaving] }));
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    startBaseline("/projects/abcdefabcdef/expenses");
     await userEvent.click(await screen.findByRole("button", { name: "Add expense" }));
     await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
     await userEvent.click(await screen.findByRole("button", { name: "Save" }));
@@ -480,7 +515,7 @@ describe("the baseline editor", () => {
   });
 
   it("edits an expense's frequency, own rate and years, and saves only what it uses", async () => {
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    startBaseline("/projects/abcdefabcdef/expenses");
     const how = await screen.findByRole("combobox", { name: "How often expense 1 falls" });
     await userEvent.type(
       screen.getByRole("textbox", { name: "Own inflation rate of expense 1" }),
@@ -514,7 +549,7 @@ describe("the baseline editor", () => {
   });
 
   it("saves each figure, its source note, and a blank limit as no limit", async () => {
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    startBaseline("/projects/abcdefabcdef/baseline");
     const units = await screen.findByRole("textbox", { name: "Number of units" });
     const hint = document.getElementById(units.getAttribute("aria-describedby") ?? "");
     expect(hint?.textContent).toMatch(/every unit pays the same/); // each figure explains itself
@@ -533,8 +568,8 @@ describe("the baseline editor", () => {
     expect(saved.sources.units).toBe("Condo declaration");
   });
 
-  it("confirms against the baseline being saved and then leaves for the project page", async () => {
-    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+  it("confirms against the baseline being saved, then points to the scenarios", async () => {
+    startBaseline("/projects/abcdefabcdef/baseline");
     const units = await screen.findByRole("textbox", { name: "Number of units" });
     await userEvent.clear(units);
     await userEvent.type(units, "12");
@@ -548,8 +583,114 @@ describe("the baseline editor", () => {
     expect((call?.[1] as Baseline).units).toBe(12);
     expect(await screen.findByText("Plan A")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("where").textContent).toBe("/projects/abcdefabcdef"),
+    const note = await screen.findByText(/Baseline saved/);
+    expect(note.textContent).toMatch(/Dues and special assessments are set in each scenario/);
+    expect(screen.getByRole("link", { name: "go to Scenarios" }).getAttribute("href")).toBe(
+      "/projects/abcdefabcdef/scenarios",
     );
+    expect(screen.getByTestId("where").textContent).toBe("/projects/abcdefabcdef/baseline");
+  });
+});
+
+describe("the project's screens", () => {
+  it("keeps baseline edits across its three screens and saves them together", async () => {
+    startBaseline("/projects/abcdefabcdef/baseline");
+    const units = await screen.findByRole("textbox", { name: "Number of units" });
+    await userEvent.clear(units);
+    await userEvent.type(units, "12");
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(screen.queryByText("Leave without saving?")).toBeNull();
+    expect(screen.getByTestId("where").textContent).toBe("/projects/abcdefabcdef/expenses");
+    expect(screen.getByRole("link", { name: "Expenses" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add expense" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalledTimes(1));
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).baseline;
+    expect(saved.units).toBe(12);
+    expect(saved.expense_lines).toHaveLength(2);
+  });
+
+  it("refuses a save while a figure on another baseline screen is half typed", async () => {
+    startBaseline("/projects/abcdefabcdef/baseline");
+    await userEvent.type(
+      await screen.findByRole("textbox", { name: "Starting reserve balance" }),
+      "abc",
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Fully Funded Balance" }));
+    expect(screen.getByRole("alert").textContent).toContain("Starting reserve balance");
+    expect(
+      (screen.getByRole("button", { name: "Save baseline" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("says why the save waits when the name is cleared on another screen", async () => {
+    startBaseline("/projects/abcdefabcdef/baseline");
+    await userEvent.clear(await screen.findByRole("textbox", { name: "Name" }));
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(screen.getByRole("alert").textContent).toBe(
+      "The project needs a name – on Facts and assumptions.",
+    );
+  });
+
+  it("does not take a scenario named like a baseline screen for one", async () => {
+    const router = startProject("/projects/abcdefabcdef/baseline", [
+      {
+        element: <BaselineEditor />,
+        children: [{ path: "baseline" }, { path: "expenses" }, { path: "ffb" }],
+      },
+      { path: "scenarios/:name", element: <p>A scenario</p> },
+    ]);
+    const units = await screen.findByRole("textbox", { name: "Number of units" });
+    await userEvent.clear(units);
+    await userEvent.type(units, "12");
+    // a scenario called "ffb" is not the Fully Funded Balance screen – going there is leaving
+    await act(() => router.navigate("/projects/abcdefabcdef/scenarios/ffb"));
+    expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+  });
+
+  it("still asks before leaving the baseline with unsaved edits", async () => {
+    startBaseline("/projects/abcdefabcdef/baseline");
+    const units = await screen.findByRole("textbox", { name: "Number of units" });
+    await userEvent.clear(units);
+    await userEvent.type(units, "12");
+    await userEvent.click(screen.getByRole("link", { name: "Scenarios" }));
+    expect(await screen.findByText("Leave without saving?")).toBeTruthy();
+  });
+
+  it("lists the adopted plan first, then working scenarios, then earlier plans", async () => {
+    const adopted = (name: string, sequence: number): Scenario => ({
+      ...scenario,
+      name,
+      adoption: { date: "2026-10-01", note: "", sequence, baseline },
+    });
+    mocked.getProject.mockResolvedValue(
+      stored({ ...project, scenarios: [adopted("Old plan", 1), scenario, adopted("Plan now", 2)] }),
+    );
+    startProject("/projects/abcdefabcdef/scenarios", [
+      { path: "scenarios", element: <ScenariosPage /> },
+    ]);
+    const table = await screen.findByRole("table");
+    const names = within(table)
+      .getAllByRole("rowheader")
+      .map((th) => within(th).getByRole("link").textContent);
+    expect(names).toEqual(["Plan now", "Plan A", "Old plan"]);
+    expect(screen.getByRole("link", { name: "New scenario" }).getAttribute("href")).toBe(
+      "/projects/abcdefabcdef/scenarios/new",
+    );
+    expect(screen.getByRole("link", { name: "Scenarios" }).getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
+
+  it("offers the workbook only with at least one scenario chosen", async () => {
+    startProject("/projects/abcdefabcdef/export", [{ path: "export", element: <ExportPage /> }]);
+    const download = await screen.findByRole("button", { name: "Download the workbook" });
+    expect((download as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: /All scenarios/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Plan A" }));
+    expect((download as HTMLButtonElement).disabled).toBe(true);
   });
 });

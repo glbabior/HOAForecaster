@@ -1,23 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
-import { api, saveFile } from "../api";
-import { CsvButton } from "../components/CsvButton";
-import { ScenarioPicker } from "../components/ScenarioPicker";
+import { api } from "../api";
 import { Confirm, ErrorBanner, Problems } from "../components/ui";
-import { date, longDate, money, percent, span } from "../format";
+import { date, longDate, money, span } from "../format";
 import { currentAdoption } from "../template";
 import type { ProjectResults } from "../types";
 
+/** The project's overview – what it holds, and the steps in the order they are done. */
 export function ProjectPage() {
   const navigate = useNavigate();
   const { id, stored, error } = useProject();
   const [results, setResults] = useState<ProjectResults | null>(null);
   const [actionError, setActionError] = useState<unknown>(null);
-  const [chosen, setChosen] = useState<string[] | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const scenarioTable = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
     if (stored) api.results(id).then(setResults).catch(setActionError);
@@ -26,28 +23,14 @@ export function ProjectPage() {
   if (!stored) return <Loading error={error} />;
   const { project } = stored;
   const b = project.baseline;
-  const names = project.scenarios.map((s) => s.name);
-  // the adopted plan first, then the working scenarios, then earlier adopted plans, latest first
-  const current = currentAdoption(project.scenarios);
-  const earlier = project.scenarios
-    .filter((s) => s.adoption && s !== current)
-    .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0));
-  const listed = [
-    ...(current ? [current] : []),
-    ...project.scenarios.filter((s) => !s.adoption),
-    ...earlier,
-  ];
-  const selected = chosen ?? names;
-  // "…" while results load – each scenario then has figures or problems of its own
-  const pending = "…";
-
-  async function run(action: () => Promise<void>) {
-    setActionError(null);
-    try {
-      await action();
-    } catch (e) {
-      setActionError(e);
-    }
+  const at = (path: string) => `/projects/${id}/${path}`;
+  const adopted = currentAdoption(project.scenarios);
+  const working = project.scenarios.filter((s) => !s.adoption).length;
+  const earlier = project.scenarios.filter((s) => s.adoption && s !== adopted).length;
+  const lines = { operating: 0, reserve: 0 };
+  for (const line of b.expense_lines) {
+    if (line.frequency === "monthly" || line.frequency === "yearly") lines.operating += 1;
+    else lines.reserve += 1;
   }
 
   return (
@@ -61,128 +44,67 @@ export function ProjectPage() {
         items={results?.baseline_problems ?? []}
       />
 
-      <section className="panel">
-        <h2>Baseline</h2>
-        <p>
-          {span(b.start_year, b.end_year)} · {b.units} units · starting balance{" "}
-          {money(b.starting_balance)} · current dues {money(b.current_dues, true)} a month ·{" "}
-          {b.expense_lines.length} expense lines
-        </p>
-        <p className="hint">
-          Last changed {date(stored.baseline_times.modified)}
-          {b.sources.ffb ? ` · Reserve study – ${b.sources.ffb}` : ""}
-        </p>
-        <Link className="button" to={`/projects/${id}/baseline`}>
-          Edit baseline
-        </Link>
-      </section>
-
-      <section className="panel">
-        <h2>Scenarios</h2>
-        <div className="section-head">
-          <span />
-          <CsvButton table={scenarioTable} filename={`${project.name} - scenarios.csv`} />
-        </div>
-        <table className="list" ref={scenarioTable}>
-          <caption className="visually-hidden">Scenarios and their key results</caption>
-          <thead>
-            <tr>
-              <th scope="col">Scenario</th>
-              <th scope="col">Lowest balance</th>
-              <th scope="col">Years below cushion</th>
-              <th scope="col">Funded at end</th>
-              <th scope="col">Target first met</th>
-              <th scope="col">Last changed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {listed.map((s) => {
-              const outcome = results?.scenarios[s.name];
-              const r = outcome && "result" in outcome ? outcome.result.summary : null;
-              const end = outcome && "result" in outcome ? outcome.result.years.at(-1)?.year : null;
-              return (
-                <tr key={s.name} className={s === current ? "adopted" : undefined}>
-                  <th scope="row">
-                    <Link to={`/projects/${id}/scenarios/${encodeURIComponent(s.name)}`}>
-                      {s.name}
-                    </Link>
-                    {s.adoption && (
-                      <div className="badge">
-                        {s === current ? "Adopted plan" : "Earlier adopted plan"} · adopted{" "}
-                        {longDate(s.adoption.date)}
-                      </div>
-                    )}
-                    {s.description && <div className="hint">{s.description}</div>}
-                  </th>
-                  {outcome && "problems" in outcome ? (
-                    <td colSpan={4} className="warning">
-                      Has problems – open it to fix them
-                    </td>
-                  ) : (
-                    <>
-                      <td
-                        className={`num${r && r.lowest_balance.startsWith("-") ? " negative" : ""}`}
-                      >
-                        {r ? `${money(r.lowest_balance)} (${r.lowest_balance_year})` : pending}
-                      </td>
-                      <td className="num">{r?.low_years ?? pending}</td>
-                      <td className="num">{r ? percent(r.pf_end) : pending}</td>
-                      <td>{r ? (r.first_target_year ?? `not by ${end}`) : pending}</td>
-                    </>
-                  )}
-                  <td>{date(stored.scenario_times[s.name]?.modified ?? "")}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="row-actions">
-          <Link className="button" to={`/projects/${id}/scenarios/new`}>
-            New scenario
-          </Link>
-          <Link className="button" to={`/projects/${id}/compare`}>
-            Compare scenarios
-          </Link>
-          <Link className="button" to={`/projects/${id}/charts`}>
-            Charts
-          </Link>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>Export</h2>
-        <div className="row-actions">
-          <ScenarioPicker names={names} selected={selected} onChange={setChosen} />
-          <button
-            type="button"
-            className="primary"
-            disabled={selected.length === 0}
-            onClick={() =>
-              run(async () => {
-                const { blob, filename } = await api.exportWorkbook(id, selected);
-                saveFile(blob, filename);
-              })
-            }
-          >
-            Excel workbook
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              run(async () => {
-                const { blob, filename } = await api.exportProject(id);
-                saveFile(blob, filename);
-              })
-            }
-          >
-            Export project
-          </button>
-        </div>
-        <p className="hint">
-          The workbook has live formulas and recalculates in Excel. Export project saves a copy you
-          can import later – a snapshot before a big change.
-        </p>
-      </section>
+      <ol className="steps">
+        <li>
+          <h2>
+            <Link to={at("baseline")}>Facts and assumptions</Link>
+          </h2>
+          <p>
+            {span(b.start_year, b.end_year)} · {b.units} units · starting balance{" "}
+            {money(b.starting_balance)} · current dues {money(b.current_dues, true)} a month
+          </p>
+          <p className="hint">
+            The building's facts and the rates everything grows at. Last changed{" "}
+            {date(stored.baseline_times.modified)}.
+          </p>
+        </li>
+        <li>
+          <h2>
+            <Link to={at("expenses")}>Expenses</Link>
+          </h2>
+          <p>
+            {lines.operating} running costs paid from dues · {lines.reserve} repairs and
+            replacements paid from reserves
+          </p>
+        </li>
+        <li>
+          <h2>
+            <Link to={at("ffb")}>Fully Funded Balance</Link>
+          </h2>
+          <p>
+            From the reserve study{b.sources.ffb ? ` – ${b.sources.ffb}` : ""}, used for percent
+            funded.
+          </p>
+        </li>
+        <li>
+          <h2>
+            <Link to={at("scenarios")}>Scenarios</Link>
+          </h2>
+          <p>
+            {working} {working === 1 ? "scenario" : "scenarios"}
+            {adopted
+              ? ` · adopted plan – ${adopted.name}, ${longDate(adopted.adoption?.date ?? "")}`
+              : ""}
+            {earlier > 0 ? ` · ${earlier} earlier adopted ${earlier === 1 ? "plan" : "plans"}` : ""}
+          </p>
+          <p className="hint">
+            Ways to pay for the plan – dues each year, special assessments, and any assumption a
+            scenario sets for itself.
+          </p>
+        </li>
+        <li>
+          <h2>
+            <Link to={at("compare")}>Compare</Link> and <Link to={at("charts")}>Charts</Link>
+          </h2>
+          <p className="hint">The scenarios side by side, as tables and as charts.</p>
+        </li>
+        <li>
+          <h2>
+            <Link to={at("export")}>Export</Link>
+          </h2>
+          <p className="hint">An Excel workbook with live formulas, or a copy of the project.</p>
+        </li>
+      </ol>
 
       <section className="panel danger no-print">
         <h2>Delete project</h2>
@@ -195,12 +117,10 @@ export function ProjectPage() {
         title={`Delete ${project.name}?`}
         confirmLabel="Delete"
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() =>
-          run(async () => {
-            await api.deleteProject(id);
-            navigate("/");
-          })
-        }
+        onConfirm={() => {
+          setActionError(null);
+          api.deleteProject(id).then(() => navigate("/"), setActionError);
+        }}
       >
         <p>
           The project moves to the trash folder inside HOAForecaster's data folder. Export it first
