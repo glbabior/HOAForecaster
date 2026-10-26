@@ -239,6 +239,12 @@ input.source {
   color: var(--muted);
 }
 
+/* an example, not a note – so it never passes for one that was typed */
+input.source::placeholder {
+  font-style: italic;
+  opacity: 0.65;
+}
+
 fieldset {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -260,12 +266,6 @@ legend {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0 24px;
-}
-
-.fact {
-  border-bottom: 1px dashed var(--border);
-  padding-bottom: 6px;
-  margin-bottom: 8px;
 }
 
 .row-actions {
@@ -627,4 +627,74 @@ tr.left-out td {
   display: inline-flex;
   gap: 6px;
   align-items: center;
+}
+
+/* The baseline's facts and assumptions – one aligned row per figure, in groups */
+table.facts {
+  width: 100%;
+  max-width: 980px;
+  border-collapse: collapse;
+}
+
+table.facts thead th {
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 10px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+table.facts tr.fact-group th {
+  padding: 16px 0 4px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+}
+
+table.facts tbody:first-of-type tr.fact-group th {
+  padding-top: 8px;
+}
+
+table.facts tbody th[scope="row"] {
+  text-align: left;
+  font-weight: 500;
+  padding: 7px 16px 7px 0;
+  vertical-align: top;
+  width: 42%;
+}
+
+table.facts tbody th[scope="row"] small {
+  display: block;
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+table.facts td {
+  padding: 5px 10px 5px 0;
+  vertical-align: top;
+}
+
+table.facts td.fact-value {
+  width: 170px;
+  white-space: nowrap;
+}
+
+table.facts td.fact-value input {
+  width: 120px;
+  text-align: right;
+}
+
+table.facts td input.source {
+  width: 100%;
+}
+
+table.facts tbody tr:not(.fact-group) + tr:not(.fact-group) th,
+table.facts tbody tr:not(.fact-group) + tr:not(.fact-group) td {
+  border-top: 1px dashed var(--border);
+}
+
+table.facts .unit-prefix {
+  display: inline-block;
+  width: 1ch;
 }

@@ -30,13 +30,13 @@ const ASSUMPTIONS: { key: ChangeableKey; label: string; kind: Kind; limit?: bool
   { key: "target", label: "Percent-funded target", kind: "percent" },
   {
     key: "max_dues_increase",
-    label: "Largest dues increase without an owner vote",
+    label: "Largest dues increase without a vote",
     kind: "percent",
     limit: true,
   },
   {
     key: "max_assessment_share",
-    label: "Largest assessment without a vote, share of the budget",
+    label: "Largest assessment without a vote",
     kind: "percent",
     limit: true,
   },

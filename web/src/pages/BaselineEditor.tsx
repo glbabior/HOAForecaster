@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
@@ -29,60 +29,179 @@ type Impact = { changed: string[]; unchanged: string[]; invalid: string[] };
 
 const SCREEN = "baseline";
 
-const SCALARS: {
+interface Fact {
   key: keyof Baseline;
   label: string;
-  hint?: string;
-  percent?: boolean;
-  blank?: boolean;
-  whole?: boolean;
-}[] = [
+  hint: string; // what the figure means, in a board member's words
+  example: string; // the kind of source note to write for it
+  unit: "$" | "%" | "year" | "count";
+  blank?: boolean; // may be left blank – no limit
+}
+
+// The baseline's figures, grouped by what they are about.
+const FACTS: { title: string; facts: Fact[] }[] = [
   {
-    key: "starting_balance",
-    label: "Starting reserve balance",
-    hint: "On January 1 of the start year",
-  },
-  { key: "units", label: "Number of units", whole: true },
-  {
-    key: "current_dues",
-    label: "Current dues per unit per month",
-    hint: "The no-change reference for extra cost",
-  },
-  {
-    key: "operating_inflation",
-    label: "Operating cost inflation",
-    percent: true,
-    hint: "For monthly and yearly expenses without a rate of their own",
-  },
-  { key: "expense_inflation", label: "Reserve expense inflation", percent: true },
-  {
-    key: "expense_base_year",
-    label: "Expense base year",
-    hint: "The year whose dollars the expense amounts are in – usually the reserve study's",
-    whole: true,
-  },
-  { key: "interest_rate", label: "Interest earned on reserves", percent: true },
-  {
-    key: "cushion",
-    label: "Minimum working cushion",
-    hint: "A year-end balance below this is flagged LOW",
-  },
-  { key: "target", label: "Percent-funded target", percent: true },
-  {
-    key: "max_dues_increase",
-    label: "Largest dues increase without an owner vote",
-    percent: true,
-    blank: true,
-    hint: "Leave blank for no limit",
+    title: "The reserve fund",
+    facts: [
+      {
+        key: "starting_balance",
+        label: "Starting reserve balance",
+        hint: "The money in the reserve fund on January 1 of the start year – if that date is still ahead, the balance you expect on it",
+        example: "e.g. Bank statement, December",
+        unit: "$",
+      },
+      {
+        key: "interest_rate",
+        label: "Interest earned on reserves",
+        hint: "What the reserve fund earns in a year, as a percentage of its balance",
+        example: "e.g. Credit union savings rate",
+        unit: "%",
+      },
+      {
+        key: "cushion",
+        label: "Minimum working cushion",
+        hint: "The lowest year-end balance the board is comfortable with – any year below it is flagged LOW",
+        example: "e.g. Board policy on reserves",
+        unit: "$",
+      },
+      {
+        key: "target",
+        label: "Percent-funded target",
+        hint: "The share of the reserve study's Fully Funded Balance the board aims to hold – drawn as the target line on charts",
+        example: "e.g. Reserve study recommendation",
+        unit: "%",
+      },
+    ],
   },
   {
-    key: "max_assessment_share",
-    label: "Largest assessment without a vote, share of the budget",
-    percent: true,
-    blank: true,
-    hint: "Leave blank for no limit",
+    title: "Owners and dues",
+    facts: [
+      {
+        key: "units",
+        label: "Number of units",
+        hint: "Dues and special assessments are per unit – every unit pays the same",
+        example: "e.g. Condo declaration, Article 2",
+        unit: "count",
+      },
+      {
+        key: "current_dues",
+        label: "Current dues per unit per month",
+        hint: "What each unit pays today – the no-change figure every scenario's extra cost is measured against",
+        example: "e.g. This year's budget",
+        unit: "$",
+      },
+    ],
+  },
+  {
+    title: "Inflation",
+    facts: [
+      {
+        key: "operating_inflation",
+        label: "Operating cost inflation",
+        hint: "How fast running costs grow each year – used by monthly and yearly expenses that do not set a rate of their own",
+        example: "e.g. Last three budgets, average increase",
+        unit: "%",
+      },
+      {
+        key: "expense_inflation",
+        label: "Reserve expense inflation",
+        hint: "How fast repair and replacement costs grow each year – used by once and every-few-years expenses",
+        example: "e.g. Reserve study, inflation assumption",
+        unit: "%",
+      },
+      {
+        key: "expense_base_year",
+        label: "Expense base year",
+        hint: "The year whose prices the reserve expense amounts are in – usually the year of the reserve study",
+        example: "e.g. Reserve study, its date",
+        unit: "year",
+      },
+    ],
+  },
+  {
+    title: "When owners must vote",
+    facts: [
+      {
+        key: "max_dues_increase",
+        label: "Largest dues increase without a vote",
+        hint: "The biggest rise in dues from one year to the next the board may make on its own – leave blank for no limit",
+        example: "e.g. Bylaws, section 6.3",
+        unit: "%",
+        blank: true,
+      },
+      {
+        key: "max_assessment_share",
+        label: "Largest assessment without a vote",
+        hint: "The biggest special assessment the board may levy on its own, as a share of that year's operating costs plus reserve contribution – leave blank for no limit",
+        example: "e.g. State condo act, assessment limit",
+        unit: "%",
+        blank: true,
+      },
+    ],
   },
 ];
+
+/** One figure as a table row – its name and hint, its value, and where it came from. */
+function FactRow({
+  fact,
+  baseline,
+  onValue,
+  onSource,
+}: {
+  fact: Fact;
+  baseline: Baseline;
+  onValue: (value: string | number | null) => void;
+  onSource: (text: string) => void;
+}) {
+  const id = useId();
+  const { key, label, hint, example, unit, blank } = fact;
+  return (
+    <tr>
+      <th scope="row">
+        <label htmlFor={id}>{label}</label>
+        <small id={`${id}-hint`} className="hint">
+          {hint}
+        </small>
+      </th>
+      <td className="fact-value">
+        <span className="with-unit">
+          {/* the same slot on every row, so the boxes line up whether or not it holds a $ */}
+          <span className="unit-prefix" aria-hidden="true">
+            {unit === "$" ? "$" : ""}
+          </span>
+          {unit === "year" || unit === "count" ? (
+            <YearInput
+              id={id}
+              name={label}
+              describedBy={`${id}-hint`}
+              value={baseline[key] as number}
+              onChange={onValue}
+            />
+          ) : (
+            <DecimalInput
+              id={id}
+              name={label}
+              describedBy={`${id}-hint`}
+              percent={unit === "%"}
+              allowBlank={blank}
+              value={baseline[key] as string | null}
+              onChange={(v) => (v !== null || blank) && onValue(v)}
+            />
+          )}
+        </span>
+      </td>
+      <td>
+        <input
+          aria-label={`Source – ${label.toLowerCase()}`}
+          className="source"
+          placeholder={example}
+          value={baseline.sources[key] ?? ""}
+          onChange={(e) => onSource(e.target.value)}
+        />
+      </td>
+    </tr>
+  );
+}
 
 export function BaselineEditor() {
   const { id, stored, error, setStored } = useProject();
@@ -310,48 +429,38 @@ function BaselineForm({
         <section className="panel">
           <h2>Facts and assumptions</h2>
           <p className="hint">
-            Each figure has a source note – where it came from and when. It travels into the
-            exported workbook as a cell comment.
+            Beside each figure, a source note says where it came from and when – a document, a page,
+            a date – so anyone reading the plan later can check it. Notes are optional, and each
+            travels into the exported workbook as a comment on that figure.
           </p>
-          <div className="grid-2">
-            {SCALARS.map(({ key, label, hint, percent, blank, whole }) => (
-              <div key={key} className="fact">
-                <Field label={label} hint={hint}>
-                  {(fid, d) =>
-                    whole ? (
-                      <YearInput
-                        id={fid}
-                        name={label}
-                        describedBy={d}
-                        value={b[key] as number}
-                        onChange={(n) => set({ [key]: n })}
-                      />
-                    ) : (
-                      <DecimalInput
-                        id={fid}
-                        name={label}
-                        describedBy={d}
-                        percent={percent}
-                        allowBlank={blank}
-                        value={b[key] as string | null}
-                        onChange={(v) => (v !== null || blank) && set({ [key]: v })}
-                      />
-                    )
-                  }
-                </Field>
-                <Field label={`Source – ${label.toLowerCase()}`}>
-                  {(fid) => (
-                    <input
-                      id={fid}
-                      className="source"
-                      value={b.sources[key] ?? ""}
-                      onChange={(e) => setSource(key, e.target.value)}
-                    />
-                  )}
-                </Field>
-              </div>
+          <table className="facts">
+            <caption className="visually-hidden">Facts and assumptions</caption>
+            <thead>
+              <tr>
+                <th scope="col">Figure</th>
+                <th scope="col">Value</th>
+                <th scope="col">Source note – where the figure came from</th>
+              </tr>
+            </thead>
+            {FACTS.map((group) => (
+              <tbody key={group.title}>
+                <tr className="fact-group">
+                  <th scope="rowgroup" colSpan={3}>
+                    {group.title}
+                  </th>
+                </tr>
+                {group.facts.map((fact) => (
+                  <FactRow
+                    key={fact.key}
+                    fact={fact}
+                    baseline={b}
+                    onValue={(value) => set({ [fact.key]: value })}
+                    onSource={(text) => setSource(fact.key, text)}
+                  />
+                ))}
+              </tbody>
             ))}
-          </div>
+          </table>
         </section>
 
         <section className="panel">

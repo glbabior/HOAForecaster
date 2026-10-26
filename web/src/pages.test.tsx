@@ -513,6 +513,26 @@ describe("the baseline editor", () => {
     });
   });
 
+  it("saves each figure, its source note, and a blank limit as no limit", async () => {
+    start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
+    const units = await screen.findByRole("textbox", { name: "Number of units" });
+    const hint = document.getElementById(units.getAttribute("aria-describedby") ?? "");
+    expect(hint?.textContent).toMatch(/every unit pays the same/); // each figure explains itself
+    await userEvent.clear(
+      screen.getByRole("textbox", { name: "Largest dues increase without a vote" }),
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Source – number of units" }),
+      "Condo declaration",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save baseline" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled());
+    const saved = (mocked.saveProject.mock.calls[0]?.[1] as Project).baseline;
+    expect(saved.max_dues_increase).toBeNull();
+    expect(saved.sources.units).toBe("Condo declaration");
+  });
+
   it("confirms against the baseline being saved and then leaves for the project page", async () => {
     start("/projects/abcdefabcdef/baseline", <BaselineEditor />);
     const units = await screen.findByRole("textbox", { name: "Number of units" });
