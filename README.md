@@ -24,6 +24,8 @@ The app opens in your browser at http://127.0.0.1:8765/. The first start builds 
 
 `--port 8766` uses another port, and `--no-browser` starts it without opening a browser.
 
+On Windows you can double-click **`HOAForecaster.bat`** in the project folder instead (or a shortcut to it on your desktop). It starts the same app, opens the browser once it is ready, and keeps its window open after the app stops, so any message stays readable. Close the window or press Ctrl+C to stop the app. It passes options on, so `HOAForecaster.bat --port 8766` works from a terminal too.
+
 ### Where projects are kept
 
 Projects are saved in your user application-data folder – `%APPDATA%\HOAForecaster` on Windows, `~/Library/Application Support/HOAForecaster` on macOS. To keep them somewhere else, such as a private folder of your own, set `HOA_DATA_DIR` before starting.
