@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { reloadWhenFresh, tokenIn } from "./api";
 import { linesFromPaste, newLineId, withFrequency } from "./components/tables";
 import { csvCell, parsePasted, toCsv } from "./csv";
 import { fromPercent, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
@@ -365,5 +366,47 @@ describe("exact rounding to cents", () => {
   it("reads exponent-form decimals the server may send", () => {
     expect(toPercent("5E-7")).toBe("0.00005");
     expect(shift("2.5E+2", 0)).toBe("250");
+  });
+});
+
+describe("reloading after a restart", () => {
+  const page = (t: string) => `<html><head><meta name="hoa-token" content="${t}" /></head></html>`;
+
+  it("waits through the old server and the gap, and reloads only for a fresh one", async () => {
+    document.head.innerHTML = '<meta name="hoa-token" content="old" />';
+    const answers: (() => Promise<Response>)[] = [
+      async () => new Response(page("old")), // the old server, still stopping
+      async () => {
+        throw new TypeError("connection refused"); // nothing listening yet
+      },
+      async () => new Response(page("new")),
+    ];
+    const fetchMock = vi.fn(() => {
+      const next = answers.shift();
+      if (!next) throw new Error("asked once too often");
+      return next();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const reload = vi.fn();
+    expect(await reloadWhenFresh(10_000, async () => undefined, reload)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(reload).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("gives up when no fresh server answers in time", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 503 })),
+    );
+    const reload = vi.fn();
+    expect(await reloadWhenFresh(0, async () => undefined, reload)).toBe(false);
+    expect(reload).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the token a page carries", () => {
+    expect(tokenIn(page("abc"))).toBe("abc");
+    expect(tokenIn("<html></html>")).toBe("");
   });
 });

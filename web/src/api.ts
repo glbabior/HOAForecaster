@@ -82,7 +82,9 @@ export const api = {
   /** A blank project with the spec's defaults, made by the server. */
   createBlank: (name: string) =>
     call<StoredProject>("/api/projects", { method: "POST", body: json({ name }) }),
-  about: () => call<{ data_folder: string; version: string }>("/api/about"),
+  about: () => call<{ data_folder: string; version: string; can_restart: boolean }>("/api/about"),
+  /** Ask the launcher for a fresh server – this one stops once it has answered. */
+  restart: () => call<{ restarting: boolean }>("/api/restart", { method: "POST" }),
   getProject: (id: string) => call<StoredProject>(projectUrl(id)),
   saveProject: (id: string, project: Project, baseRevision: number) =>
     call<StoredProject>(projectUrl(id), {
@@ -148,4 +150,35 @@ export function saveFile(blob: Blob, filename: string): void {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** The token in a page's HTML, as the server wrote it there. */
+export const tokenIn = (html: string): string =>
+  new DOMParser()
+    .parseFromString(html, "text/html")
+    .querySelector<HTMLMetaElement>('meta[name="hoa-token"]')?.content ?? "";
+
+/** Wait until a fresh server answers – its page carries a new token, so the old server still
+ * stopping never counts – then load it. False if none answered in time. */
+export async function reloadWhenFresh(
+  timeoutMs = 120_000,
+  pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms)),
+  reload = () => window.location.reload(),
+): Promise<boolean> {
+  const old = token();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await pause(500);
+    try {
+      const response = await fetch("/", { cache: "no-store" });
+      const fresh = response.ok ? tokenIn(await response.text()) : "";
+      if (fresh && fresh !== old) {
+        reload();
+        return true;
+      }
+    } catch {
+      // the old server has gone and the new one is not listening yet
+    }
+  }
+  return false;
 }

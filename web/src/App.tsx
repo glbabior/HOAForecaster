@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, createBrowserRouter, useParams } from "react-router-dom";
 
-import { api } from "./api";
-import { ErrorBanner } from "./components/ui";
+import { api, reloadWhenFresh } from "./api";
+import { Confirm, ErrorBanner } from "./components/ui";
 import { BaselineEditor } from "./pages/BaselineEditor";
 import { ChartsPage } from "./pages/ChartsPage";
 import { ComparePage } from "./pages/ComparePage";
@@ -10,6 +10,65 @@ import { ProjectList } from "./pages/ProjectList";
 import { ProjectPage } from "./pages/ProjectPage";
 import { ScenarioEditor } from "./pages/ScenarioEditor";
 import type { StoredProject } from "./types";
+
+/** Restart the server and reload the page – shown only when the launcher can start a fresh
+ * server. The old one stops once it has answered; the page waits for the new one. */
+function RestartButton() {
+  const [can, setCan] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [state, setState] = useState<"idle" | "waiting" | "failed">("idle");
+  useEffect(() => {
+    api.about().then(
+      (a) => setCan(a.can_restart),
+      () => setCan(false),
+    );
+  }, []);
+  if (!can) return null;
+
+  async function restart() {
+    setAsking(false);
+    setState("waiting");
+    try {
+      await api.restart();
+    } catch {
+      // the answer can be lost as the server stops – wait for the fresh one all the same
+    }
+    if (!(await reloadWhenFresh())) {
+      setState("failed");
+      return;
+    }
+    // still here a moment later – the reload was stopped (Stay on the leave-page question)
+    setTimeout(() => setState("failed"), 4000);
+  }
+
+  return (
+    <>
+      <button type="button" className="small" onClick={() => setAsking(true)}>
+        Restart
+      </button>
+      <Confirm
+        open={asking}
+        title="Restart HOAForecaster?"
+        confirmLabel="Restart"
+        onCancel={() => setAsking(false)}
+        onConfirm={() => void restart()}
+      >
+        <p>
+          The server stops and a fresh one starts – rebuilding the screens first if they changed –
+          and this page reloads once it is back. Save first: edits on the screen are kept only as a
+          draft.
+        </p>
+      </Confirm>
+      {state !== "idle" && (
+        <div className="restarting" role="status">
+          {state === "waiting"
+            ? "Restarting HOAForecaster – this page reloads when it is back…"
+            : "Reload this page to use HOAForecaster – if it does not load, look at its window for a message."}
+        </div>
+      )}
+    </>
+  );
+}
 
 function Layout() {
   return (
@@ -21,6 +80,7 @@ function Layout() {
         <Link to="/" className="brand">
           HOAForecaster
         </Link>
+        <RestartButton />
       </header>
       <main id="main">
         <Outlet />

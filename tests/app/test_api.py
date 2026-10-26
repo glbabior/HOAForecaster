@@ -544,3 +544,27 @@ def test_an_adopted_plan_still_has_figures_when_the_baseline_has_problems(
     assert results["baseline_problems"] == ["there must be at least one unit"]
     assert "result" in results["scenarios"]["Dues only"]
     assert "problems" in results["scenarios"]["Two-part assessment"]
+
+
+# ---------------------------------------------------------------- restarting
+
+
+def test_restart_stops_this_server_only_after_answering(store: ProjectStore) -> None:
+    calls: list[str] = []
+    app = create_app(store, TOKEN, None, on_restart=lambda: calls.append("restart"))
+    client = TestClient(app, base_url="http://127.0.0.1:8765", headers={TOKEN_HEADER: TOKEN})
+    assert client.get("/api/about").json()["can_restart"] is True
+    answer = client.post("/api/restart")
+    assert (answer.status_code, answer.json(), calls) == (202, {"restarting": True}, ["restart"])
+
+
+def test_restart_is_refused_where_nothing_can_start_a_fresh_server(client: TestClient) -> None:
+    assert client.get("/api/about").json()["can_restart"] is False
+    answer = client.post("/api/restart")
+    assert answer.status_code == 409 and "cannot restart itself" in answer.json()["message"]
+
+
+def test_restart_needs_the_token(store: ProjectStore) -> None:
+    app = create_app(store, TOKEN, None, on_restart=lambda: pytest.fail("restarted"))
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    assert client.post("/api/restart").status_code == 403

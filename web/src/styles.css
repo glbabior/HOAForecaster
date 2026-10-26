@@ -106,6 +106,24 @@ a {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* shown over everything while the server restarts */
+.restarting {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  font-size: 1.1rem;
+  font-weight: 600;
+  z-index: 20;
 }
 
 .brand {

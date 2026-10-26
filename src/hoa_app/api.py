@@ -24,6 +24,7 @@ from urllib.parse import quote as url_quote
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -222,7 +223,14 @@ async def _too_large(send: Send) -> None:
 # ---------------------------------------------------------------- the app
 
 
-def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> FastAPI:
+def create_app(
+    store: ProjectStore,
+    token: str,
+    static_dir: Path | None,
+    on_restart: Callable[[], None] | None = None,
+) -> FastAPI:
+    """The app. `on_restart`, given by the launcher, stops this server so the launcher starts a
+    fresh one; without it the app cannot restart itself."""
     app = FastAPI(title="HOAForecaster", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -322,7 +330,20 @@ def create_app(store: ProjectStore, token: str, static_dir: Path | None) -> Fast
 
     @app.get("/api/about")
     def about() -> dict[str, Any]:
-        return {"data_folder": str(store.root), "version": version("hoaforecaster")}
+        return {
+            "data_folder": str(store.root),
+            "version": version("hoaforecaster"),
+            "can_restart": on_restart is not None,
+        }
+
+    @app.post("/api/restart", status_code=202)
+    def restart() -> JSONResponse:
+        """Stop this server so the launcher starts a fresh one – after this answer is sent."""
+        if on_restart is None:
+            raise ApiError(409, "this copy of the app cannot restart itself – start it again")
+        return JSONResponse(
+            {"restarting": True}, status_code=202, background=BackgroundTask(on_restart)
+        )
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> dict[str, Any]:
