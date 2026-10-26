@@ -12,14 +12,16 @@ rem   * It sets its own working directory. Explorer can start a script from anyw
 rem     uv finds the project from the working directory.
 rem   * It checks that uv is installed, and says how to get it, rather than failing with
 rem     "'uv' is not recognized".
-rem   * It pauses at the end. Without that, the window vanishes the moment something fails -
-rem     a first build that cannot find npm, the port already in use - and takes the message
-rem     with it, which reads as "nothing happened".
+rem   * It pauses at the end when something failed. Without that, the window vanishes the
+rem     moment something fails - a first build that cannot find npm, the port already in
+rem     use - and takes the message with it, which reads as "nothing happened".
 rem
 rem The first start takes a minute or two: uv installs the Python packages and the screens
 rem are built with npm. Later starts are quick.
 rem
-rem Stop the app with Ctrl+C in this window, or just close the window.
+rem Stop the app with Ctrl+C in this window, or just close the window. Double-clicking this file
+rem while the app is running stops the running copy cleanly first, and that copy's window
+rem closes by itself.
 
 setlocal
 cd /d "%~dp0"
@@ -39,8 +41,10 @@ echo A browser tab opens by itself once the server is listening. Ctrl+C stops it
 echo.
 
 uv run hoaforecaster %*
+set code=%errorlevel%
 
 echo.
 echo HOAForecaster has stopped.
-pause
+rem keep the message on screen only when something went wrong
+if not "%code%"=="0" pause
 endlocal

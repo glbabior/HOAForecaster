@@ -55,6 +55,10 @@ from hoa_workbook.export import export_workbook
 from hoa_workbook.read import MAX_FILE_BYTES, WorkbookFormatError, read_workbook
 
 TOKEN_HEADER = "X-HOA-Token"
+# the launcher's own key for stopping this server when the app is started again – never in the
+# page, so nothing the page runs can stop the server
+STOP_HEADER = "X-HOA-Stop"
+STOP_PATH = "/api/stop"
 TOKEN_PLACEHOLDER = "__HOA_TOKEN__"  # in web/dist/index.html, replaced when served
 MAX_JSON_BYTES = 5 * 1024 * 1024
 MAX_BODY_BYTES = MAX_FILE_BYTES + 1024 * 1024  # a workbook upload plus multipart framing
@@ -228,16 +232,28 @@ def create_app(
     token: str,
     static_dir: Path | None,
     on_restart: Callable[[], None] | None = None,
+    stop_key: str | None = None,
+    on_stop: Callable[[], None] | None = None,
 ) -> FastAPI:
     """The app. `on_restart`, given by the launcher, stops this server so the launcher starts a
-    fresh one; without it the app cannot restart itself."""
+    fresh one; without it the app cannot restart itself. `on_stop` stops it for good when the app
+    is started again – asked with `stop_key`, which only the launcher has."""
+    if (stop_key is None) != (on_stop is None):
+        raise ValueError("a stop key and what stopping does are given together, or neither")
     app = FastAPI(title="HOAForecaster", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        if request.url.path.startswith("/api/"):
+        if request.url.path == STOP_PATH:
+            sent = request.headers.get(STOP_HEADER, "")
+            if stop_key is None or not secrets.compare_digest(sent.encode(), stop_key.encode()):
+                return JSONResponse(
+                    {"message": "only HOAForecaster's launcher can stop it", "problems": []},
+                    status_code=403,
+                )
+        elif request.url.path.startswith("/api/"):
             sent = request.headers.get(TOKEN_HEADER, "")
             if not secrets.compare_digest(sent.encode(), token.encode()):
                 return JSONResponse(
@@ -344,6 +360,12 @@ def create_app(
         return JSONResponse(
             {"restarting": True}, status_code=202, background=BackgroundTask(on_restart)
         )
+
+    @app.post(STOP_PATH, status_code=202)
+    def stop() -> JSONResponse:
+        """Stop this server for good – the app was started again. After this answer is sent."""
+        assert on_stop is not None  # given with the key, and nothing passes the guard without one
+        return JSONResponse({"stopping": True}, status_code=202, background=BackgroundTask(on_stop))
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> dict[str, Any]:

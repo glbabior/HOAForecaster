@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hoa_app import api as api_module
-from hoa_app.api import TOKEN_HEADER, TOKEN_PLACEHOLDER, create_app
+from hoa_app.api import STOP_HEADER, TOKEN_HEADER, TOKEN_PLACEHOLDER, create_app
 from hoa_engine import project_from_dict, project_to_dict
 from hoa_store.store import ProjectStore
 from hoa_workbook.export import export_workbook
@@ -568,3 +568,35 @@ def test_restart_needs_the_token(store: ProjectStore) -> None:
     app = create_app(store, TOKEN, None, on_restart=lambda: pytest.fail("restarted"))
     client = TestClient(app, base_url="http://127.0.0.1:8765")
     assert client.post("/api/restart").status_code == 403
+
+
+# ---------------------------------------------------------------- stopping for a new launch
+
+
+def test_a_new_launch_stops_this_server_with_its_stop_key(store: ProjectStore) -> None:
+    calls: list[str] = []
+    app = create_app(store, TOKEN, None, stop_key="stop-key", on_stop=lambda: calls.append("x"))
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    answer = client.post("/api/stop", headers={STOP_HEADER: "stop-key"})
+    assert (answer.status_code, answer.json(), calls) == (202, {"stopping": True}, ["x"])
+
+
+def test_the_page_cannot_stop_the_server(store: ProjectStore) -> None:
+    # the page's token never stops it, nor a wrong key – only the launcher's own key does
+    calls: list[str] = []
+    app = create_app(store, TOKEN, None, stop_key="stop-key", on_stop=lambda: calls.append("x"))
+    client = TestClient(app, base_url="http://127.0.0.1:8765")
+    for headers in ({TOKEN_HEADER: TOKEN}, {STOP_HEADER: "wrong"}, {}):
+        assert client.post("/api/stop", headers=headers).status_code == 403
+    assert calls == []
+
+
+def test_without_a_stop_key_nothing_stops_the_server(client: TestClient) -> None:
+    assert client.post("/api/stop", headers={STOP_HEADER: ""}).status_code == 403
+
+
+def test_a_stop_key_comes_with_what_stopping_does(store: ProjectStore) -> None:
+    with pytest.raises(ValueError, match="together"):
+        create_app(store, TOKEN, None, stop_key="stop-key")
+    with pytest.raises(ValueError, match="together"):
+        create_app(store, TOKEN, None, on_stop=lambda: None)

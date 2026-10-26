@@ -14,14 +14,16 @@ class FolderInUse(Exception):
 
 
 class DataFolderLock:
-    """An operating-system lock on <data folder>/.lock, held for the life of the process.
+    """An operating-system lock on <data folder>/.lock (or another file there), held for the
+    life of the process. The server holds `.lock` – the data itself; the launcher holds its own,
+    so a new launch can tell the app is running even while no server is.
 
     The OS releases it if the process dies, so a crash never leaves a stale lock.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, name: str = ".lock") -> None:
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._file: IO[str] = open(root / ".lock", "a+", encoding="utf-8")  # noqa: SIM115
+        self._file: IO[str] = open(root / name, "a+", encoding="utf-8")  # noqa: SIM115
         try:
             if sys.platform == "win32":
                 import msvcrt
