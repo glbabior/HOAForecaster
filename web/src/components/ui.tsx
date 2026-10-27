@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { fromPercent, parseDecimal, toPercent } from "../decimal";
+import { fromPercent, grouped, parseDecimal, toPercent } from "../decimal";
 
 export function Problems({ title, items }: { title?: string; items: string[] }) {
   if (items.length === 0) return null;
@@ -111,9 +111,10 @@ export function Field({ label, hint, error, children }: FieldProps) {
 const MAX_PLACES = 10; // more decimal places than any amount or rate needs
 
 /** A decimal typed as text. `onChange` receives the exact decimal string; while the text is
- * not a number the field is marked and reported to the form, which will not save. `percent`
- * shows and takes percentages for stored fractions. `name` says which field it is in the
- * form's list of problems. */
+ * not a number the field is marked and reported to the form, which will not save. Text is
+ * left as typed while typing and shown tidied on leaving the field – amounts with thousands
+ * separators. `percent` shows and takes percentages for stored fractions. `name` says which
+ * field it is in the form's list of problems. */
 export function DecimalInput({
   id,
   value,
@@ -133,7 +134,7 @@ export function DecimalInput({
   allowBlank?: boolean;
   label?: string;
 }) {
-  const shown = value === null ? "" : percent ? toPercent(value) : value;
+  const shown = value === null ? "" : percent ? toPercent(value) : grouped(value);
   const [text, setText] = useState(shown);
   const [invalid, setInvalid] = useState(false);
   const [seen, setSeen] = useState(value);
@@ -153,6 +154,7 @@ export function DecimalInput({
         value={text}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
+        onBlur={() => !invalid && setText(shown)}
         onChange={(e) => {
           const next = e.target.value;
           setText(next);

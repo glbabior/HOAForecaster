@@ -485,7 +485,7 @@ describe("the baseline editor", () => {
     const ffb2030 = await screen.findByRole("textbox", {
       name: "Fully Funded Balance at the start of 2030",
     });
-    expect((ffb2030 as HTMLInputElement).value).toBe("203000");
+    expect((ffb2030 as HTMLInputElement).value).toBe("203,000");
     expect(screen.queryByRole("textbox", { name: "End year" })).toBeNull();
   });
 

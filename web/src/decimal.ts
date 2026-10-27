@@ -47,6 +47,15 @@ export function fromPercent(text: string): string | null {
   return parsed === null ? null : shift(parsed, -2);
 }
 
+/** An exact decimal with thousands separators – "1234567.5" → "1,234,567.5". Every digit is
+ * kept, and parseDecimal reads it back to the same value. */
+export function grouped(value: string): string {
+  const plain = shift(value, 0); // plain digits, whatever form the server wrote
+  const [whole = "", frac] = plain.split(".");
+  const withCommas = whole.replace(/\B(?=(\d{3})+$)/g, ",");
+  return frac === undefined ? withCommas : `${withCommas}.${frac}`;
+}
+
 /** For display and charts only. */
 export const num = (value: string | null | undefined): number =>
   value === null || value === undefined ? NaN : Number(value);

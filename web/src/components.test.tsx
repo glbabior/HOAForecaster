@@ -164,6 +164,30 @@ describe("decimal inputs", () => {
     expect(screen.getByText("1250.5")).toBeTruthy(); // the last good value is kept
   });
 
+  it("shows amounts with commas, and puts them back after typing", async () => {
+    function Big() {
+      const [value, setValue] = useState<string | null>("1250000");
+      return <DecimalInput label="Amount" name="Amount" value={value} onChange={setValue} />;
+    }
+    render(<Big />);
+    const input = screen.getByRole("textbox", { name: "Amount" }) as HTMLInputElement;
+    expect(input.value).toBe("1,250,000");
+    await userEvent.clear(input);
+    await userEvent.type(input, "98765.5");
+    expect(input.value).toBe("98765.5"); // left as typed while typing
+    await userEvent.tab();
+    expect(input.value).toBe("98,765.5");
+  });
+
+  it("leaves text that is not a number as typed when leaving the field", async () => {
+    render(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Amount" }) as HTMLInputElement;
+    await userEvent.clear(input);
+    await userEvent.type(input, "12x34");
+    await userEvent.tab();
+    expect(input.value).toBe("12x34");
+  });
+
   it("shows percentages and stores fractions", async () => {
     render(<Harness percent />);
     const input = screen.getByRole("textbox", { name: "Amount" });

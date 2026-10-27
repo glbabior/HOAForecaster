@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { reloadWhenFresh, tokenIn } from "./api";
 import { linesFromPaste, newLineId, withFrequency } from "./components/tables";
 import { csvCell, parsePasted, toCsv } from "./csv";
-import { fromPercent, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
+import { fromPercent, grouped, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
 import { dues, money, percent, span } from "./format";
 import { sharedDomain, sharedGrid } from "./scale";
 import {
@@ -46,6 +46,22 @@ describe("exact decimals", () => {
   it("takes percentages with or without the sign", () => {
     expect(fromPercent("20%")).toBe("0.2");
     expect(fromPercent("abc")).toBeNull();
+  });
+
+  it.each([
+    ["1250000", "1,250,000"],
+    ["1234.5", "1,234.5"],
+    ["-98765.4321", "-98,765.4321"],
+    ["999", "999"],
+    ["0.25", "0.25"],
+  ])("groups %s as %s, keeping every digit", (exact, shown) => {
+    expect(grouped(exact)).toBe(shown);
+    expect(parseDecimal(shown)).toBe(exact);
+  });
+
+  it("groups a figure the server wrote with an exponent", () => {
+    expect(grouped("1E+3")).toBe("1,000");
+    expect(grouped("1.5E+7")).toBe("15,000,000");
   });
 
   it("converts to numbers only for display", () => {
