@@ -1,11 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routes } from "./App";
 import { ApiError, api } from "./api";
-import type { Facts, Project, Scenario, StoredProject } from "./types";
+import type { ExpenseLine, Facts, Project, Scenario, StoredProject } from "./types";
 
 vi.mock("./api", async (importOriginal) => {
   const real = await importOriginal<typeof import("./api")>();
@@ -516,7 +516,7 @@ describe("saving without a Save button", () => {
     if (roof) other.facts.expense_lines.push({ ...roof, id: "line-1" });
     serve(projectOf(scenario("Plan A"), other));
     start(`${A}/expenses`);
-    await userEvent.click(await screen.findByRole("button", { name: "Add expense" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add a one-time cost" }));
     await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled(), SLOW);
     expect(savedScenario("Plan A")?.facts.expense_lines.at(-1)?.id).toBe("line-2");
   });
@@ -554,5 +554,95 @@ describe("leaving with something unsaved", () => {
     await userEvent.clear(await screen.findByRole("textbox", { name: "Name" }));
     await userEvent.click(screen.getByRole("link", { name: "Compare" }));
     expect(await screen.findByText(/The project needs a name, so the changes/)).toBeTruthy();
+  });
+});
+
+describe("the expense tables", () => {
+  it("show each kind in a table of its own, and move a line when its kind changes", async () => {
+    start(`${A}/expenses`);
+    const once = await screen.findByRole("table", { name: "One-time costs" });
+    expect(within(once).getByRole("textbox", { name: "Description of expense 2" })).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "Monthly costs" })).toBeNull(); // none yet
+    expect(screen.getByRole("heading", { name: "Monthly costs (0)" })).toBeTruthy();
+    // a one-time cost has no last year or interval; a yearly one no "already inflated"
+    expect(within(once).queryByRole("columnheader", { name: "Last year" })).toBeNull();
+    const yearly = screen.getByRole("table", { name: "Yearly costs" });
+    expect(within(yearly).queryByRole("columnheader", { name: "Already inflated?" })).toBeNull();
+    await userEvent.selectOptions(
+      within(once).getByRole("combobox", { name: "How often expense 2 falls" }),
+      "every",
+    );
+    const every = screen.getByRole("table", { name: "Every few years" });
+    expect(within(every).getByRole("textbox", { name: "Description of expense 2" })).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "One-time costs" })).toBeNull();
+    await waitFor(
+      () => expect(savedScenario("Plan A")?.facts.expense_lines[1]?.frequency).toBe("every"),
+      SLOW,
+    );
+  });
+});
+
+describe("the expense tables' own tools", () => {
+  const once = (id: string, year: number) => ({
+    id,
+    frequency: "once" as const,
+    year,
+    amount: "1",
+    description: id,
+    source: "",
+    nominal: false,
+  });
+  const section = (title: string) =>
+    screen
+      .getByRole("heading", { name: new RegExp(`^${title}`) })
+      .closest("details") as HTMLElement;
+
+  it("take pasted rows as one-time costs before there are any", async () => {
+    const empty = scenario("Plan A");
+    empty.facts.expense_lines = [];
+    serve(projectOf(empty, scenario("Plan B")));
+    start(`${A}/expenses`);
+    await screen.findByRole("heading", { name: "One-time costs (0)" });
+    const text = ["2030\t12000\tGate\tno\tQuote", "2031\t5000\tPaint"].join("\n");
+    fireEvent.paste(
+      within(section("One-time costs")).getByRole("button", { name: "Add a one-time cost" }),
+      {
+        clipboardData: { getData: () => text },
+      },
+    );
+    expect(await screen.findByText("Added 2 one-time costs from the clipboard.")).toBeTruthy();
+    await waitFor(() => expect(savedScenario("Plan A")?.facts.expense_lines).toHaveLength(2), SLOW);
+    expect(savedScenario("Plan A")?.facts.expense_lines.map((l) => l.year)).toEqual([2030, 2031]);
+  });
+
+  it("sort one kind by year within the places it holds, leaving the others where they are", async () => {
+    const mixed = scenario("Plan A");
+    const yearly = { ...(mixed.facts.expense_lines[0] as ExpenseLine), id: "y" };
+    const every = { ...once("d", 2029), frequency: "every" as const, interval: 5, end_year: null };
+    mixed.facts.expense_lines = [once("a", 2030), yearly, once("c", 2027), every, once("e", 2025)];
+    serve(projectOf(mixed, scenario("Plan B")));
+    start(`${A}/expenses`);
+    await screen.findByRole("heading", { name: "One-time costs (3)" });
+    await userEvent.click(
+      within(section("One-time costs")).getByRole("button", { name: "Sort by year" }),
+    );
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled(), SLOW);
+    expect(savedScenario("Plan A")?.facts.expense_lines.map((l) => l.id)).toEqual([
+      "e",
+      "y",
+      "c",
+      "d",
+      "a",
+    ]);
+  });
+
+  it("keep the keyboard on a line's choice after it moves to another table", async () => {
+    start(`${A}/expenses`);
+    const choice = await screen.findByRole("combobox", { name: "How often expense 2 falls" });
+    await userEvent.selectOptions(choice, "every");
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("How often expense 2 falls"),
+    );
+    expect(screen.getByText("Expense 2 moved to Every few years.")).toBeTruthy();
   });
 });

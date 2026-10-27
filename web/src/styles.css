@@ -427,6 +427,74 @@ td.flag {
   max-width: 10em;
 }
 
+/* the expense tables, one per kind – the description and its source note take the room left */
+.expense-kind {
+  border-top: 1px solid var(--border);
+  padding: 8px 0 12px;
+}
+
+.expense-kind:first-child {
+  border-top: 0;
+}
+
+.expense-kind > summary {
+  cursor: pointer;
+  list-style-position: outside;
+  margin-left: 1.1em;
+}
+
+.expense-kind > summary h3 {
+  display: inline;
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.expense-kind .count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+table.expenses {
+  width: 100%;
+}
+
+table.expenses td.described {
+  width: 100%;
+}
+
+table.expenses td.described input {
+  display: block;
+  min-width: 18em;
+}
+
+table.expenses td.described input.source {
+  margin-top: 4px;
+  font-size: 0.9em;
+}
+
+table.expenses td:not(.described) input:not([type="checkbox"]) {
+  min-width: 5em;
+  width: 5.5em;
+}
+
+table.expenses td.amount input:not([type="checkbox"]) {
+  width: 8em;
+}
+
+/* how often, Copy to… and Remove stacked, so the row stays narrow */
+table.expenses td.row-buttons > * {
+  display: block;
+  width: 100%;
+}
+
+table.expenses td.row-buttons select {
+  min-width: 9.5em;
+}
+
+table.expenses td.row-buttons > * + * {
+  margin-top: 4px;
+}
+
 .expense-detail {
   background: var(--bg);
   border-radius: var(--radius);

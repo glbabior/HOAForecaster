@@ -98,6 +98,39 @@ export function linesFromPaste(
   return { lines, skipped };
 }
 
+/** The four kinds of expense, each in a table of its own with the columns it uses. */
+const KINDS: {
+  frequency: Frequency;
+  title: string;
+  hint: string;
+  add: string;
+}[] = [
+  {
+    frequency: "monthly",
+    title: "Monthly costs",
+    hint: "Operating costs paid from dues, an amount a month – each grows from its first year (blank – the start year) at its own inflation rate, or the operating rate when that is blank.",
+    add: "Add a monthly cost",
+  },
+  {
+    frequency: "yearly",
+    title: "Yearly costs",
+    hint: "Operating costs paid from dues, an amount a year – grown like monthly costs.",
+    add: "Add a yearly cost",
+  },
+  {
+    frequency: "every",
+    title: "Every few years",
+    hint: "Reserve expenses that come round again – an amount each time, in the expense base year's dollars and grown with reserve inflation unless already inflated.",
+    add: "Add a cost every few years",
+  },
+  {
+    frequency: "once",
+    title: "One-time costs",
+    hint: "Reserve expenses that fall once, in the expense base year's dollars and grown with reserve inflation unless already inflated. Paste rows from a spreadsheet – year, amount, description, yes/no, source – to add them here.",
+    add: "Add a one-time cost",
+  },
+];
+
 export function ExpenseTable({
   lines,
   onChange,
@@ -116,141 +149,171 @@ export function ExpenseTable({
 }) {
   const [notice, setNotice] = useState("");
   const rows = useRowIds(lines.length);
+  const ids = () => [...taken, ...lines.map((l) => l.id)];
 
-  function update(i: number, change: Partial<ExpenseLine>) {
-    onChange(lines.map((line, j) => (j === i ? { ...line, ...change } : line)));
-  }
-
-  function paste(e: ClipboardEvent<HTMLTableElement>) {
+  function paste(e: ClipboardEvent<HTMLElement>) {
     const text = e.clipboardData.getData("text/plain");
     if (!text.includes("\t")) return; // a single value – let the cell take it
     e.preventDefault();
-    const { lines: pasted, skipped } = linesFromPaste(text, [...taken, ...lines.map((l) => l.id)]);
+    const { lines: pasted, skipped } = linesFromPaste(text, ids());
     rows.added(pasted.length);
     onChange([...lines, ...pasted]);
     setNotice(
-      `Added ${pasted.length} expense${pasted.length === 1 ? "" : "s"} from the clipboard` +
+      `Added ${pasted.length} one-time cost${pasted.length === 1 ? "" : "s"} from the clipboard` +
         (skipped
           ? ` – ${skipped} row${skipped === 1 ? "" : "s"} skipped (no year or amount).`
           : "."),
     );
   }
 
-  function sortByYear() {
-    // lines without a year – monthly and yearly lines from the start – come first
-    const order = lines
-      .map((_, i) => i)
-      .sort((a, b) => (lines[a]?.year ?? 0) - (lines[b]?.year ?? 0));
+  /** One table's lines in year order, each kept in a place its kind already had in the list. */
+  function sortByYear(frequency: Frequency) {
+    const places = lines.flatMap((l, i) => (l.frequency === frequency ? [i] : []));
+    const sorted = [...places].sort((a, b) => (lines[a]?.year ?? 0) - (lines[b]?.year ?? 0));
+    const order = lines.map((_, i) => i);
+    places.forEach((place, k) => {
+      order[place] = sorted[k] ?? place;
+    });
     rows.reordered(order);
     onChange(order.map((i) => lines[i] as ExpenseLine));
   }
 
   return (
-    <div>
-      <p className="hint">
-        Monthly and yearly expenses are operating costs, paid from dues – each grows from its first
-        year (blank – the start year) at its own inflation rate, or the operating rate when that is
-        blank. Once and every-few-years expenses come out of reserves; their amounts are in the
-        expense base year's dollars and grow with reserve inflation, unless marked as already in
-        that year's dollars. Paste rows from a spreadsheet – year, amount, description, yes/no,
-        source – to add them as one-off expenses.
+    <div className="expense-tables">
+      <p className="hint" role="status">
+        {notice}
       </p>
-      <div className="table-scroll">
-        <table className="edit-table expenses" onPaste={paste}>
-          <caption className="visually-hidden">Expenses</caption>
-          <thead>
-            <tr>
-              <th scope="col">How often</th>
-              <th scope="col">Year, or first year</th>
-              <th scope="col">Last year</th>
-              <th scope="col">Every … years</th>
-              <th scope="col">Amount</th>
-              <th scope="col">Description</th>
-              <th scope="col">Own inflation</th>
-              <th scope="col">Already in that year's dollars</th>
-              <th scope="col">Source</th>
-              <th scope="col">
-                <span className="visually-hidden">Remove</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line, i) => (
-              <ExpenseRow
-                key={rows.ids[i]}
-                line={line}
-                index={i}
-                defaultYear={defaultYear}
-                onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
-                onUpdate={(change) => update(i, change)}
-                onRemove={() => {
-                  rows.removed(i);
-                  onChange(lines.filter((_, j) => j !== i));
+      {KINDS.map((kind) => {
+        const shown = lines.flatMap((line, i) => (line.frequency === kind.frequency ? [i] : []));
+        return (
+          // paste on the whole section, so it works before the first one-time cost exists
+          <details
+            key={kind.frequency}
+            className="expense-kind"
+            open
+            onPaste={kind.frequency === "once" ? paste : undefined}
+          >
+            <summary>
+              <h3>
+                {kind.title} <span className="count">({shown.length})</span>
+              </h3>
+            </summary>
+            <p className="hint">{kind.hint}</p>
+            {shown.length > 0 && (
+              <div className="table-scroll">
+                <table className={`edit-table expenses ${kind.frequency}`}>
+                  <caption className="visually-hidden">{kind.title}</caption>
+                  <thead>
+                    <tr>
+                      <ExpenseHeadings frequency={kind.frequency} />
+                      <th scope="col">
+                        <span className="visually-hidden">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((i) => {
+                      const line = lines[i] as ExpenseLine;
+                      return (
+                        <ExpenseRow
+                          key={rows.ids[i]}
+                          line={line}
+                          index={i}
+                          defaultYear={defaultYear}
+                          onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
+                          onMoved={(to) => {
+                            const title = KINDS.find((k) => k.frequency === to)?.title ?? to;
+                            setNotice(`Expense ${i + 1} moved to ${title}.`);
+                          }}
+                          onRemove={() => {
+                            rows.removed(i);
+                            onChange(lines.filter((_, j) => j !== i));
+                          }}
+                          onCopy={onCopy && (() => onCopy(line))}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="row-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  rows.added();
+                  const blank = blankLine(newLineId(ids()), defaultYear);
+                  onChange([...lines, withFrequency(blank, kind.frequency, defaultYear)]);
                 }}
-                onCopy={onCopy && (() => onCopy(line))}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="row-actions">
-        <button
-          type="button"
-          onClick={() => {
-            rows.added();
-            onChange([
-              ...lines,
-              blankLine(newLineId([...taken, ...lines.map((l) => l.id)]), defaultYear),
-            ]);
-          }}
-        >
-          Add expense
-        </button>
-        <button type="button" onClick={sortByYear}>
-          Sort by year
-        </button>
-        <span role="status">{notice}</span>
-      </div>
+              >
+                {kind.add}
+              </button>
+              {shown.length > 1 && (
+                <button type="button" onClick={() => sortByYear(kind.frequency)}>
+                  Sort by year
+                </button>
+              )}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 }
 
-/** One expense's inputs – only the ones its frequency uses are shown. */
+const ALREADY_INFLATED = "Already in that year's dollars – not grown by reserve inflation";
+
+function ExpenseHeadings({ frequency }: { frequency: Frequency }) {
+  const operating = isOperating(frequency);
+  return (
+    <>
+      <th scope="col">{frequency === "once" ? "Year" : "First year"}</th>
+      {frequency === "every" && <th scope="col">Every … years</th>}
+      {frequency !== "once" && <th scope="col">Last year</th>}
+      <th scope="col">
+        {frequency === "monthly"
+          ? "Amount a month"
+          : frequency === "yearly"
+            ? "Amount a year"
+            : "Amount"}
+      </th>
+      <th scope="col">Description and source</th>
+      {operating ? (
+        <th scope="col">Own inflation</th>
+      ) : (
+        <th scope="col" title={ALREADY_INFLATED}>
+          Already inflated?
+        </th>
+      )}
+    </>
+  );
+}
+
+/** One expense's inputs – the ones its kind uses, in its table's columns. */
 function ExpenseRow({
   line,
   index,
   defaultYear,
   onChange,
-  onUpdate,
   onRemove,
   onCopy,
+  onMoved,
 }: {
   line: ExpenseLine;
   index: number;
   defaultYear: number;
   onChange: (line: ExpenseLine) => void;
-  onUpdate: (change: Partial<ExpenseLine>) => void;
   onRemove: () => void;
   onCopy?: () => void;
+  /** after the line has moved to another kind's table */
+  onMoved: (to: Frequency) => void;
 }) {
   const n = index + 1;
   const what = line.description ? `expense ${n} (${line.description})` : `expense ${n}`;
   const operating = isOperating(line.frequency);
+  const update = (change: Partial<ExpenseLine>) => onChange({ ...line, ...change });
   return (
     <tr>
-      <td>
-        <select
-          aria-label={`How often expense ${n} falls`}
-          value={line.frequency}
-          onChange={(e) => onChange(withFrequency(line, e.target.value as Frequency, defaultYear))}
-        >
-          {FREQUENCIES.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-      </td>
       <td>
         {operating ? (
           <OptionalYearInput
@@ -258,84 +321,106 @@ function ExpenseRow({
             name={`First year of ${what}`}
             value={line.year}
             placeholder="start"
-            onChange={(year) => onUpdate({ year })}
+            onChange={(year) => update({ year })}
           />
         ) : (
           <YearInput
             label={`Year of expense ${n}`}
             name={`Year of ${what}`}
             value={line.year ?? defaultYear}
-            onChange={(year) => onUpdate({ year })}
+            onChange={(year) => update({ year })}
           />
         )}
       </td>
-      <td>
-        {line.frequency !== "once" && (
+      {line.frequency === "every" && (
+        <td>
+          <YearInput
+            label={`Years between occurrences of expense ${n}`}
+            name={`Years between occurrences of ${what}`}
+            value={line.interval ?? 5}
+            onChange={(interval) => update({ interval })}
+          />
+        </td>
+      )}
+      {line.frequency !== "once" && (
+        <td>
           <OptionalYearInput
             label={`Last year of expense ${n}`}
             name={`Last year of ${what}`}
             value={line.end_year ?? null}
             placeholder="end"
-            onChange={(end_year) => onUpdate({ end_year })}
+            onChange={(end_year) => update({ end_year })}
           />
-        )}
-      </td>
-      <td>
-        {line.frequency === "every" && (
-          <YearInput
-            label={`Years between occurrences of expense ${n}`}
-            name={`Years between occurrences of ${what}`}
-            value={line.interval ?? 5}
-            onChange={(interval) => onUpdate({ interval })}
-          />
-        )}
-      </td>
-      <td>
+        </td>
+      )}
+      <td className="amount">
         <DecimalInput
           label={`Amount of expense ${n}${line.frequency === "monthly" ? " a month" : ""}`}
           name={`Amount of ${what}`}
           value={line.amount}
-          onChange={(v) => v !== null && onUpdate({ amount: v })}
+          onChange={(v) => v !== null && update({ amount: v })}
         />
-        {line.frequency === "monthly" && <small className="hint"> a month</small>}
       </td>
-      <td>
+      <td className="described">
         <input
           aria-label={`Description of expense ${n}`}
           value={line.description}
-          onChange={(e) => onUpdate({ description: e.target.value })}
+          onChange={(e) => update({ description: e.target.value })}
+        />
+        {/* the source note under its description, so the description has the row's room */}
+        <input
+          aria-label={`Source of expense ${n}`}
+          className="source"
+          placeholder="Source – where the figure came from"
+          title={line.source || undefined}
+          value={line.source}
+          onChange={(e) => update({ source: e.target.value })}
         />
       </td>
-      <td>
-        {operating && (
+      {operating ? (
+        <td>
           <DecimalInput
             label={`Own inflation rate of expense ${n}`}
             name={`Own inflation rate of ${what}`}
             percent
             allowBlank
             value={line.inflation ?? null}
-            onChange={(inflation) => onUpdate({ inflation })}
+            onChange={(inflation) => update({ inflation })}
           />
-        )}
-      </td>
-      <td className="center">
-        {!operating && (
+        </td>
+      ) : (
+        <td className="center">
           <input
             type="checkbox"
             aria-label={`Expense ${n} is already in that year's dollars`}
+            title={ALREADY_INFLATED}
             checked={line.nominal ?? false}
-            onChange={(e) => onUpdate({ nominal: e.target.checked })}
+            onChange={(e) => update({ nominal: e.target.checked })}
           />
-        )}
-      </td>
-      <td>
-        <input
-          aria-label={`Source of expense ${n}`}
-          value={line.source}
-          onChange={(e) => onUpdate({ source: e.target.value })}
-        />
-      </td>
+        </td>
+      )}
       <td className="row-buttons">
+        <select
+          aria-label={`How often expense ${n} falls`}
+          title="How often – choosing another moves it to that table"
+          value={line.frequency}
+          onChange={(e) => {
+            const to = e.target.value as Frequency;
+            onChange(withFrequency(line, to, defaultYear));
+            onMoved(to);
+            // the row now sits in another table – keep the keyboard on its choice
+            const label = `How often expense ${n} falls`;
+            setTimeout(() =>
+              document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)?.focus(),
+            );
+          }}
+        >
+          {FREQUENCIES.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
         {onCopy && (
           <button
             type="button"
