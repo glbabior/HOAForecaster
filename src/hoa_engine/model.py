@@ -59,6 +59,15 @@ class ExpenseLine:
     interval: int | None = None  # every-few-years lines only
     inflation: Decimal | None = None  # operating lines – their own rate; None, the scenario's
     id: str = ""  # stable, and kept when the scenario is copied
+    useful_life: int | None = None  # once lines – years between replacements, for the FFB
+
+    @property
+    def life(self) -> int | None:
+        """The years between this component's replacements (spec 4.1) – an every-few-years
+        line's interval, a once line's own useful life; None for operating lines."""
+        if self.frequency is Frequency.EVERY:
+            return self.interval
+        return self.useful_life if self.frequency is Frequency.ONCE else None
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,9 @@ class Facts:
     max_dues_increase: Decimal | None = Decimal("0.20")
     max_assessment_share: Decimal | None = Decimal("0.05")
     sources: dict[str, str] = field(default_factory=dict)  # input name → where it came from
+    # True – the Fully Funded Balance is worked out from the expenses' useful lives (spec 4.2);
+    # the typed figures in `ffb` are kept but not used
+    ffb_from_lines: bool = False
 
     @property
     def years(self) -> range:
@@ -256,6 +268,7 @@ def expense_line_from_dict(e: dict[str, Any], line_id: Any) -> ExpenseLine:
         end_year=None if frequency is Frequency.ONCE else _opt_int(e.get("end_year")),
         interval=_opt_int(e.get("interval")) if frequency is Frequency.EVERY else None,
         inflation=_opt_dec(e.get("inflation")) if frequency.operating else None,
+        useful_life=_opt_int(e.get("useful_life")) if frequency is Frequency.ONCE else None,
     )
 
 
@@ -276,6 +289,8 @@ def expense_line_to_dict(e: ExpenseLine) -> dict[str, Any]:
         out["inflation"] = None if e.inflation is None else str(e.inflation)
     else:
         out["nominal"] = e.nominal
+    if e.frequency is Frequency.ONCE:
+        out["useful_life"] = e.useful_life
     return out
 
 
@@ -309,6 +324,7 @@ def facts_from_dict(d: dict[str, Any]) -> Facts:
         max_dues_increase=_opt_dec(d.get("max_dues_increase")),
         max_assessment_share=_opt_dec(d.get("max_assessment_share")),
         sources=_sources(d.get("sources", {})),
+        ffb_from_lines=_bool(d.get("ffb_from_lines", False)),
     )
 
 
@@ -332,6 +348,7 @@ def facts_to_dict(b: Facts) -> dict[str, Any]:
             None if b.max_assessment_share is None else str(b.max_assessment_share)
         ),
         "sources": dict(b.sources),
+        "ffb_from_lines": b.ffb_from_lines,
     }
 
 

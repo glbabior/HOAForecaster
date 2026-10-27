@@ -86,12 +86,18 @@ export function copyLine(target: Scenario, line: ExpenseLine): Scenario {
 }
 
 /** The target with this Fully Funded Balance – every year this scenario has replaces the
- * target's, years only the target has are kept – and its source note. */
+ * target's, years only the target has are kept – its source note, and whether it is worked
+ * out from the expenses. */
 export function copyFfb(target: Scenario, from: Facts): Scenario {
   const sources = withNote(target.facts.sources, "ffb", from.sources.ffb);
   return {
     ...target,
-    facts: { ...target.facts, ffb: { ...target.facts.ffb, ...from.ffb }, sources },
+    facts: {
+      ...target.facts,
+      ffb: { ...target.facts.ffb, ...from.ffb },
+      ffb_from_lines: from.ffb_from_lines,
+      sources,
+    },
   };
 }
 

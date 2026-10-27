@@ -107,7 +107,11 @@ def result_json(result: ScenarioResult) -> dict[str, Any]:
                 for line, amount in getattr(y, key)
             ]
         years.append(row)
-    return {"years": years, "summary": to_json(result.summary)}
+    return {
+        "years": years,
+        "summary": to_json(result.summary),
+        "ffb": {str(y): str(v) for y, v in sorted(result.ffb.items())},
+    }
 
 
 def stored_json(stored: StoredProject) -> dict[str, Any]:

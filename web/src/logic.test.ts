@@ -174,7 +174,13 @@ describe("expense frequencies", () => {
       end_year: null,
       nominal: false,
     });
-    expect(withFrequency(withFrequency(once, "every", 2027), "once", 2027)).toEqual(once);
+    // a default interval never becomes a useful life nobody typed
+    expect(withFrequency(withFrequency(once, "every", 2027), "once", 2027)).toEqual({
+      ...once,
+      useful_life: null,
+    });
+    // a typed useful life becomes the interval
+    expect(withFrequency({ ...once, useful_life: 12 }, "every", 2027).interval).toBe(12);
   });
 
   it("gives new lines an identifier no other line has", () => {
@@ -218,6 +224,7 @@ const facts = (change: Partial<Facts> = {}): Facts => ({
   max_dues_increase: "0.2",
   max_assessment_share: "0.05",
   sources: { interest_rate: "Bank" },
+  ffb_from_lines: false,
   ...change,
 });
 

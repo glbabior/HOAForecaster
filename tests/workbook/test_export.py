@@ -162,7 +162,32 @@ def _varied_project() -> Project:
         adoption=Adoption(date(2026, 11, 3), "Fictional board vote", 2),
     )
     first = replace(later, name="Earlier plan", adoption=Adoption(date(2025, 6, 1), "", 1))
-    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short, adopted, first))
+    # worked out from useful lives, with no typed figures at all – a line coming into service
+    # within the horizon, a nominal one already ageing, and one retired after its last year
+    worked = Scenario(
+        "Worked out from lives",
+        replace(
+            f,
+            ffb={},
+            ffb_from_lines=True,
+            expense_lines=(
+                ExpenseLine(2036, D(30000), "Lift", useful_life=5, id="lift"),
+                ExpenseLine(2033, D(8000), "Doors", nominal=True, useful_life=12, id="doors"),
+                ExpenseLine(
+                    2028,
+                    D(2500),
+                    "Sealing",
+                    frequency=Frequency.EVERY,
+                    interval=4,
+                    end_year=2036,
+                    id="sealing",
+                ),
+                ExpenseLine(None, D(50000), "Running costs", frequency=Frequency.YEARLY, id="run"),
+            ),
+        ),
+        grown,
+    )
+    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short, adopted, first, worked))
 
 
 def _projects() -> list[Any]:
@@ -202,6 +227,18 @@ def test_exported_workbook_recalculates_to_the_engines_figures(
     for s in project.scenarios:
         problems += [f"{s.name} {p}" for p in mismatches(run(s), expected["scenarios"][s.name])]
     assert not problems, "\n".join(problems)
+    # a worked-out Fully Funded Balance, every year the screen shows – the start year too
+    wb = openpyxl.load_workbook(workbook, data_only=True)
+    for s in (x for x in project.scenarios if x.facts.ffb_from_lines):
+        ws = next(w for w in wb.worksheets if w["A1"].value == s.name)
+        row, header = _rows(ws)["Fully Funded Balance at start of year"], {}
+        for c in range(VALUE_COL, ws.max_column + 1):
+            if isinstance(ws.cell(row - 1, c).value, int):
+                header[ws.cell(row - 1, c).value] = c
+        worked = run(s).ffb
+        assert sorted(worked) == sorted(header), s.name
+        for y, v in worked.items():
+            assert abs(Decimal(str(ws.cell(row, header[y]).value)) - v) < D("0.005"), (s.name, y)
 
 
 @pytest.mark.parametrize("project", _projects())
@@ -975,3 +1012,92 @@ def test_a_new_row_gets_an_id_no_other_line_has() -> None:
     project = replace(DEMO, scenarios=(taken,))
     lines = _facts_after(_insert_expense(1, copy_formulas=True), project=project).expense_lines
     assert [line.id for line in lines[:2]] == ["line-1", "line-2"]
+
+
+# ---------------------------------------------------------------- the worked-out FFB (4.2)
+
+WORKED = "Worked-out Fully Funded Balance"  # the demo's scenario
+
+
+def test_a_worked_out_fully_funded_balance_is_formulas_with_the_typed_figures_kept() -> None:
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
+    ws = wb[WORKED]  # 31 characters – the name fits a sheet as it is
+    rows = _rows(ws)
+    ffb = rows["Fully Funded Balance at start of year"]
+    assert ws.cell(ffb + 1, VALUE_COL).value == "this sheet's expenses' useful lives"
+    assert str(ws.cell(ffb, VALUE_COL).value).startswith("=SUMPRODUCT(")
+    assert ws.cell(ffb + 2, 1).value == "Reserve study's figures (kept, not used while worked out)"
+    facts = next(s for s in DEMO.scenarios if s.name == WORKED).facts
+    assert ws.cell(ffb + 2, VALUE_COL).value == int(facts.ffb[facts.start_year])
+    typed = wb["Dues only"]
+    assert typed.cell(
+        _rows(typed)["Fully Funded Balance at start of year"] + 1, VALUE_COL
+    ).value == ("the reserve study's figures")
+
+
+def _worked_ffb(edit: Any) -> Any:
+    def apply(wb: openpyxl.Workbook) -> None:
+        ws = next(w for w in wb.worksheets if w["A1"].value == WORKED)
+        edit(ws, _rows(ws)["Fully Funded Balance at start of year"])
+
+    return apply
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda ws, r: setattr(ws.cell(r + 1, VALUE_COL), "value", "guesswork"), "unrecognised"),
+        (lambda ws, r: setattr(ws.cell(r + 1, 1), "value", None), "unrecognised"),
+        (lambda ws, r: setattr(ws.cell(r + 2, 1), "value", None), "Reserve study's figures"),
+        (lambda ws, r: setattr(ws.cell(r, VALUE_COL), "value", 5), "worked out from the expenses"),
+    ],
+    ids=["bad mode", "no mode", "no kept row", "typed over"],
+)
+def test_a_damaged_worked_out_fully_funded_balance_is_refused(edit: Any, message: str) -> None:
+    with pytest.raises(WorkbookFormatError, match=message):
+        read_workbook(_broken(_worked_ffb(edit)))
+
+
+def test_a_workbook_from_before_the_mode_row_reads_as_the_studys_figures() -> None:
+    def older(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        r = _rows(ws)["Fully Funded Balance at start of year"] + 1
+        ws.cell(r, 1).value = ws.cell(r, VALUE_COL).value = None  # v1.6 left this row blank
+
+    again = read_workbook(_broken(older))
+    facts = next(s for s in again.scenarios if s.name == "Dues only").facts
+    assert not facts.ffb_from_lines
+    assert facts.ffb == next(s for s in DEMO.scenarios if s.name == "Dues only").facts.ffb
+
+
+def test_switching_the_mode_in_excel_is_read() -> None:
+    def to_typed(ws: Any, r: int) -> None:
+        ws.cell(r + 1, VALUE_COL).value = "the reserve study's figures"
+        for c in range(VALUE_COL, ws.max_column + 1):
+            ws.cell(r, c).value = ws.cell(r + 2, c).value  # the kept figures, typed back
+        ws.cell(r + 2, 1).value = None
+
+    again = read_workbook(_broken(_worked_ffb(to_typed)))
+    facts = next(s for s in again.scenarios if s.name == WORKED).facts
+    before = next(s for s in DEMO.scenarios if s.name == WORKED).facts
+    assert not facts.ffb_from_lines and facts.ffb == before.ffb
+
+
+def test_a_one_time_costs_useful_life_is_read_and_must_be_whole() -> None:
+    def life(value: Any) -> Any:
+        def edit(wb: openpyxl.Workbook) -> None:
+            ws = wb["Dues only"]
+            first = _first_expense_row(ws)
+            row = next(
+                r
+                for r in range(first, ws.max_row)
+                if ws.cell(r, EXPENSE_COL["id"]).value == "boiler"
+            )
+            ws.cell(row, EXPENSE_COL["useful_life"]).value = value
+
+        return edit
+
+    facts = _facts_after(life(18))
+    assert next(x for x in facts.expense_lines if x.id == "boiler").useful_life == 18
+    with pytest.raises(WorkbookFormatError, match="useful life should be years"):
+        read_workbook(_broken(life(2.5)))

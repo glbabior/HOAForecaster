@@ -24,6 +24,9 @@ export interface ExpenseLine {
   inflation?: Dec | null;
   /** once and every-few-years lines – already in that year's dollars */
   nominal?: boolean;
+  /** once lines – the years between the component's replacements, for the worked-out Fully
+   * Funded Balance (an every-few-years line's useful life is its interval) */
+  useful_life?: number | null;
 }
 
 export const isOperating = (f: Frequency): boolean => f === "monthly" || f === "yearly";
@@ -46,6 +49,9 @@ export interface Facts {
   max_dues_increase: Dec | null;
   max_assessment_share: Dec | null;
   sources: Record<string, string>;
+  /** the Fully Funded Balance is worked out from the expenses' useful lives (spec 4.2); the
+   * typed figures in `ffb` are kept but not used */
+  ffb_from_lines: boolean;
 }
 
 export interface Assessment {
@@ -172,6 +178,8 @@ export interface Summary {
 export interface ScenarioResult {
   years: YearResult[];
   summary: Summary;
+  /** the Fully Funded Balance at the start of each year, start to end + 1 – typed or worked out */
+  ffb: Record<string, Dec>;
 }
 
 export type ScenarioOutcome = { result: ScenarioResult } | { problems: string[] };

@@ -79,6 +79,8 @@ class Summary:
 class ScenarioResult:
     years: tuple[YearResult, ...]
     summary: Summary
+    # the Fully Funded Balance at the start of each year, start to end + 1 – typed or worked out
+    ffb: dict[int, Decimal]
 
 
 def falls_in(line: ExpenseLine, year: int) -> bool:
@@ -119,7 +121,40 @@ def _needs_vote(
     return dues_jump or big_assessment
 
 
-def project_years(b: Facts, s: Scenario) -> tuple[YearResult, ...]:
+def line_ffb(line: ExpenseLine, year: int, b: Facts) -> Decimal:
+    """The line's share of the Fully Funded Balance at the start of `year` (spec 4.2) – its cost
+    in that year's dollars times its age over its useful life. Zero for a line without a life."""
+    life = line.life  # None for operating lines
+    if life is None or life < 1 or line.year is None:
+        return ZERO
+    if line.frequency is Frequency.EVERY and line.end_year is not None and year > line.end_year:
+        return ZERO  # retired after its last occurrence
+    ahead = line.year - year
+    remaining = life if ahead >= life else ahead % life  # Python's % takes the sign of `life`
+    age = life - remaining
+    # a nominal amount is in the dollars of the year it falls – a once line's year, an
+    # every-few-years line's next occurrence (the same amount falls each time)
+    nominal_year = line.year if line.frequency is Frequency.ONCE else year + remaining
+    grown_from = nominal_year if line.nominal else b.expense_base_year
+    cost = line.amount * (1 + b.expense_inflation) ** (year - grown_from)
+    return cost * age / life
+
+
+def worked_out_ffb(b: Facts) -> dict[int, Decimal]:
+    """The Fully Funded Balance at the start of each year, start to end + 1, from the reserve
+    lines' useful lives (spec 4.2)."""
+    return {
+        y: sum((line_ffb(line, y, b) for line in b.expense_lines), ZERO)
+        for y in range(b.start_year, b.end_year + 2)
+    }
+
+
+def ffb_of(b: Facts) -> dict[int, Decimal]:
+    """The Fully Funded Balance the scenario uses – worked out, or typed from the study."""
+    return worked_out_ffb(b) if b.ffb_from_lines else b.ffb
+
+
+def project_years(b: Facts, s: Scenario, ffb: dict[int, Decimal]) -> tuple[YearResult, ...]:
     dues_by_year = resolve_dues(s, b.years)
     assessment_by_year: dict[int, Decimal] = {}
     for a in s.assessments:
@@ -145,7 +180,7 @@ def project_years(b: Facts, s: Scenario) -> tuple[YearResult, ...]:
         interest = balance * b.interest_rate
         expenses = sum((amount for _, amount in lines), ZERO)
         ending = balance + contribution + assessment + interest - expenses
-        ffb_next = b.ffb[y + 1]
+        ffb_next = ffb[y + 1]
         percent_funded = ZERO if ffb_next == 0 else ending / ffb_next
         owner_dues = dues * 12
         dues_increase = (dues - b.current_dues) * 12
@@ -226,5 +261,7 @@ def run(scenario: Scenario) -> ScenarioResult:
         problems = validate_run(scenario)
         if problems:
             raise InvalidInputs(problems)
-        years = project_years(scenario.facts, scenario)
-        return ScenarioResult(years=years, summary=summarise(years))
+        f = scenario.facts
+        ffb = {y: v for y, v in ffb_of(f).items() if f.start_year <= y <= f.end_year + 1}
+        years = project_years(f, scenario, ffb)
+        return ScenarioResult(years=years, summary=summarise(years), ffb=ffb)

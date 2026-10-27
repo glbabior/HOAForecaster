@@ -46,7 +46,11 @@ from hoa_workbook.layout import (
     EXPENSES_HEADING,
     FACT_ROWS,
     FACTS_HEADING,
+    FFB_KEPT_LABEL,
     FFB_LABEL,
+    FFB_MODE_LABEL,
+    FFB_TYPED,
+    FFB_WORKED_OUT,
     FIRST_PROJECT_ROW,
     FREQUENCY_TEXT,
     HEADER_ROW,
@@ -236,6 +240,7 @@ def _expense_inputs(ws: Worksheet, r: int, line: ExpenseLine) -> None:
     _input(at("year"), line.year, YEAR)
     _input(at("end_year"), line.end_year, YEAR)
     _input(at("interval"), line.interval, "0")
+    _input(at("useful_life"), line.useful_life, "0")
     _input(at("inflation"), line.inflation, PCT)
     nominal = at("nominal")
     nominal.value = None if line.frequency.operating else "yes" if line.nominal else "no"
@@ -296,24 +301,77 @@ def _plan_facts(ws: Worksheet, facts: Facts, top: int) -> tuple[dict[str, str], 
     return refs, top + 2 + len(FACT_ROWS) + 1
 
 
-def _plan_ffb(ws: Worksheet, facts: Facts, top: int) -> tuple[dict[int, str], int]:
+@dataclass(frozen=True)
+class _Ffb:
+    """Where the Fully Funded Balance sits – each year's cell, its column and year cell, for the
+    worked-out formulas written once the expense rows are known."""
+
+    cells: dict[int, str]  # year → the cell the Plan rows read
+    columns: dict[int, str]  # year → its column letter
+    years_row: int
+    row: int
+
+
+def _plan_ffb(ws: Worksheet, facts: Facts, top: int) -> tuple[_Ffb, int]:
     """The scenario's Fully Funded Balance – its own years and one more, and any other year it
-    holds (kept, though the horizon does not reach it). Returns the cell of each year, and the
-    next free row."""
+    holds (kept, though the horizon does not reach it) – and where it comes from. Typed, the row
+    holds the study's figures; worked out (spec 4.2), formulas filled in later, with the typed
+    figures kept in the row below. Returns where it is, and the next free row."""
     _text(_at(ws, top, 1), PLAN_FFB_HEADING, bold=True)
     _text(_at(ws, top + 1, 1), PLAN_FFB_YEARS_LABEL)
     _text(_at(ws, top + 2, 1), FFB_LABEL)
     _comment(_at(ws, top + 2, 1), facts.sources.get("ffb", ""))
-    cells = {}
+    _text(_at(ws, top + 3, 1), FFB_MODE_LABEL)
+    worked_out = facts.ffb_from_lines
+    # set in the app, like the dues mode – it decides which cells hold formulas
+    _text(_at(ws, top + 3, VALUE_COL), FFB_WORKED_OUT if worked_out else FFB_TYPED, italic=True)
+    typed_row = top + 4 if worked_out else top + 2
+    if worked_out:
+        _text(_at(ws, typed_row, 1), FFB_KEPT_LABEL, color=GREY)
+    cells, columns = {}, {}
     years = sorted({*facts.ffb, *range(facts.start_year, facts.end_year + 2)})
     for i, y in enumerate(years):
         c = col_letter(VALUE_COL + i)
         ws[f"{c}{top + 1}"] = y
         ws[f"{c}{top + 1}"].number_format = YEAR
-        _input(ws[f"{c}{top + 2}"], facts.ffb.get(y), CUR)
-        cells[y] = f"{c}${top + 2}"
+        _input(ws[f"{c}{typed_row}"], facts.ffb.get(y), CUR)
+        cells[y], columns[y] = f"{c}${top + 2}", c
     _header(ws, top + 1, 1, VALUE_COL + len(years) - 1)
-    return cells, top + 4
+    return _Ffb(cells, columns, top + 1, top + 2), top + (6 if worked_out else 5)
+
+
+def _worked_out_ffb(
+    ws: Worksheet, facts: Facts, ffb: _Ffb, rows: tuple[int, int], rates: _Rates
+) -> None:
+    """Each year's Fully Funded Balance from the expense rows' useful lives (spec 4.2) – one
+    array formula per year, a second, independent working of the engine's."""
+    first, last = rows
+
+    def column(key: str) -> str:
+        c = col_letter(EXPENSE_COL[key])
+        return f"${c}${first}:${c}${last}"
+
+    f, amount, start, end = (column(k) for k in ("frequency", "amount", "year", "end_year"))
+    interval, life_col, nominal = (column(k) for k in ("interval", "useful_life", "nominal"))
+    t = FREQUENCY_TEXT
+    life = f'(({f}="{t["every"]}")*{interval}+({f}="{t["once"]}")*{life_col})'
+    guarded = f"({life}+({life}=0))"  # no division or MOD by zero – those rows count for 0
+    for y in range(facts.start_year, facts.end_year + 2):
+        year = f"{ffb.columns[y]}${ffb.years_row}"
+        ahead = f"({start}-{year})"
+        # remaining life – the whole life while not yet in service, else on the line's cycle
+        remaining = (
+            f"(MOD({ahead},{guarded})+({ahead}>={guarded})*({guarded}-MOD({ahead},{guarded})))"
+        )
+        # an every-few-years line counts up to its last year; once lines have none
+        active = f'({life}>0)*((({f}="{t["once"]}")+({end}="")+({year}<={end}))>0)'
+        # a nominal amount is in the dollars of the year it falls – a once line's year, an
+        # every-few-years line's next occurrence (the same amount falls each time)
+        nominal_year = f'(({f}="{t["once"]}")*{start}+({f}="{t["every"]}")*({year}+{remaining}))'
+        grown_from = f'(({nominal}="yes")*{nominal_year}+({nominal}<>"yes")*{rates.base_year})'
+        cost = f"{amount}*(1+{rates.expense_inflation})^({year}-{grown_from})"
+        formula = f"=SUMPRODUCT({active}*{cost}*({guarded}-{remaining})/{guarded})"
+        _formula(ws[f"{ffb.columns[y]}{ffb.row}"], formula, CUR)
 
 
 @dataclass(frozen=True)
@@ -321,6 +379,7 @@ class _Totals:
     operating: dict[int, str]  # the cell of each year's total
     reserve: dict[int, str]
     last_row: int
+    lines: tuple[int, int]  # the first and last row of the expense table
 
 
 def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Totals:
@@ -345,7 +404,15 @@ def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Tot
         if k < len(lines):
             _expense_inputs(ws, r, lines[k])
         else:  # a spare row – inputs to fill in
-            for key in ("frequency", "amount", "year", "end_year", "interval", "inflation"):
+            for key in (
+                "frequency",
+                "amount",
+                "year",
+                "end_year",
+                "interval",
+                "useful_life",
+                "inflation",
+            ):
                 ws.cell(r, EXPENSE_COL[key]).fill = YELLOW
                 ws.cell(r, EXPENSE_COL[key]).font = _font(color=BLUE)
         for c in year_col.values():
@@ -369,7 +436,7 @@ def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Tot
             _formula(ws[f"{c}{row}"], f"={rows}", CUR, bold=True)
             ws[f"{c}{row}"].fill = TOTAL_FILL
             out_cells[y] = f"{c}${row}"
-    return _Totals(*totals, reserve_row)
+    return _Totals(*totals, reserve_row, (first, last))
 
 
 def _plan(wb: Workbook, plan: _Plan) -> None:
@@ -400,7 +467,8 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
         _text(ws.cell(row, 1), label, bold=key in ("end", "pf"))
 
     ref, row = _plan_facts(ws, facts, plan_inputs_row(len(s.assessments)))
-    ffb, row = _plan_ffb(ws, facts, row)
+    ffb_at, row = _plan_ffb(ws, facts, row)
+    ffb = ffb_at.cells
     rates = _Rates(
         ref["operating_inflation"],
         ref["expense_inflation"],
@@ -409,6 +477,8 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
     )
     totals = _plan_expenses(ws, facts, rates, row)
     operating, reserve = totals.operating, totals.reserve
+    if facts.ffb_from_lines:
+        _worked_out_ffb(ws, facts, ffb_at, totals.lines, rates)
     if s.adoption:
         r = totals.last_row + 2
         for i, label in enumerate((ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL)):

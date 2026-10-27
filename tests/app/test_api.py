@@ -379,6 +379,16 @@ def test_a_blank_scenario_from_the_specs_defaults(client: TestClient) -> None:
         assert refused.json()["message"] == "a new scenario needs a usable name"
 
 
+def test_a_run_carries_the_fully_funded_balance_it_used(client: TestClient) -> None:
+    worked = next(s for s in DEMO_RAW["scenarios"] if s["facts"]["ffb_from_lines"])
+    result = client.post("/api/run", json={"scenario": worked}).json()
+    f = worked["facts"]
+    assert list(result["ffb"]) == [str(y) for y in range(f["start_year"], f["end_year"] + 2)]
+    assert all(isinstance(v, str) and float(v) > 0 for v in result["ffb"].values())
+    for year in result["years"]:  # each year's percent funded is against next year's figure
+        assert year["ffb_next"] == result["ffb"][str(year["year"] + 1)]
+
+
 def test_about_names_the_data_folder(client: TestClient, store: ProjectStore) -> None:
     about = client.get("/api/about").json()
     assert about["data_folder"] == str(store.root) and about["version"]

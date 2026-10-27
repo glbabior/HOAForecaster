@@ -35,7 +35,11 @@ from hoa_workbook.layout import (
     EXPENSES_HEADING,
     FACT_ROWS,
     FACTS_HEADING,
+    FFB_KEPT_LABEL,
     FFB_LABEL,
+    FFB_MODE_LABEL,
+    FFB_TYPED,
+    FFB_WORKED_OUT,
     FREQUENCY_TEXT,
     HEADER_ROW,
     MODE_GROWN,
@@ -166,7 +170,16 @@ def _project(wb: Workbook) -> dict[str, str]:
 
 
 _FREQUENCY = {text: key for key, text in FREQUENCY_TEXT.items()}
-_LINE_INPUTS = ("frequency", "amount", "year", "end_year", "interval", "inflation", "nominal")
+_LINE_INPUTS = (
+    "frequency",
+    "amount",
+    "year",
+    "end_year",
+    "interval",
+    "useful_life",
+    "inflation",
+    "nominal",
+)
 
 
 def _optional_whole(value: Any, where: str) -> int | None:
@@ -188,6 +201,7 @@ def _expense_line(ws: Worksheet, r: int, where: str) -> dict[str, Any]:
         )
     inflation = cell("inflation")
     interval = cell("interval")
+    life = cell("useful_life")
     return {
         "id": _text(cell("id")),
         "frequency": frequency,
@@ -201,6 +215,7 @@ def _expense_line(ws: Worksheet, r: int, where: str) -> dict[str, Any]:
         else _whole(interval, where + " interval", "a number of years"),
         "inflation": None if inflation is None else _number(inflation, where + " inflation"),
         "nominal": _text(cell("nominal")).lower() == "yes",
+        "useful_life": None if life is None else _whole(life, where + " useful life", "years"),
     }
 
 
@@ -343,14 +358,28 @@ def _inputs(ws: Worksheet) -> dict[str, Any]:
     ffb_row = sections[FFB_LABEL]
     if _comment(ws.cell(ffb_row, 1)):
         sources["ffb"] = _comment(ws.cell(ffb_row, 1))
+    worked_out = _ffb_mode(ws, ffb_row + 1)
+    typed_row = ffb_row
+    if worked_out:
+        typed_row = ffb_row + 2
+        if _text(ws.cell(typed_row, 1).value) != FFB_KEPT_LABEL:
+            raise WorkbookFormatError(f"{ws.title} is missing the row '{FFB_KEPT_LABEL}'")
     ffb = {}
     for c in range(VALUE_COL, ws.max_column + 1):
-        year, value = ws.cell(ffb_row - 1, c).value, ws.cell(ffb_row, c).value
-        if year is None or value is None:
+        year = ws.cell(ffb_row - 1, c).value
+        if year is None:
             continue
         y = _whole(year, f"{ws.title} Fully Funded Balance year")
         where = f"{ws.title} Fully Funded Balance {y}"
-        ffb[str(y)] = _number(_typed_cell(value, where), where)
+        due = horizon.start <= y <= horizon.stop  # its years and one more
+        if worked_out and due and not _is_formula(ws.cell(ffb_row, c).value):
+            raise WorkbookFormatError(
+                f"{where} was typed over, but it is worked out from the expenses – type the "
+                "study's figure in the row below instead, or choose the study's figures in the app"
+            )
+        value = ws.cell(typed_row, c).value
+        if value is not None:
+            ffb[str(y)] = _number(_typed_cell(value, where), where)
 
     head = sections[EXPENSES_HEADING] + 1
     total = ws.cell(sections[PLAN_OPERATING_LABEL], EXPENSE_YEAR_COL).value
@@ -384,10 +413,24 @@ def _inputs(ws: Worksheet) -> dict[str, Any]:
             "expense_lines": lines,
             "ffb": ffb,
             "sources": sources,
+            "ffb_from_lines": worked_out,
         },
         "horizon": horizon,
         "adoption": _adoption(ws, sections),
     }
+
+
+def _ffb_mode(ws: Worksheet, r: int) -> bool:
+    """Whether the sheet's Fully Funded Balance is worked out from its expenses (spec 4.2) – the
+    mode row below the figures."""
+    label, value = _text(ws.cell(r, 1).value), _text(ws.cell(r, VALUE_COL).value)
+    if not label and not value:
+        return False  # exported before v1.7, which had no mode row – the study's figures
+    if label != FFB_MODE_LABEL or value not in (FFB_TYPED, FFB_WORKED_OUT):
+        raise WorkbookFormatError(
+            f"{ws.title} – unrecognised '{FFB_MODE_LABEL}' below the Fully Funded Balance"
+        )
+    return value == FFB_WORKED_OUT
 
 
 def _scenario(ws: Worksheet) -> dict[str, Any]:

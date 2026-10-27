@@ -1,6 +1,8 @@
 # HOAForecaster – Application Requirements
 
-Version 1.6 – October 27, 2026 (v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+Version 1.7 – October 27, 2026 (v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+
+Changes in v1.7 – a one-time expense can carry its useful life, and a scenario's Fully Funded Balance can be worked out from its expenses instead of typed from the reserve study (sections 4, 4.1 and 6).
 
 Changes in v1.6 – the shared baseline is gone – every scenario holds all of its own inputs (its facts and assumptions, its expenses and its Fully Funded Balance as well as its dues and assessments), so a scenario's changes to the baseline (v1.5 section 5.1) are gone too; a new scenario copies everything from the scenario it starts from, and a fact, an expense line or the Fully Funded Balance can be copied into chosen scenarios later (section 7.2); an adopted plan is a scenario made read-only (section 5.2); the project's screens are organised by scenario (section 7); every edit is saved as it is made, with no Save button (sections 7.2 and 8.2); the workbook carries each scenario's inputs on its own sheet (section 7.6); project files move to schema version 3 (section 8.2).
 
@@ -47,7 +49,7 @@ Every numeric input carries an optional `source` text field (where the number ca
 | 2 | Start year, end year | integer | Horizon of 5–30 full years. Default end = start + 13. If today is mid-year, the user enters the expected January 1 balance of the next year and starts there |
 | 3 | Expenses | table – frequency, amount, description, years | One line per expense, each with a frequency (section 4.1). Free text per line records the nature of the expense; many lines per year allowed |
 | 4 | Reserve expense inflation rate and base year | percent, integer | Default 3%, base year = the reserve study's year. Applies to once and every-few-years expenses |
-| 5 | Fully Funded Balance by year | table – year, amount | From the reserve study, start year through end year + 1. Required for percent funded |
+| 5 | Fully Funded Balance by year | table – year, amount, or worked out | From the reserve study, start year through end year + 1 – or worked out from the expenses' useful lives (section 4.2). Required for percent funded |
 | 6 | (removed in v1.5 – operating expenses are the monthly and yearly lines of input 3) | | |
 | 7 | Operating expense inflation rate | percent | Default 3%. The growth rate of any monthly or yearly expense that does not set its own |
 | 8 | Interest rate earned on reserves | percent | Default 2% |
@@ -57,7 +59,7 @@ Every numeric input carries an optional `source` text field (where the number ca
 | 12 | Percent-funded target | percent | Default 70%. Drawn as the target line on charts |
 | 13 | Governance limits (optional) | percent, percent | Max dues increase per year without an owner vote (default 20%); max special assessment as a share of the annual budget without a vote (default 5%). Used only for warnings |
 
-Validation – FFB present for every year from the start year to end year + 1, rates between 0 and 50% (each expense line's own rate too), currency non-negative, units ≥ 1.
+Validation – FFB present for every year from the start year to end year + 1 (unless it is worked out), a useful life of at least 1 year, rates between 0 and 50% (each expense line's own rate too), currency non-negative, units ≥ 1.
 
 ### 4.1 Expense frequencies
 
@@ -72,6 +74,21 @@ Validation – FFB present for every year from the start year to end year + 1, r
 - Once and every-few-years lines are the reserve expenses, inflated from the base year at input 4.
 - Every line has a stable identifier, kept when a scenario is copied, so a line copied into other scenarios (section 7.2) replaces the same line there.
 - Lines and occurrences outside the horizon are kept and ignored. An every-few-years line needs an interval of at least 1; a last year may not come before the first year.
+- A reserve expense's useful life is how many years the component lasts between replacements – for an every-few-years line its interval; a once line can carry one (optional). It is used only to work out the Fully Funded Balance (section 4.2).
+
+### 4.2 Fully Funded Balance worked out from the expenses
+
+A scenario's Fully Funded Balance is either typed from the reserve study (input 5) or worked out from its reserve expenses – the scenario chooses; typed figures are kept while it is worked out. Worked out, for the start of each year Y from the start year to end year + 1, it is the sum over the reserve lines that have a useful life L (every-few-years lines, and once lines with one) of
+
+```
+cost_Y × age_Y / L
+  cost_Y = the line's amount in year-Y dollars – inflated from the base year at input 4, or for a line marked as already in its year's dollars deflated at input 4 from the year it falls (a once line's year; an every-few-years line's next occurrence, Y + rem, since the same amount falls each time)
+  next   = the line's year, or for an every-few-years line its first occurrence
+  rem    = L when next − Y ≥ L (not yet in service), else (next − Y) mod L   (mod taking the sign of L, so a line already replaced keeps ageing on the same cycle)
+  age_Y  = L − rem
+```
+
+An every-few-years line with a last year counts only for years up to it. Monthly and yearly lines never count. This is the reserve-study standard's "effective age ÷ useful life × current cost", with each line's remaining life taken from its schedule.
 
 ## 5. Scenario inputs
 
@@ -110,7 +127,7 @@ total_from_owners   = total_dues + assessment
 interest            = starting_balance × interest_rate
 expenses            = Σ once lines in the year and every-few-years lines falling in the year, each × (1 + exp_inflation)^(year − base_year) unless flagged nominal
 ending_balance      = starting_balance + contribution + assessment + interest − expenses
-ffb_next            = FFB for year + 1
+ffb_next            = FFB for year + 1 (typed, or worked out – section 4.2)
 percent_funded      = ending_balance / ffb_next
 low_flag            = ending_balance < cushion
 target_met          = percent_funded ≥ target

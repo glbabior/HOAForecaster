@@ -76,6 +76,7 @@ const facts: Facts = {
   max_dues_increase: "0.2",
   max_assessment_share: "0.05",
   sources: {},
+  ffb_from_lines: false,
 };
 
 const scenario = (name: string, change: Partial<Scenario> = {}): Scenario => ({
@@ -120,6 +121,9 @@ function start(path: string) {
 }
 
 const at = (router: ReturnType<typeof start>) => router.state.location.pathname;
+/** The heading of a collapsible section – its summary, found by its title. */
+const summaryOf = (title: string): HTMLElement =>
+  screen.getByText(title, { selector: ".summary-title" }).closest("summary") as HTMLElement;
 const lastSaved = (): Project => mocked.saveProject.mock.calls.at(-1)?.[1] as Project;
 const savedScenario = (name: string): Scenario | undefined =>
   lastSaved().scenarios.find((s) => s.name === name);
@@ -563,7 +567,7 @@ describe("the expense tables", () => {
     const once = await screen.findByRole("table", { name: "One-time costs" });
     expect(within(once).getByRole("textbox", { name: "Description of expense 2" })).toBeTruthy();
     expect(screen.queryByRole("table", { name: "Monthly costs" })).toBeNull(); // none yet
-    expect(screen.getByRole("heading", { name: "Monthly costs (0)" })).toBeTruthy();
+    expect(summaryOf("Monthly costs").textContent).toBe("Monthly costs (0)");
     // a one-time cost has no last year or interval; a yearly one no "already inflated"
     expect(within(once).queryByRole("columnheader", { name: "Last year" })).toBeNull();
     const yearly = screen.getByRole("table", { name: "Yearly costs" });
@@ -592,17 +596,15 @@ describe("the expense tables' own tools", () => {
     source: "",
     nominal: false,
   });
-  const section = (title: string) =>
-    screen
-      .getByRole("heading", { name: new RegExp(`^${title}`) })
-      .closest("details") as HTMLElement;
+  const section = (title: string) => summaryOf(title).closest("details") as HTMLElement;
 
   it("take pasted rows as one-time costs before there are any", async () => {
     const empty = scenario("Plan A");
     empty.facts.expense_lines = [];
     serve(projectOf(empty, scenario("Plan B")));
     start(`${A}/expenses`);
-    await screen.findByRole("heading", { name: "One-time costs (0)" });
+    await screen.findByText("One-time costs", { selector: ".summary-title" });
+    expect(summaryOf("One-time costs").textContent).toBe("One-time costs (0)");
     const text = ["2030\t12000\tGate\tno\tQuote", "2031\t5000\tPaint"].join("\n");
     fireEvent.paste(
       within(section("One-time costs")).getByRole("button", { name: "Add a one-time cost" }),
@@ -622,7 +624,8 @@ describe("the expense tables' own tools", () => {
     mixed.facts.expense_lines = [once("a", 2030), yearly, once("c", 2027), every, once("e", 2025)];
     serve(projectOf(mixed, scenario("Plan B")));
     start(`${A}/expenses`);
-    await screen.findByRole("heading", { name: "One-time costs (3)" });
+    await screen.findByText("One-time costs", { selector: ".summary-title" });
+    expect(summaryOf("One-time costs").textContent).toBe("One-time costs (3)");
     await userEvent.click(
       within(section("One-time costs")).getByRole("button", { name: "Sort by year" }),
     );
@@ -644,5 +647,43 @@ describe("the expense tables' own tools", () => {
       expect(document.activeElement?.getAttribute("aria-label")).toBe("How often expense 2 falls"),
     );
     expect(screen.getByText("Expense 2 moved to Every few years.")).toBeTruthy();
+  });
+});
+
+describe("a worked-out Fully Funded Balance", () => {
+  it("is chosen on its screen, shows the server's figures and keeps the typed ones", async () => {
+    mocked.run.mockResolvedValue({
+      years: [],
+      summary: {
+        lowest_balance: "0",
+        lowest_balance_year: 2027,
+        pf_end: "0.5",
+        first_target_year: null,
+        low_years: 0,
+        vote_years: 0,
+      },
+      ffb: Object.fromEntries(years(2027, 2032).map((y) => [String(y), String(y * 10)])),
+    });
+    start(`${A}/ffb`);
+    await userEvent.click(
+      await screen.findByRole("radio", { name: /Worked out from this scenario's expenses/ }),
+    );
+    const table = await screen.findByRole("table", { name: "Fully Funded Balance, worked out" });
+    expect(within(table).getByRole("row", { name: /2032/ }).textContent).toContain("$20,320");
+    expect(
+      screen.getByText(/0 of 1 reserve expenses count – 1 one-time cost has no useful life yet/),
+    ).toBeTruthy();
+    await waitFor(() => expect(savedScenario("Plan A")?.facts.ffb_from_lines).toBe(true), SLOW);
+    expect(savedScenario("Plan A")?.facts.ffb["2027"]).toBe("202700"); // kept for switching back
+  });
+
+  it("takes a one-time cost's useful life", async () => {
+    start(`${A}/expenses`);
+    const life = await screen.findByRole("textbox", { name: "Useful life of expense 2 in years" });
+    await userEvent.type(life, "30");
+    await waitFor(
+      () => expect(savedScenario("Plan A")?.facts.expense_lines[1]?.useful_life).toBe(30),
+      SLOW,
+    );
   });
 });

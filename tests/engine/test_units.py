@@ -806,7 +806,9 @@ def test_a_project_holds_at_most_200_scenarios() -> None:
 def test_the_schema_2_demo_upgrades_to_todays_demo() -> None:
     old = json.loads((Path(__file__).parent / "fixtures" / "demo_schema2.json").read_text("utf-8"))
     today = json.loads(DEMO.read_text(encoding="utf-8"))
-    assert project_from_dict(old) == project_from_dict(today)
+    upgraded, now = project_from_dict(old), project_from_dict(today)
+    # today's demo has one scenario more – the worked-out Fully Funded Balance (spec 4.2)
+    assert upgraded == replace(now, scenarios=now.scenarios[: len(upgraded.scenarios)])
 
 
 def test_version_2_lines_of_a_scenarios_own_never_share_an_id_with_a_different_line() -> None:
@@ -834,3 +836,80 @@ def test_a_renamed_version_2_line_skips_ids_already_taken() -> None:
     second = {**own(**{"own-1": "2"}), "name": "T"}
     _, renamed = _upgraded(_version_2(first, second)).scenarios
     assert renamed.facts.expense_lines[-1].id == "line-2"
+
+
+# ---------------------------------------------------------------- the worked-out FFB (4.2)
+
+
+def _components() -> Facts:
+    every = Frequency.EVERY
+    return baseline(
+        ffb={},  # not needed when worked out
+        ffb_from_lines=True,
+        expense_lines=(
+            # recoated every 10 years, next in 2032 – 8 years old at the start of 2030
+            ExpenseLine(2032, D(1000), "Roof", frequency=every, interval=10, id="roof"),
+            # 30 years left of a 50-year life; its amount is in 2060's dollars
+            ExpenseLine(2060, D(1000), "Siding", nominal=True, useful_life=50, id="siding"),
+            ExpenseLine(2031, D(9999), "No life given", id="unknown"),
+            # first fitted in 2040 with a 5-year life – not in service yet
+            ExpenseLine(2040, D(700), "New gate", useful_life=5, id="gate"),
+            # every 2 years from 2030, the last time in 2031
+            ExpenseLine(2030, D(100), "Pump", frequency=every, interval=2, end_year=2031, id="p"),
+            ExpenseLine(None, D(5000), "Water", frequency=Frequency.YEARLY, id="water"),
+        ),
+    )
+
+
+def test_the_ffb_is_worked_out_from_each_reserve_lines_age_and_useful_life() -> None:
+    f = _components()
+    ffb = run(Scenario("S", f, rate("100", "0").dues)).ffb
+    g = D("1.1")  # reserve inflation from the 2030 base year
+    siding = lambda y: D(1000) / g ** (2060 - y) * (50 - (2060 - y)) / 50  # noqa: E731
+    expected = {
+        2030: D(1000) * 8 / 10 + siding(2030) + D(100),  # the pump is due – fully deteriorated
+        2031: D(1000) * g * 9 / 10 + siding(2031) + D(100) * g * 1 / 2,
+        2032: D(1000) * g**2 + siding(2032),  # due again – the pump is retired after 2031
+        2033: D(1000) * g**3 * 1 / 10 + siding(2033),  # renewed in 2032 – a year old
+        2034: D(1000) * g**4 * 2 / 10 + siding(2034),
+        2035: D(1000) * g**5 * 3 / 10 + siding(2035),
+    }
+    assert ffb == expected
+
+
+def test_a_worked_out_ffb_feeds_percent_funded_and_needs_no_typed_figures() -> None:
+    f = _components()
+    assert validate_facts(f) == []
+    s = Scenario("S", f, rate("100", "0").dues)
+    result = run(s)
+    for y in result.years:
+        assert y.ffb_next == result.ffb[y.year + 1]
+        assert y.percent_funded == y.ending_balance / y.ffb_next
+    typed = replace(f, ffb_from_lines=False)
+    assert any("Fully Funded Balance is missing" in p for p in validate_facts(typed))
+    # typed, the result carries the typed figures
+    assert run(replace(s, facts=baseline())).ffb == baseline().ffb
+
+
+def test_a_useful_life_must_be_at_least_a_year_and_belongs_to_once_lines() -> None:
+    f = baseline(expense_lines=(ExpenseLine(2031, D(1), "Gate", useful_life=0, id="g"),))
+    assert "the 2031 expense 'Gate' needs a useful life of at least 1 year" in validate_facts(f)
+    raw = facts_to_dict(_components())
+    assert raw["ffb_from_lines"] is True
+    lines = {line["id"]: line for line in raw["expense_lines"]}
+    assert lines["siding"]["useful_life"] == 50
+    assert "useful_life" not in lines["roof"]  # an every-few-years line's life is its interval
+    raw["expense_lines"][0]["useful_life"] = 7  # a stale field is dropped on reading
+    again = facts_from_dict(raw)
+    assert again == _components()
+    assert again.expense_lines[0].life == 10 and again.expense_lines[5].life is None
+
+
+def test_a_nominal_every_few_years_lines_cost_is_deflated_from_its_next_occurrence() -> None:
+    # the same $1,000 falls in 2032, 2042, … – so in 2033 it is a year past and 9 years ahead
+    line = ExpenseLine(2032, D(1000), "Pump", frequency=Frequency.EVERY, interval=10, nominal=True)
+    f = baseline(ffb={}, ffb_from_lines=True, expense_lines=(line,))
+    ffb = run(Scenario("S", f, rate("100", "0").dues)).ffb
+    g = D("1.1")
+    assert ffb[2030] == D(1000) / g**2 * 8 / 10
+    assert ffb[2033] == D(1000) / g**9 * 1 / 10

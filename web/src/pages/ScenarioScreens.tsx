@@ -891,20 +891,75 @@ export function ExpensesScreen() {
 // ---------------------------------------------------------------- Fully Funded Balance
 
 export function FfbScreen() {
-  const { form, setForm } = useScenario();
+  const { form, setForm, result } = useScenario();
   const f = form.facts;
+  const years = plausibleHorizon(f.start_year, f.end_year)
+    ? Array.from({ length: f.end_year - f.start_year + 2 }, (_, i) => f.start_year + i)
+    : [];
+  const set = (change: Partial<Facts>) => setForm({ ...form, facts: { ...f, ...change } });
+  // the reserve lines that count towards a worked-out figure, and those that cannot yet
+  const reserve = f.expense_lines.filter((l) => l.frequency === "every" || l.frequency === "once");
+  const lifeless = reserve.filter((l) => l.frequency === "once" && !l.useful_life);
   return (
     <InputsScreen>
       <section className="panel">
-        {plausibleHorizon(f.start_year, f.end_year) ? (
-          <FfbTable
-            years={Array.from(
-              { length: f.end_year - f.start_year + 2 },
-              (_, i) => f.start_year + i,
+        <fieldset className="plain">
+          <legend className="visually-hidden">Where the Fully Funded Balance comes from</legend>
+          <label className="check">
+            <input
+              type="radio"
+              name="ffb-from"
+              checked={!f.ffb_from_lines}
+              onChange={() => set({ ffb_from_lines: false })}
+            />{" "}
+            The reserve study's figures, typed below
+          </label>
+          <label className="check">
+            <input
+              type="radio"
+              name="ffb-from"
+              checked={f.ffb_from_lines}
+              onChange={() => set({ ffb_from_lines: true })}
+            />{" "}
+            Worked out from this scenario's expenses and their useful lives
+          </label>
+        </fieldset>
+        {f.ffb_from_lines ? (
+          <>
+            <p className="hint">
+              Each reserve expense counts its cost in that year's dollars times how far it is
+              through its useful life – an every-few-years expense's interval, or a one-time cost's
+              useful life – from when it next falls due. Monthly and yearly costs do not count.{" "}
+              {reserve.length - lifeless.length} of {reserve.length} reserve expenses count
+              {lifeless.length > 0
+                ? ` – ${lifeless.length} one-time cost${lifeless.length === 1 ? " has" : "s have"} no useful life yet.`
+                : "."}
+            </p>
+            {result && (
+              <table className="list ffb-worked">
+                <caption className="visually-hidden">Fully Funded Balance, worked out</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Start of year</th>
+                    <th scope="col" className="num">
+                      Fully Funded Balance
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {years.map((y) => (
+                    <tr key={y}>
+                      <th scope="row">{y}</th>
+                      <td className="num">{money(result.ffb[String(y)])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
-            values={f.ffb}
-            onChange={(ffb) => setForm({ ...form, facts: { ...f, ffb } })}
-          />
+            <p className="hint">The typed figures are kept, for switching back.</p>
+          </>
+        ) : years.length > 0 ? (
+          <FfbTable years={years} values={f.ffb} onChange={(ffb) => set({ ffb })} />
         ) : (
           <p className="hint">
             Set a start and end year 5 to 30 years apart on Facts and assumptions to see this table.
@@ -916,19 +971,14 @@ export function FfbScreen() {
               id={fid}
               className="source"
               value={f.sources.ffb ?? ""}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  facts: { ...f, sources: { ...f.sources, ffb: e.target.value } },
-                })
-              }
+              onChange={(e) => set({ sources: { ...f.sources, ffb: e.target.value } })}
             />
           )}
         </Field>
         <div className="row-actions">
           <CopyButton
-            what="the Fully Funded Balance table"
-            label="Copy the Fully Funded Balance table to other scenarios"
+            what="the Fully Funded Balance"
+            label="Copy the Fully Funded Balance to other scenarios"
             apply={(target) => copyFfb(target, f)}
           />
         </div>

@@ -73,6 +73,9 @@ EXPENSE_COLUMNS = (
     ExpenseColumn("year", "Year, or first year"),
     ExpenseColumn("end_year", "Last year (blank – to the end)"),
     ExpenseColumn("interval", "Every … years"),
+    ExpenseColumn(
+        "useful_life", "Useful life (one-time costs – every few years uses its interval)"
+    ),
     ExpenseColumn("inflation", "Own inflation (blank – the operating rate)"),
     ExpenseColumn("nominal", "Already in that year's dollars?"),
     ExpenseColumn("id", "Line id"),
@@ -147,6 +150,12 @@ FACTS_HEADING = "This scenario's facts and assumptions"
 VALUE_COL, SOURCE_COL = PLAN_FIRST_COL, PLAN_FIRST_COL + 1
 PLAN_FFB_HEADING = "This scenario's Fully Funded Balance (from the reserve study)"
 PLAN_FFB_YEARS_LABEL = "Start of year"  # the year row above FFB_LABEL; years from VALUE_COL
+# the row below FFB_LABEL – where the figures come from, set in the app (spec 4.2), since it
+# decides which cells hold formulas
+FFB_MODE_LABEL = "Fully Funded Balance from"
+FFB_TYPED, FFB_WORKED_OUT = "the reserve study's figures", "this sheet's expenses' useful lives"
+# the row below that while worked out – the typed figures, kept for switching back
+FFB_KEPT_LABEL = "Reserve study's figures (kept, not used while worked out)"
 EXPENSES_HEADING = (
     "This scenario's expenses – one row each (blank rows are spare). To add more, insert rows "
     "inside the list and copy a whole row into them, so its year formulas come with it"

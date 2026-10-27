@@ -68,7 +68,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -77,7 +78,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -86,7 +88,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -95,7 +98,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -104,7 +108,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -113,7 +118,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -122,7 +128,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -131,7 +138,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -140,7 +148,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -149,7 +158,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -158,7 +168,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -167,7 +178,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -176,7 +188,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -185,7 +198,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -194,7 +208,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -203,7 +218,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -223,7 +239,8 @@
       "amount": "22000",
       "description": "Balcony railing replacement",
       "source": "Fictional contractor estimate, 2026 dollars",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "boiler",
@@ -232,7 +249,8 @@
       "amount": "60000",
       "description": "Boiler replacement",
       "source": "Placeholder – no estimate yet",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "gutters",
@@ -278,7 +296,8 @@
     "sources": {
      "starting_balance": "Fictional balance sheet, December 2026",
      "current_dues": "Fictional 2026 budget"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "rate",
@@ -355,7 +374,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -364,7 +384,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -373,7 +394,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -382,7 +404,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -391,7 +414,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -400,7 +424,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -409,7 +434,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -418,7 +444,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -427,7 +454,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -436,7 +464,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -445,7 +474,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -454,7 +484,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -463,7 +494,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -472,7 +504,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -481,7 +514,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -490,7 +524,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -510,7 +545,8 @@
       "amount": "22000",
       "description": "Balcony railing replacement",
       "source": "Fictional contractor estimate, 2026 dollars",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "boiler",
@@ -519,7 +555,8 @@
       "amount": "60000",
       "description": "Boiler replacement",
       "source": "Placeholder – no estimate yet",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "gutters",
@@ -565,7 +602,8 @@
     "sources": {
      "starting_balance": "Fictional balance sheet, December 2026",
      "current_dues": "Fictional 2026 budget"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "rate",
@@ -655,7 +693,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -664,7 +703,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -673,7 +713,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -682,7 +723,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -691,7 +733,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -700,7 +743,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -709,7 +753,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -718,7 +763,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -727,7 +773,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -736,7 +783,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -745,7 +793,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -754,7 +803,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -763,7 +813,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -772,7 +823,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -781,7 +833,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -790,7 +843,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -810,7 +864,8 @@
       "amount": "22000",
       "description": "Balcony railing replacement",
       "source": "Fictional contractor estimate, 2026 dollars",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "boiler",
@@ -819,7 +874,8 @@
       "amount": "60000",
       "description": "Boiler replacement",
       "source": "Placeholder – no estimate yet",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "gutters",
@@ -865,7 +921,8 @@
     "sources": {
      "starting_balance": "Fictional balance sheet, December 2026",
      "current_dues": "Fictional 2026 budget"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "explicit",
@@ -963,7 +1020,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -972,7 +1030,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -981,7 +1040,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -990,7 +1050,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -999,7 +1060,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -1008,7 +1070,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -1017,7 +1080,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -1026,7 +1090,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -1035,7 +1100,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -1044,7 +1110,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -1053,7 +1120,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -1062,7 +1130,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -1071,7 +1140,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -1080,7 +1150,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -1089,7 +1160,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -1098,7 +1170,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -1118,7 +1191,8 @@
       "amount": "22000",
       "description": "Balcony railing replacement",
       "source": "Fictional contractor estimate, 2026 dollars",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "boiler",
@@ -1127,7 +1201,8 @@
       "amount": "60000",
       "description": "Boiler replacement",
       "source": "Placeholder – no estimate yet",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "gutters",
@@ -1173,7 +1248,8 @@
     "sources": {
      "starting_balance": "Fictional balance sheet, December 2026",
      "current_dues": "Fictional 2026 budget"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "rate",
@@ -1250,7 +1326,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -1259,7 +1336,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -1268,7 +1346,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -1277,7 +1356,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -1286,7 +1366,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -1295,7 +1376,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -1304,7 +1386,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -1313,7 +1396,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -1322,7 +1406,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -1331,7 +1416,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -1340,7 +1426,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -1349,7 +1436,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -1358,7 +1446,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -1367,7 +1456,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -1376,7 +1466,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -1385,7 +1476,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -1405,7 +1497,8 @@
       "amount": "22000",
       "description": "Balcony railing replacement",
       "source": "Fictional contractor estimate, 2026 dollars",
-      "nominal": false
+      "nominal": false,
+      "useful_life": null
      },
      {
       "id": "gutters",
@@ -1463,7 +1556,8 @@
      "starting_balance": "Fictional balance sheet, December 2026",
      "current_dues": "Fictional 2026 budget",
      "interest_rate": "Fictional bank offer"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "rate",
@@ -1540,7 +1634,8 @@
       "amount": "14000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2028",
@@ -1549,7 +1644,8 @@
       "amount": "19500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2029",
@@ -1558,7 +1654,8 @@
       "amount": "150000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2030",
@@ -1567,7 +1664,8 @@
       "amount": "11200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2031",
@@ -1576,7 +1674,8 @@
       "amount": "27000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2032",
@@ -1585,7 +1684,8 @@
       "amount": "16800",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2033",
@@ -1594,7 +1694,8 @@
       "amount": "58000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2034",
@@ -1603,7 +1704,8 @@
       "amount": "12900",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2035",
@@ -1612,7 +1714,8 @@
       "amount": "35400",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2036",
@@ -1621,7 +1724,8 @@
       "amount": "20600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2037",
@@ -1630,7 +1734,8 @@
       "amount": "86000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2038",
@@ -1639,7 +1744,8 @@
       "amount": "15500",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2039",
@@ -1648,7 +1754,8 @@
       "amount": "30200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2040",
@@ -1657,7 +1764,8 @@
       "amount": "18200",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2041",
@@ -1666,7 +1774,8 @@
       "amount": "46600",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "study-2042",
@@ -1675,7 +1784,8 @@
       "amount": "23000",
       "description": "Reserve study total, all scheduled components",
       "source": "Fictional reserve study, 2026, expense schedule",
-      "nominal": true
+      "nominal": true,
+      "useful_life": null
      },
      {
       "id": "repaint",
@@ -1733,7 +1843,8 @@
      "starting_balance": "Fictional balance sheet, September 2026",
      "current_dues": "Fictional 2026 budget",
      "interest_rate": "Fictional bank offer, autumn 2026"
-    }
+    },
+    "ffb_from_lines": false
    },
    "dues": {
     "mode": "rate",
@@ -1761,6 +1872,322 @@
     "note": "Fictional annual meeting, motion carried",
     "sequence": 1
    }
+  },
+  {
+   "name": "Worked-out Fully Funded Balance",
+   "description": "Dues only, with the Fully Funded Balance worked out from the expenses' useful lives",
+   "facts": {
+    "start_year": 2027,
+    "end_year": 2042,
+    "starting_balance": "185000",
+    "expense_lines": [
+     {
+      "id": "management",
+      "frequency": "yearly",
+      "year": null,
+      "amount": "58000",
+      "description": "Management, accounting and administration",
+      "source": "Fictional 2027 budget",
+      "end_year": null,
+      "inflation": null
+     },
+     {
+      "id": "utilities",
+      "frequency": "monthly",
+      "year": null,
+      "amount": "3100",
+      "description": "Common-area water, power and gas",
+      "source": "Fictional 2026 utility bills",
+      "end_year": null,
+      "inflation": "0.035"
+     },
+     {
+      "id": "insurance",
+      "frequency": "yearly",
+      "year": null,
+      "amount": "41000",
+      "description": "Master insurance policy",
+      "source": "Fictional broker quote",
+      "end_year": null,
+      "inflation": "0.045"
+     },
+     {
+      "id": "landscaping",
+      "frequency": "yearly",
+      "year": 2027,
+      "amount": "13000",
+      "description": "Landscaping contract",
+      "source": "Fictional contract, 2027–2033",
+      "end_year": 2033,
+      "inflation": "0.025"
+     },
+     {
+      "id": "landscaping-renewal",
+      "frequency": "yearly",
+      "year": 2034,
+      "amount": "16500",
+      "description": "Landscaping contract after renewal",
+      "source": "Placeholder – contract to be re-bid",
+      "end_year": null,
+      "inflation": null
+     },
+     {
+      "id": "study-2027",
+      "frequency": "once",
+      "year": 2027,
+      "amount": "14000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2028",
+      "frequency": "once",
+      "year": 2028,
+      "amount": "19500",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2029",
+      "frequency": "once",
+      "year": 2029,
+      "amount": "150000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": 30
+     },
+     {
+      "id": "study-2030",
+      "frequency": "once",
+      "year": 2030,
+      "amount": "11200",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2031",
+      "frequency": "once",
+      "year": 2031,
+      "amount": "27000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2032",
+      "frequency": "once",
+      "year": 2032,
+      "amount": "16800",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2033",
+      "frequency": "once",
+      "year": 2033,
+      "amount": "58000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2034",
+      "frequency": "once",
+      "year": 2034,
+      "amount": "12900",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2035",
+      "frequency": "once",
+      "year": 2035,
+      "amount": "35400",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2036",
+      "frequency": "once",
+      "year": 2036,
+      "amount": "20600",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2037",
+      "frequency": "once",
+      "year": 2037,
+      "amount": "86000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2038",
+      "frequency": "once",
+      "year": 2038,
+      "amount": "15500",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2039",
+      "frequency": "once",
+      "year": 2039,
+      "amount": "30200",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2040",
+      "frequency": "once",
+      "year": 2040,
+      "amount": "18200",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2041",
+      "frequency": "once",
+      "year": 2041,
+      "amount": "46600",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "study-2042",
+      "frequency": "once",
+      "year": 2042,
+      "amount": "23000",
+      "description": "Reserve study total, all scheduled components",
+      "source": "Fictional reserve study, 2026, expense schedule",
+      "nominal": true,
+      "useful_life": null
+     },
+     {
+      "id": "repaint",
+      "frequency": "every",
+      "year": 2031,
+      "amount": "85000",
+      "description": "Exterior repaint",
+      "source": "Fictional painter's estimate, 2026 dollars",
+      "end_year": null,
+      "interval": 8,
+      "nominal": false
+     },
+     {
+      "id": "railings",
+      "frequency": "once",
+      "year": 2031,
+      "amount": "22000",
+      "description": "Balcony railing replacement",
+      "source": "Fictional contractor estimate, 2026 dollars",
+      "nominal": false,
+      "useful_life": 25
+     },
+     {
+      "id": "boiler",
+      "frequency": "once",
+      "year": 2035,
+      "amount": "60000",
+      "description": "Boiler replacement",
+      "source": "Placeholder – no estimate yet",
+      "nominal": false,
+      "useful_life": 20
+     },
+     {
+      "id": "gutters",
+      "frequency": "every",
+      "year": 2028,
+      "amount": "4500",
+      "description": "Gutter cleaning and roof sealing",
+      "source": "Fictional maintenance plan",
+      "end_year": 2040,
+      "interval": 3,
+      "nominal": false
+     },
+     {
+      "id": "clubhouse-roof",
+      "frequency": "once",
+      "year": 2050,
+      "amount": "40000",
+      "description": "Clubhouse roof (fictional) – first due after the horizon",
+      "source": "Invented for the demo",
+      "nominal": false,
+      "useful_life": 10
+     }
+    ],
+    "expense_inflation": "0.035",
+    "expense_base_year": 2026,
+    "ffb": {
+     "2027": "610000",
+     "2028": "634000",
+     "2029": "659000",
+     "2030": "685000",
+     "2031": "712000",
+     "2032": "740000",
+     "2033": "770000",
+     "2034": "801000",
+     "2035": "833000",
+     "2036": "866000",
+     "2037": "901000",
+     "2038": "937000",
+     "2039": "974000",
+     "2040": "1013000",
+     "2041": "1054000",
+     "2042": "1096000",
+     "2043": "1140000"
+    },
+    "operating_inflation": "0.04",
+    "interest_rate": "0.015",
+    "units": 24,
+    "current_dues": "560",
+    "cushion": "75000",
+    "target": "0.6",
+    "max_dues_increase": "0.20",
+    "max_assessment_share": "0.05",
+    "sources": {
+     "starting_balance": "Fictional balance sheet, December 2026",
+     "current_dues": "Fictional 2026 budget"
+    },
+    "ffb_from_lines": true
+   },
+   "dues": {
+    "mode": "rate",
+    "first_value": "650",
+    "annual_increase": "0.045",
+    "overrides": {}
+   },
+   "assessments": [],
+   "rounding": "dollar",
+   "adoption": null
   }
  ]
 }

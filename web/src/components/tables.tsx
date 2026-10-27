@@ -44,8 +44,14 @@ export function withFrequency(line: ExpenseLine, frequency: Frequency, year: num
       inflation: line.inflation ?? null,
     };
   const reserve = { ...common, year: line.year ?? year, nominal: line.nominal ?? false };
-  if (frequency === "once") return reserve;
-  return { ...reserve, interval: line.interval ?? 5, end_year: line.end_year ?? null };
+  // a useful life typed on a one-time cost becomes an every-few-years interval – never the
+  // reverse, where the interval may only be the default
+  if (frequency === "once") return { ...reserve, useful_life: line.useful_life ?? null };
+  return {
+    ...reserve,
+    interval: line.interval ?? line.useful_life ?? 5,
+    end_year: line.end_year ?? null,
+  };
 }
 
 let counter = 0;
@@ -194,9 +200,8 @@ export function ExpenseTable({
             onPaste={kind.frequency === "once" ? paste : undefined}
           >
             <summary>
-              <h3>
-                {kind.title} <span className="count">({shown.length})</span>
-              </h3>
+              <span className="summary-title">{kind.title}</span>{" "}
+              <span className="count">({shown.length})</span>
             </summary>
             <p className="hint">{kind.hint}</p>
             {shown.length > 0 && (
@@ -268,7 +273,11 @@ function ExpenseHeadings({ frequency }: { frequency: Frequency }) {
   return (
     <>
       <th scope="col">{frequency === "once" ? "Year" : "First year"}</th>
-      {frequency === "every" && <th scope="col">Every … years</th>}
+      {frequency === "every" && (
+        <th scope="col" title="How many years the component lasts between replacements">
+          Every … years (its useful life)
+        </th>
+      )}
       {frequency !== "once" && <th scope="col">Last year</th>}
       <th scope="col">
         {frequency === "monthly"
@@ -278,6 +287,14 @@ function ExpenseHeadings({ frequency }: { frequency: Frequency }) {
             : "Amount"}
       </th>
       <th scope="col">Description and source</th>
+      {frequency === "once" && (
+        <th
+          scope="col"
+          title="How many years the component lasts between replacements – for a Fully Funded Balance worked out from the expenses; blank leaves it out of that"
+        >
+          Useful life
+        </th>
+      )}
       {operating ? (
         <th scope="col">Own inflation</th>
       ) : (
@@ -377,6 +394,17 @@ function ExpenseRow({
           onChange={(e) => update({ source: e.target.value })}
         />
       </td>
+      {line.frequency === "once" && (
+        <td>
+          <OptionalYearInput
+            label={`Useful life of expense ${n} in years`}
+            name={`Useful life of ${what}`}
+            value={line.useful_life ?? null}
+            placeholder="years"
+            onChange={(useful_life) => update({ useful_life })}
+          />
+        </td>
+      )}
       {operating ? (
         <td>
           <DecimalInput

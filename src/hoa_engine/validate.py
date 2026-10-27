@@ -49,6 +49,8 @@ def _line(line: ExpenseLine, b: Facts) -> list[str]:
         problems.append(f"{name} needs a year")
     if line.frequency is Frequency.EVERY and (line.interval is None or line.interval < 1):
         problems.append(f"{name} needs a number of years between occurrences, at least 1")
+    if line.useful_life is not None and line.useful_life < 1:
+        problems.append(f"{name} needs a useful life of at least 1 year")
     if line.year is not None and line.end_year is not None and line.end_year < line.year:
         problems.append(f"{name} ends before it starts")
     problems += _rate(f"the inflation rate of {name}", line.inflation)
@@ -71,7 +73,7 @@ def validate_facts(b: Facts) -> list[str]:
     if len(b.expense_lines) > MAX_LINES:
         return [f"there are more than {MAX_LINES:,} expense lines"]
     missing = [y for y in range(b.start_year, b.end_year + 2) if y not in b.ffb]
-    if missing:
+    if missing and not b.ffb_from_lines:  # worked out, the typed figures are not needed
         problems.append("Fully Funded Balance is missing for " + ", ".join(str(y) for y in missing))
     if not b.start_year - MAX_BASE_YEAR_AGE <= b.expense_base_year <= b.end_year:
         problems.append(
