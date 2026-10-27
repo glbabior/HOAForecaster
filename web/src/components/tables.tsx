@@ -1,4 +1,4 @@
-import { useState, type ClipboardEvent, type ReactNode } from "react";
+import { useState, type ClipboardEvent } from "react";
 
 import { parsePasted } from "../csv";
 import { parseDecimal } from "../decimal";
@@ -12,9 +12,8 @@ export const FREQUENCIES: { value: Frequency; label: string }[] = [
   { value: "once", label: "Once" },
 ];
 
-/** The first `<prefix>-N` identifier not yet taken – baseline lines are `line-N` and a
- * scenario's own lines `own-N`, the forms the server gives them, so one never takes the
- * other's id. */
+/** The first `<prefix>-N` identifier not yet taken – `line-N`, the form the server gives
+ * new lines too. */
 export function newLineId(taken: Iterable<string>, prefix = "line"): string {
   const used = new Set(taken);
   let n = 1;
@@ -54,7 +53,7 @@ const newId = (): string => `row-${(counter += 1)}`;
 
 /** Stable keys for the rows of an editable list, so removing or sorting rows never moves
  * half-typed text or focus onto a different row. Kept in step with the list's length; a
- * list replaced from outside (a restored draft) gets fresh keys. */
+ * list replaced from outside gets fresh keys. */
 export function useRowIds(length: number) {
   const [ids, setIds] = useState<string[]>(() => Array.from({ length }, newId));
   if (ids.length !== length) setIds(Array.from({ length }, newId));
@@ -103,13 +102,17 @@ export function ExpenseTable({
   lines,
   onChange,
   defaultYear,
-  reserved = [],
+  onCopy,
+  taken = [],
 }: {
   lines: ExpenseLine[];
   onChange: (lines: ExpenseLine[]) => void;
   defaultYear: number;
-  /** ids scenarios use for lines of their own or for lines since deleted – never reused */
-  reserved?: string[];
+  /** offer each line for copying into other scenarios */
+  onCopy?: (line: ExpenseLine) => void;
+  /** ids other scenarios use – a new line never takes one, so copying it never replaces a
+   * different line there */
+  taken?: string[];
 }) {
   const [notice, setNotice] = useState("");
   const rows = useRowIds(lines.length);
@@ -122,10 +125,7 @@ export function ExpenseTable({
     const text = e.clipboardData.getData("text/plain");
     if (!text.includes("\t")) return; // a single value – let the cell take it
     e.preventDefault();
-    const { lines: pasted, skipped } = linesFromPaste(text, [
-      ...reserved,
-      ...lines.map((l) => l.id),
-    ]);
+    const { lines: pasted, skipped } = linesFromPaste(text, [...taken, ...lines.map((l) => l.id)]);
     rows.added(pasted.length);
     onChange([...lines, ...pasted]);
     setNotice(
@@ -187,6 +187,7 @@ export function ExpenseTable({
                   rows.removed(i);
                   onChange(lines.filter((_, j) => j !== i));
                 }}
+                onCopy={onCopy && (() => onCopy(line))}
               />
             ))}
           </tbody>
@@ -199,7 +200,7 @@ export function ExpenseTable({
             rows.added();
             onChange([
               ...lines,
-              blankLine(newLineId([...reserved, ...lines.map((l) => l.id)]), defaultYear),
+              blankLine(newLineId([...taken, ...lines.map((l) => l.id)]), defaultYear),
             ]);
           }}
         >
@@ -214,33 +215,29 @@ export function ExpenseTable({
   );
 }
 
-/** One expense's inputs – only the ones its frequency uses are shown. `actions` replaces the
- * Remove button (a scenario's own lines offer others); `marker` says whose line it is. */
-export function ExpenseRow({
+/** One expense's inputs – only the ones its frequency uses are shown. */
+function ExpenseRow({
   line,
   index,
   defaultYear,
   onChange,
   onUpdate,
   onRemove,
-  actions,
-  marker,
+  onCopy,
 }: {
   line: ExpenseLine;
   index: number;
   defaultYear: number;
   onChange: (line: ExpenseLine) => void;
   onUpdate: (change: Partial<ExpenseLine>) => void;
-  onRemove?: () => void;
-  actions?: ReactNode;
-  marker?: ReactNode;
+  onRemove: () => void;
+  onCopy?: () => void;
 }) {
   const n = index + 1;
   const what = line.description ? `expense ${n} (${line.description})` : `expense ${n}`;
   const operating = isOperating(line.frequency);
   return (
     <tr>
-      {marker !== undefined && <td>{marker}</td>}
       <td>
         <select
           aria-label={`How often expense ${n} falls`}
@@ -338,17 +335,25 @@ export function ExpenseRow({
           onChange={(e) => onUpdate({ source: e.target.value })}
         />
       </td>
-      <td>
-        {actions ?? (
+      <td className="row-buttons">
+        {onCopy && (
           <button
             type="button"
             className="small"
-            aria-label={`Remove expense ${n}`}
-            onClick={onRemove}
+            aria-label={`Copy expense ${n} to other scenarios`}
+            onClick={onCopy}
           >
-            Remove
+            Copy to…
           </button>
         )}
+        <button
+          type="button"
+          className="small"
+          aria-label={`Remove expense ${n}`}
+          onClick={onRemove}
+        >
+          Remove
+        </button>
       </td>
     </tr>
   );

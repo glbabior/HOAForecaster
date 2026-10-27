@@ -1,71 +1,15 @@
-// Shapes for new and reshaped scenarios. New projects come from the server, which holds
-// the spec's defaults (src/hoa_app/template.py).
+// Shapes for new, copied and reshaped scenarios. Blank scenarios come from the server, which
+// holds the spec's defaults (src/hoa_app/template.py).
 
-import type { Baseline, Changes, ExpenseLine, Scenario } from "./types";
+import type { ExpenseLine, Facts, Scenario } from "./types";
 
-export const noChanges = (): Changes => ({ values: {}, sources: {}, expense_lines: {}, ffb: {} });
-
-export function blankScenario(name: string, baseline: Baseline): Scenario {
-  return {
-    name,
-    description: "",
-    dues: {
-      mode: "rate",
-      first_value: baseline.current_dues,
-      annual_increase: "0.03",
-      overrides: {},
-    },
-    assessments: [],
-    rounding: "dollar",
-    changes: noChanges(),
-  };
-}
-
-/** A new scenario started from a saved one (spec 7.2) – its dues, assessments, rounding,
- * description and changes to the baseline, but not its adoption: it runs on today's baseline,
- * with typed dues stretched to cover the years it now runs over. */
-export function startFrom(source: Scenario, name: string, baseline: Baseline): Scenario {
-  const seeded: Scenario = {
-    name,
-    description: source.description,
-    dues: structuredClone(source.dues),
-    assessments: structuredClone(source.assessments),
-    rounding: source.rounding,
-    changes: structuredClone(source.changes),
-    adoption: null,
-  };
-  const { start_year: start, end_year: end } = applyChanges(baseline, seeded.changes);
-  return plausibleHorizon(start, end) ? reshapeScenario(seeded, start, end) : seeded;
-}
-
-/** The baseline as a scenario sees it (spec 5.1) – for showing it; the server works out the
- * figures. Mirrors `apply_changes` in src/hoa_engine/model.py. */
-export function applyChanges(baseline: Baseline, changes: Changes): Baseline {
-  const known = new Set(baseline.expense_lines.map((l) => l.id));
-  const own = (id: string): ExpenseLine | null => {
-    const line = changes.expense_lines[id];
-    return line ? { id, ...line } : null;
-  };
-  const lines = baseline.expense_lines.flatMap((l) =>
-    l.id in changes.expense_lines ? (own(l.id) ?? []) : [l],
-  );
-  for (const id of Object.keys(changes.expense_lines)) {
-    const line = own(id);
-    if (!known.has(id) && line) lines.push(line);
-  }
-  return {
-    ...baseline,
-    ...(changes.values as Partial<Baseline>),
-    expense_lines: lines,
-    ffb: { ...baseline.ffb, ...changes.ffb },
-    sources: { ...baseline.sources, ...changes.sources },
-  };
-}
-
-/** Every input a scenario runs on – an adopted plan's frozen baseline, never today's. Mirrors
- * `baseline_for` in src/hoa_engine/model.py. */
-export const baselineFor = (baseline: Baseline, scenario: Scenario): Baseline =>
-  applyChanges(scenario.adoption?.baseline ?? baseline, scenario.changes);
+/** A new scenario started from another (spec 7.2) – a copy of all its inputs, but not its
+ * name, its adoption or its timestamps. */
+export const startFrom = (source: Scenario, name: string): Scenario => ({
+  ...structuredClone(source),
+  name,
+  adoption: null,
+});
 
 /** The current adopted plan – the one adopted most recently (spec 5.2). */
 export function currentAdoption(scenarios: Scenario[]): Scenario | undefined {
@@ -74,10 +18,10 @@ export function currentAdoption(scenarios: Scenario[]): Scenario | undefined {
     .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0))[0];
 }
 
-/** The years a scenario runs over – its own horizon, or the baseline's; none while it is not a
- * usable horizon (a year half typed). */
-export function horizonOf(baseline: Baseline, scenario: Scenario): number[] {
-  const { start_year: start, end_year: end } = baselineFor(baseline, scenario);
+/** The years a scenario runs over – none while it is not a usable horizon (a year half
+ * typed). */
+export function horizonOf(scenario: Scenario): number[] {
+  const { start_year: start, end_year: end } = scenario.facts;
   if (!plausibleHorizon(start, end)) return [];
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }
@@ -87,18 +31,17 @@ export function horizonOf(baseline: Baseline, scenario: Scenario): number[] {
 export const plausibleHorizon = (start: number, end: number): boolean =>
   start >= 1900 && end - start + 1 >= 5 && end - start + 1 <= 30;
 
-/** The horizon changed – every Fully Funded Balance already entered is kept (shortening
- * must never discard data), and new years get zero. */
-export function reshapeHorizon(baseline: Baseline, start: number, end: number): Baseline {
-  const ffb: Record<string, string> = { ...baseline.ffb };
+/** The scenario over a new horizon – every Fully Funded Balance and typed dues figure already
+ * entered is kept (shortening must never discard data); new years get a zero Fully Funded
+ * Balance, and typed dues the nearest earlier figure (or the first one, before the old
+ * start). A horizon still being typed only changes the years. */
+export function withHorizon(scenario: Scenario, start: number, end: number): Scenario {
+  const facts = { ...scenario.facts, start_year: start, end_year: end };
+  if (!plausibleHorizon(start, end)) return { ...scenario, facts };
+  const ffb: Record<string, string> = { ...facts.ffb };
   for (let y = start; y <= end + 1; y += 1) ffb[String(y)] ??= "0";
-  return { ...baseline, start_year: start, end_year: end, ffb };
-}
-
-/** Typed dues keep every year they had; new years take the nearest earlier figure (or the
- * first one, before the old start). Grown dues need nothing. */
-export function reshapeScenario(scenario: Scenario, start: number, end: number): Scenario {
-  if (scenario.dues.mode !== "explicit") return scenario;
+  const reshaped = { ...scenario, facts: { ...facts, ffb } };
+  if (scenario.dues.mode !== "explicit") return reshaped;
   const explicit: Record<string, string> = { ...scenario.dues.explicit };
   const known = Object.keys(explicit)
     .map(Number)
@@ -108,5 +51,52 @@ export function reshapeScenario(scenario: Scenario, start: number, end: number):
     const earlier = known.filter((k) => k < y).at(-1) ?? known[0];
     explicit[String(y)] = earlier === undefined ? "0" : (explicit[String(earlier)] ?? "0");
   }
-  return { ...scenario, dues: { mode: "explicit", explicit } };
+  return { ...reshaped, dues: { mode: "explicit", explicit } };
+}
+
+// ---------------------------------------------------------------- copying into other scenarios
+
+/** Source notes with one note set – or removed, when the copied figure has none. */
+function withNote(sources: Record<string, string>, key: string, note: string | undefined) {
+  const rest = Object.fromEntries(Object.entries(sources).filter(([k]) => k !== key));
+  return note ? { ...rest, [key]: note } : rest;
+}
+
+/** A scalar fact or assumption, as a key of Facts. */
+export type FactKey = Exclude<keyof Facts, "expense_lines" | "ffb" | "sources">;
+
+/** The target with this scenario's figure and source note for one fact – the horizon
+ * reshaping the target's tables as typing it there would. */
+export function copyFact(target: Scenario, from: Facts, key: FactKey): Scenario {
+  const sources = withNote(target.facts.sources, key, from.sources[key]);
+  const next = { ...target, facts: { ...target.facts, [key]: from[key], sources } };
+  if (key === "start_year" || key === "end_year")
+    return withHorizon(next, next.facts.start_year, next.facts.end_year);
+  return next;
+}
+
+/** The target with this expense line – replacing its line of the same id, or added last. */
+export function copyLine(target: Scenario, line: ExpenseLine): Scenario {
+  const lines = target.facts.expense_lines;
+  const copy = structuredClone(line);
+  const expense_lines = lines.some((l) => l.id === line.id)
+    ? lines.map((l) => (l.id === line.id ? copy : l))
+    : [...lines, copy];
+  return { ...target, facts: { ...target.facts, expense_lines } };
+}
+
+/** The target with this Fully Funded Balance – every year this scenario has replaces the
+ * target's, years only the target has are kept – and its source note. */
+export function copyFfb(target: Scenario, from: Facts): Scenario {
+  const sources = withNote(target.facts.sources, "ffb", from.sources.ffb);
+  return {
+    ...target,
+    facts: { ...target.facts, ffb: { ...target.facts.ffb, ...from.ffb }, sources },
+  };
+}
+
+export function uniqueName(base: string, taken: string[]): string {
+  let name = base;
+  for (let n = 2; taken.includes(name); n += 1) name = `${base} (${n})`;
+  return name;
 }

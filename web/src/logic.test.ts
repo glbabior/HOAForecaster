@@ -7,16 +7,15 @@ import { fromPercent, grouped, num, parseDecimal, roundCents, shift, toPercent }
 import { dues, money, percent, span } from "./format";
 import { sharedDomain, sharedGrid } from "./scale";
 import {
-  applyChanges,
-  blankScenario,
+  copyFact,
+  copyFfb,
+  copyLine,
   horizonOf,
-  noChanges,
   plausibleHorizon,
-  reshapeHorizon,
-  reshapeScenario,
   startFrom,
+  withHorizon,
 } from "./template";
-import type { Baseline, Scenario } from "./types";
+import type { ExpenseLine, Facts, Scenario } from "./types";
 
 describe("exact decimals", () => {
   it.each([
@@ -192,125 +191,121 @@ describe("shared chart scale", () => {
   });
 });
 
-describe("a scenario's changes to the baseline", () => {
-  const line = (id: string, year: number) => ({
-    id,
-    frequency: "once" as const,
-    year,
-    amount: "1",
-    description: id,
-    source: "",
-    nominal: false,
-  });
-  const baseline = {
-    start_year: 2027,
-    end_year: 2031,
-    interest_rate: "0.02",
-    expense_lines: [line("roof", 2028), line("gate", 2029), line("paint", 2030)],
-    ffb: { "2027": "1" },
-    sources: { interest_rate: "Bank" },
-  } as unknown as Baseline;
+const line = (id: string, year: number, amount = "1"): ExpenseLine => ({
+  id,
+  frequency: "once",
+  year,
+  amount,
+  description: id,
+  source: "",
+  nominal: false,
+});
 
-  it("changes, leaves out and adds lines where the server does", () => {
-    const strip = (l: ReturnType<typeof line>) =>
-      Object.fromEntries(Object.entries(l).filter(([k]) => k !== "id")) as Omit<typeof l, "id">;
-    const [later, pool] = [strip(line("roof", 2031)), strip(line("pool", 2030))];
-    const own = applyChanges(baseline, {
-      values: { interest_rate: "0.05", end_year: 2033 },
-      sources: { interest_rate: "Board" },
-      expense_lines: { roof: later, gate: null, pool, gone: null },
-      ffb: { "2032": "9" },
-    });
-    expect(own.expense_lines.map((l) => `${l.id} ${l.year}`)).toEqual([
-      "roof 2031",
-      "paint 2030",
-      "pool 2030",
-    ]);
-    expect([own.interest_rate, own.end_year, own.sources.interest_rate]).toEqual([
-      "0.05",
-      2033,
-      "Board",
-    ]);
-    expect(own.ffb).toEqual({ "2027": "1", "2032": "9" });
-  });
+const facts = (change: Partial<Facts> = {}): Facts => ({
+  start_year: 2027,
+  end_year: 2031,
+  starting_balance: "100000",
+  expense_lines: [line("roof", 2028), line("gate", 2029)],
+  expense_inflation: "0.03",
+  expense_base_year: 2026,
+  ffb: { "2027": "1", "2028": "2", "2029": "3", "2030": "4", "2031": "5", "2032": "6" },
+  operating_inflation: "0.03",
+  interest_rate: "0.02",
+  units: 10,
+  current_dues: "500",
+  cushion: "0",
+  target: "0.7",
+  max_dues_increase: "0.2",
+  max_assessment_share: "0.05",
+  sources: { interest_rate: "Bank" },
+  ...change,
+});
 
-  it("runs over its own horizon, or none while that is not a usable one", () => {
-    const s = blankScenario("S", baseline);
-    expect(horizonOf(baseline, s)).toEqual([2027, 2028, 2029, 2030, 2031]);
-    const typing = { ...s, changes: { ...noChanges(), values: { end_year: 2 } } };
-    expect(horizonOf(baseline, typing)).toEqual([]);
-  });
+const scenario = (name: string, change: Partial<Scenario> = {}): Scenario => ({
+  name,
+  description: "",
+  facts: facts(),
+  dues: { mode: "rate", first_value: "500", annual_increase: "0.03", overrides: {} },
+  assessments: [],
+  rounding: "dollar",
+  ...change,
 });
 
 describe("starting a scenario from another", () => {
-  const baseline = {
-    start_year: 2028,
-    end_year: 2032,
-    ffb: {},
-    expense_lines: [],
-  } as unknown as Baseline;
-  const typed: Scenario = {
-    name: "Adopted",
+  const adopted = scenario("Adopted", {
     description: "As voted",
     dues: { mode: "explicit", explicit: { "2027": "500", "2028": "510" } },
     assessments: [{ year: 2029, amount: "100", note: "" }],
     rounding: "none",
-    changes: { values: { interest_rate: "0.04" }, sources: {}, expense_lines: {}, ffb: {} },
-    adoption: { date: "2026-11-03", note: "", sequence: 1, baseline },
-  };
+    adoption: { date: "2026-11-03", note: "", sequence: 1 },
+  });
 
-  it("copies its inputs and changes but not its adoption, on today's years", () => {
-    const seeded = startFrom(typed, "New scenario", baseline);
+  it("copies every input but not its name or adoption", () => {
+    const seeded = startFrom(adopted, "New scenario");
     expect(seeded.adoption).toBeNull();
     expect([seeded.name, seeded.description, seeded.rounding]).toEqual([
       "New scenario",
       "As voted",
       "none",
     ]);
-    expect(seeded.changes.values).toEqual({ interest_rate: "0.04" });
-    expect(seeded.dues).toEqual({
-      mode: "explicit",
-      explicit: {
-        "2027": "500",
-        "2028": "510",
-        "2029": "510",
-        "2030": "510",
-        "2031": "510",
-        "2032": "510",
-      },
-    });
+    expect(seeded.facts).toEqual(adopted.facts);
+    expect(seeded.dues).toEqual(adopted.dues);
     seeded.assessments.push({ year: 2030, amount: "1", note: "" });
-    expect(typed.assessments).toHaveLength(1); // a copy, not the source's own lists
+    seeded.facts.expense_lines.push(line("pool", 2030));
+    // a copy, not the source's own lists
+    expect(adopted.assessments).toHaveLength(1);
+    expect(adopted.facts.expense_lines).toHaveLength(2);
+  });
+});
+
+describe("copying into other scenarios", () => {
+  it("copies a figure with its source note, or clears the target's note", () => {
+    const from = facts({ interest_rate: "0.05", sources: { interest_rate: "New bank" } });
+    const target = scenario("T", {
+      facts: facts({ sources: { interest_rate: "Old", units: "Deed" } }),
+    });
+    const copied = copyFact(target, from, "interest_rate");
+    expect(copied.facts.interest_rate).toBe("0.05");
+    expect(copied.facts.sources).toEqual({ interest_rate: "New bank", units: "Deed" });
+    const noNote = copyFact(target, facts({ interest_rate: "0.01", sources: {} }), "interest_rate");
+    expect(noNote.facts.sources).toEqual({ units: "Deed" });
+    expect(target.facts.interest_rate).toBe("0.02"); // the target itself is left alone
   });
 
-  it("keeps assessments and pinned years outside today's years, for the editor to list", () => {
-    const early = {
-      ...typed,
-      dues: {
-        mode: "rate" as const,
-        first_value: "500",
-        annual_increase: "0.03",
-        overrides: { "2027": "480" },
-      },
-      assessments: [{ year: 2027, amount: "100", note: "" }],
-    };
-    const seeded = startFrom(early, "New scenario", baseline);
-    // nothing is dropped silently – the server names each one as a problem to fix
-    expect(seeded.assessments.map((a) => a.year)).toEqual([2027]);
-    expect(seeded.dues).toMatchObject({ overrides: { "2027": "480" } });
+  it("reshapes the target's tables when a horizon year is copied", () => {
+    const typed = scenario("T", { dues: { mode: "explicit", explicit: { "2027": "500" } } });
+    const longer = copyFact(typed, facts({ end_year: 2033 }), "end_year");
+    expect(longer.facts.end_year).toBe(2033);
+    expect(longer.facts.ffb["2034"]).toBe("0");
+    expect(longer.dues).toMatchObject({ explicit: { "2033": "500" } });
+  });
+
+  it("replaces the line with the same id, or adds it last", () => {
+    const target = scenario("T");
+    const changed = copyLine(target, line("gate", 2035, "9000"));
+    expect(changed.facts.expense_lines.map((l) => `${l.id} ${l.year} ${l.amount}`)).toEqual([
+      "roof 2028 1",
+      "gate 2035 9000",
+    ]);
+    const added = copyLine(target, line("pool", 2030));
+    expect(added.facts.expense_lines.map((l) => l.id)).toEqual(["roof", "gate", "pool"]);
+  });
+
+  it("copies the Fully Funded Balance over the target's years, keeping years only it has", () => {
+    const target = scenario("T", {
+      facts: facts({ ffb: { "2027": "1", "2040": "40" }, sources: { ffb: "Old study" } }),
+    });
+    const copied = copyFfb(target, facts({ ffb: { "2027": "7", "2028": "8" }, sources: {} }));
+    expect(copied.facts.ffb).toEqual({ "2027": "7", "2028": "8", "2040": "40" });
+    expect(copied.facts.sources.ffb).toBeUndefined();
   });
 });
 
 describe("horizon changes", () => {
-  const baseline = {
-    start_year: 2027,
-    end_year: 2031,
-    ffb: { "2027": "1", "2032": "6" },
-  } as unknown as Baseline;
-
-  it("keeps every Fully Funded Balance it had and adds zeros for new years", () => {
-    const longer = reshapeHorizon(baseline, 2027, 2033);
-    expect(longer.ffb).toEqual({
+  it("keep every Fully Funded Balance and add zeros for new years", () => {
+    const s = scenario("S", { facts: facts({ ffb: { "2027": "1", "2032": "6" } }) });
+    const longer = withHorizon(s, 2027, 2033);
+    expect(longer.facts.ffb).toEqual({
       "2027": "1",
       "2028": "0",
       "2029": "0",
@@ -320,41 +315,35 @@ describe("horizon changes", () => {
       "2033": "0",
       "2034": "0",
     });
-    const shorter = reshapeHorizon(longer, 2029, 2033);
-    expect(shorter.ffb["2027"]).toBe("1"); // shortening never discards an entry
+    const shorter = withHorizon(longer, 2029, 2033);
+    expect(shorter.facts.ffb["2027"]).toBe("1"); // shortening never discards an entry
   });
 
-  it("acts only on a horizon that makes sense", () => {
+  it("act only on a horizon that makes sense", () => {
     expect(plausibleHorizon(2027, 2031)).toBe(true);
     expect(plausibleHorizon(2027, 2030)).toBe(false); // four years
     expect(plausibleHorizon(2027, 2057)).toBe(false); // thirty-one
     expect(plausibleHorizon(2027, 2)).toBe(false); // an end year half typed
+    const typing = withHorizon(scenario("S"), 2027, 2);
+    expect(typing.facts.end_year).toBe(2);
+    expect(typing.facts.ffb).toEqual(scenario("S").facts.ffb);
+    expect(horizonOf(typing)).toEqual([]);
+    expect(horizonOf(scenario("S"))).toEqual([2027, 2028, 2029, 2030, 2031]);
   });
 
-  it("carries typed dues into new years and leaves grown dues alone", () => {
-    const typed: Scenario = {
-      ...blankScenario("T", { current_dues: "500" } as Baseline),
+  it("carry typed dues into new years and leave grown dues alone", () => {
+    const typed = scenario("T", {
       dues: { mode: "explicit", explicit: { "2027": "500", "2028": "520" } },
-    };
-    const reshaped = reshapeScenario(typed, 2027, 2030);
+    });
+    const reshaped = withHorizon(typed, 2027, 2031);
     expect(reshaped.dues).toEqual({
       mode: "explicit",
-      explicit: { "2027": "500", "2028": "520", "2029": "520", "2030": "520" },
+      explicit: { "2027": "500", "2028": "520", "2029": "520", "2030": "520", "2031": "520" },
     });
-    const earlier = reshapeScenario(reshaped, 2025, 2028);
-    expect(earlier.dues).toEqual({
-      mode: "explicit",
-      explicit: {
-        "2025": "500",
-        "2026": "500",
-        "2027": "500",
-        "2028": "520",
-        "2029": "520",
-        "2030": "520",
-      },
-    });
-    const grown = blankScenario("G", { current_dues: "500" } as Baseline);
-    expect(reshapeScenario(grown, 2027, 2030)).toBe(grown);
+    const earlier = withHorizon(reshaped, 2025, 2029);
+    expect(earlier.dues).toMatchObject({ explicit: { "2025": "500", "2026": "500" } });
+    const grown = scenario("G");
+    expect(withHorizon(grown, 2027, 2033).dues).toBe(grown.dues);
   });
 });
 

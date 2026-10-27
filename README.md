@@ -1,6 +1,6 @@
 # HOAForecaster
 
-A local app for homeowners association boards. Enter a building's reserve facts once, then build and compare funding plans – dues paths, special assessments and any assumption changed for one plan – and see each plan's year-by-year reserve balance, percent funded and cost per owner. When the board decides, adopt a plan and keep it as a frozen record, and export the same Excel workbook a board already knows, with live formulas.
+A local app for homeowners association boards. Enter a building's reserve facts – balance, expenses, the reserve study's Fully Funded Balance – into a funding plan with its dues and special assessments, copy it into other plans that differ in any input, and see each plan's year-by-year reserve balance, percent funded and cost per owner. Every edit saves itself. When the board decides, adopt a plan – it becomes read-only – and export the same Excel workbook a board already knows, with live formulas.
 
 It runs on your own computer only – nothing is sent anywhere. See [the user guide](docs/user-guide.md), [the requirements](HOAForecaster_REQUIREMENTS.md), [how the figures are worked out](docs/engine.md) and [the exported workbook](docs/workbook.md).
 
@@ -28,7 +28,7 @@ On Windows you can double-click **`HOAForecaster.bat`** in the project folder in
 
 Starting the app while it is already running – double-clicking `HOAForecaster.bat` again, say – first stops the running copy cleanly (its window closes by itself), waits until it has ended, and then starts as usual. A copy started before this version cannot be stopped this way; close its window first.
 
-The **Restart** button at the top right of every screen stops the server and starts a fresh one, rebuilding the screens first if they changed, then reloads the page – use it after updating the code. It appears only when the app was started this way, through `uv run hoaforecaster` or `HOAForecaster.bat`. Save your edits first; unsaved ones are kept only as a draft.
+The **Restart** button at the top right of every screen stops the server and starts a fresh one, rebuilding the screens first if they changed, then reloads the page – use it after updating the code. It appears only when the app was started this way, through `uv run hoaforecaster` or `HOAForecaster.bat`. Every edit is already saved, apart from an entry that is not yet a usable number.
 
 ### Where projects are kept
 

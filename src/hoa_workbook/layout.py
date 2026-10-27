@@ -1,8 +1,10 @@
 """Where everything sits in an exported workbook – shared by the writer and the reader.
 
-The layout follows the reference workbook (Method, Inputs, Compare, Charts,
-Expenses, one Plan sheet per scenario), generalised to any horizon, the three
-dues modes and any number of special assessments.
+The layout follows the reference workbook (Method, Compare, Charts, one Plan
+sheet per scenario), generalised to any horizon, the three dues modes and any
+number of special assessments. The reference workbook's Inputs and Expenses
+sheets are part of every Plan sheet, since each scenario holds all of its own
+inputs (spec 7.6); a Project sheet holds the association's name and notes.
 """
 
 from __future__ import annotations
@@ -10,54 +12,51 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from hoa_engine.model import CHANGEABLE
-
-METHOD, COMPARE, INPUTS, CHARTS, EXPENSES = "Method", "Compare", "Inputs", "Charts", "Expenses"
-SHEET_ORDER = (METHOD, INPUTS, COMPARE, CHARTS, EXPENSES)
+METHOD, PROJECT, COMPARE, CHARTS = "Method", "Project", "Compare", "Charts"
+SHEET_ORDER = (METHOD, PROJECT, COMPARE, CHARTS)
 RESERVED = {*SHEET_ORDER, "History"}  # Excel reserves "History"
+# the shared sheets of a workbook exported before each scenario held its own inputs
+OLD_SHEETS = ("Inputs", "Expenses")
 
-HEADER_ROW = 4  # years run across this row on Expenses and Plan sheets
-FIRST_INPUT_ROW = 5  # Inputs – first row of values (row 4 is the column header)
+HEADER_ROW = 4  # years run across this row on Plan sheets
 
-# ---------------------------------------------------------------- Inputs sheet
+# ---------------------------------------------------------------- Project sheet
+
+FIRST_PROJECT_ROW = 5  # the first row of values (row 4 is the column header)
+NAME_LABEL, NOTES_LABEL = "Association", "Project notes"
+PROJECT_ROW = {"name": FIRST_PROJECT_ROW, "notes": FIRST_PROJECT_ROW + 1}
+
+# ---------------------------------------------------------------- a scenario's facts
 
 
 @dataclass(frozen=True)
-class InputRow:
-    key: str  # Baseline field, or "name" for the project name
+class FactRow:
+    key: str  # Facts field
     label: str
-    kind: str  # "text", "money", "rate", "year", "count"
+    kind: str  # "money", "rate", "year", "count"
 
 
-INPUT_ROWS = (
-    InputRow("name", "Association", "text"),
-    InputRow("starting_balance", "Starting reserve balance (January 1 of the start year)", "money"),
-    InputRow("start_year", "Start year", "year"),
-    InputRow("end_year", "End year", "year"),
-    InputRow("units", "Number of units", "count"),
-    InputRow("current_dues", "Current dues per unit per month", "money"),
-    InputRow(
+FACT_ROWS = (
+    FactRow("starting_balance", "Starting reserve balance (January 1 of the start year)", "money"),
+    FactRow("start_year", "Start year", "year"),
+    FactRow("end_year", "End year", "year"),
+    FactRow("units", "Number of units", "count"),
+    FactRow("current_dues", "Current dues per unit per month", "money"),
+    FactRow(
         "operating_inflation",
         "Operating cost inflation per year (monthly and yearly lines without their own)",
         "rate",
     ),
-    InputRow("expense_inflation", "Reserve expense inflation per year", "rate"),
-    InputRow("expense_base_year", "Expense base year (dollars of the reserve study)", "year"),
-    InputRow("interest_rate", "Interest earned on reserves per year", "rate"),
-    InputRow("cushion", "Minimum working cushion", "money"),
-    InputRow("target", "Percent-funded target", "rate"),
-    InputRow("max_dues_increase", "Largest dues increase without an owner vote", "rate"),
-    InputRow("max_assessment_share", "Largest assessment without a vote, share of budget", "rate"),
-    InputRow("notes", "Project notes", "text"),
+    FactRow("expense_inflation", "Reserve expense inflation per year", "rate"),
+    FactRow("expense_base_year", "Expense base year (dollars of the reserve study)", "year"),
+    FactRow("interest_rate", "Interest earned on reserves per year", "rate"),
+    FactRow("cushion", "Minimum working cushion", "money"),
+    FactRow("target", "Percent-funded target", "rate"),
+    FactRow("max_dues_increase", "Largest dues increase without an owner vote", "rate"),
+    FactRow("max_assessment_share", "Largest assessment without a vote, share of budget", "rate"),
 )
-INPUT_ROW = {r.key: FIRST_INPUT_ROW + i for i, r in enumerate(INPUT_ROWS)}
 
-
-def input_ref(key: str) -> str:
-    return f"{INPUTS}!$B${INPUT_ROW[key]}"
-
-
-# ---------------------------------------------------------------- Expenses sheet
+# ---------------------------------------------------------------- a scenario's expenses
 
 
 @dataclass(frozen=True)
@@ -74,15 +73,12 @@ EXPENSE_COLUMNS = (
     ExpenseColumn("year", "Year, or first year"),
     ExpenseColumn("end_year", "Last year (blank – to the end)"),
     ExpenseColumn("interval", "Every … years"),
-    ExpenseColumn("inflation", "Own inflation (blank – Inputs)"),
+    ExpenseColumn("inflation", "Own inflation (blank – the operating rate)"),
     ExpenseColumn("nominal", "Already in that year's dollars?"),
     ExpenseColumn("id", "Line id"),
 )
 EXPENSE_COL = {c.key: i for i, c in enumerate(EXPENSE_COLUMNS, start=1)}
-FIRST_EXPENSE_ROW = 5
 EXPENSE_YEAR_COL = len(EXPENSE_COLUMNS) + 1  # the start year
-OPERATING_TOTAL_LABEL = "TOTAL operating expenses (monthly and yearly lines)"
-EXPENSE_TOTAL_LABEL = "TOTAL projected reserve expenses (once and every few years)"
 # how each frequency is written in the How often column
 FREQUENCY_TEXT = {
     "monthly": "monthly",
@@ -90,7 +86,6 @@ FREQUENCY_TEXT = {
     "every": "every few years",
     "once": "once",
 }
-FFB_HEADER_LABEL = "Year"
 FFB_LABEL = "Fully Funded Balance at start of year"
 
 # ---------------------------------------------------------------- Plan sheets
@@ -147,43 +142,27 @@ def plan_chart_row(n_assessments: int) -> int:
     return assess_last_row(n_assessments) + 3
 
 
-# Below the charts, the scenario's own inputs (spec 5.1) – each found by its label on import.
-ASSUMPTIONS_HEADING = (
-    "This scenario's assumptions – green follows Inputs, blue on yellow is this scenario's own"
-)
-ASSUMPTION_ROWS = tuple(r for r in INPUT_ROWS if r.key in CHANGEABLE)  # labels as on Inputs
+# Below the charts, the scenario's own inputs – each block found by its heading on import.
+FACTS_HEADING = "This scenario's facts and assumptions"
 VALUE_COL, SOURCE_COL = PLAN_FIRST_COL, PLAN_FIRST_COL + 1
-PLAN_FFB_HEADING = "This scenario's Fully Funded Balance – green follows Expenses"
+PLAN_FFB_HEADING = "This scenario's Fully Funded Balance (from the reserve study)"
 PLAN_FFB_YEARS_LABEL = "Start of year"  # the year row above FFB_LABEL; years from VALUE_COL
-CHANGES_HEADING = (
-    "This scenario's expense changes – a row per line it changes, leaves out or adds, with the "
-    "same id as the line on Expenses (blank rows are spare)"
+EXPENSES_HEADING = (
+    "This scenario's expenses – one row each (blank rows are spare). To add more, insert rows "
+    "inside the list and copy a whole row into them, so its year formulas come with it"
 )
-LEAVE_OUT_COL = len(EXPENSE_COLUMNS) + 1
-LEAVE_OUT_HEADING = "Leave out?"
-# An adopted plan's sheet holds its frozen baseline in full, so it marks which values, notes,
-# lines and years are the plan's own changes – the rest is the baseline as it was adopted.
-OWN_COL = LEAVE_OUT_COL + 1
-OWN_HEADING = "This plan's own?"
-MARK_COL = SOURCE_COL + 1  # the assumptions' mark – one of ASSUMPTION_MARKS
-ASSUMPTION_MARKS = ("", "value", "note", "value and note")
-FFB_NOTE_MARK_COL = 2  # on the Fully Funded Balance mark row – "note" when the note is its own
-PLAN_FFB_OWN_LABEL = "This plan's own Fully Funded Balance?"  # the row below FFB_LABEL
-# the start year, in the changes table – after the mark column on every Plan sheet (blank on an
-# ordinary scenario's), so all Plan sheets share one layout
-CHANGE_YEAR_COL = OWN_COL + 1
+EXPENSE_SPARE_ROWS = 3
+PLAN_OPERATING_LABEL = "TOTAL operating expenses (monthly and yearly lines)"
+PLAN_RESERVE_LABEL = "TOTAL reserve expenses (once and every few years)"
 ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL = (
     "Adopted on",
     "Adoption note",
     "Adoption order (the highest is the current plan)",
 )  # below the reserve total, on an adopted plan's sheet only
-CHANGE_SPARE_ROWS = 3
-PLAN_OPERATING_LABEL = "TOTAL operating expenses – this scenario"
-PLAN_RESERVE_LABEL = "TOTAL reserve expenses – this scenario"
 
 
 def plan_inputs_row(n_assessments: int) -> int:
-    """The row of the assumptions heading, below the two charts."""
+    """The row of the facts heading, below the two charts."""
     return plan_chart_row(n_assessments) + 2 * CHART_HEIGHT_ROWS + 1
 
 

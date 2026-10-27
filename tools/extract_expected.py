@@ -158,6 +158,17 @@ def _plan_sheet(wb: Any, name: str) -> Any:
     raise ValueError(f"no sheet for scenario {name!r}")
 
 
+def _horizon(project: dict[str, Any], s: dict[str, Any]) -> tuple[int, int]:
+    """A scenario's start and end year – its own facts (schema 3), or in an older project file
+    the baseline as the scenario saw it (an adopted plan's frozen copy, its own values)."""
+    if "facts" in s:
+        own = s["facts"]
+    else:
+        frozen = (s.get("adoption") or {}).get("baseline")
+        own = {**(frozen or project["baseline"]), **s.get("changes", {}).get("values", {})}
+    return own["start_year"], own["end_year"]
+
+
 def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
     wb = openpyxl.load_workbook(workbook, data_only=True)
     compare = wb["Compare"]
@@ -165,10 +176,7 @@ def extract(workbook: Path, project: dict[str, Any]) -> dict[str, Any]:
     scenarios = {}
     for s in project["scenarios"]:
         name = s["name"]
-        # a scenario may have a horizon of its own (spec 5.1)
-        frozen = (s.get("adoption") or {}).get("baseline")  # an adopted plan's own years
-        own = {**(frozen or project["baseline"]), **s.get("changes", {}).get("values", {})}
-        start, end = own["start_year"], own["end_year"]
+        start, end = _horizon(project, s)
         scenarios[name] = {
             "years": _plan(_plan_sheet(wb, name), range(start, end + 1)),
             "summary": _summary(compare, columns[name], start, end),

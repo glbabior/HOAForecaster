@@ -1,4 +1,4 @@
-"""Baseline and scenario inputs, and their JSON form.
+"""Scenario inputs, and their JSON form.
 
 Money and rates are `Decimal` in memory and decimal strings in JSON, never
 binary floats. Rates and percentages are fractions (0.03 means 3%).
@@ -10,7 +10,7 @@ import functools
 import re
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -57,12 +57,14 @@ class ExpenseLine:
     frequency: Frequency = Frequency.ONCE
     end_year: int | None = None
     interval: int | None = None  # every-few-years lines only
-    inflation: Decimal | None = None  # operating lines – their own rate; None follows the baseline
-    id: str = ""  # stable, so a scenario can change or leave out this line
+    inflation: Decimal | None = None  # operating lines – their own rate; None, the scenario's
+    id: str = ""  # stable, and kept when the scenario is copied
 
 
 @dataclass(frozen=True)
-class Baseline:
+class Facts:
+    """A scenario's facts and assumptions (spec section 4)."""
+
     start_year: int
     end_year: int
     starting_balance: Decimal
@@ -101,76 +103,27 @@ class DuesPath:
     overrides: dict[int, Decimal] = field(default_factory=dict)  # pinned years, RATE mode only
 
 
-# The baseline inputs a scenario can change (spec 5.1), with how each is written.
-YEAR_VALUES = ("start_year", "end_year", "expense_base_year", "units")
-LIMITS = ("max_dues_increase", "max_assessment_share")  # None is "no limit", a change of its own
-CHANGEABLE = (
-    "start_year",
-    "end_year",
-    "starting_balance",
-    "units",
-    "current_dues",
-    "operating_inflation",
-    "expense_inflation",
-    "expense_base_year",
-    "interest_rate",
-    "cushion",
-    "target",
-    *LIMITS,
-)
-
-
-@dataclass(frozen=True)
-class Changes:
-    """A scenario's own values for baseline inputs (spec 5.1) – only what it changes; the rest
-    follows the baseline."""
-
-    values: dict[str, Decimal | int | None] = field(default_factory=dict)  # CHANGEABLE keys
-    sources: dict[str, str] = field(default_factory=dict)
-    # by line id – the scenario's own full copy of a baseline line, a line of its own, or None
-    # to leave a baseline line out
-    expense_lines: dict[str, ExpenseLine | None] = field(default_factory=dict)
-    ffb: dict[int, Decimal] = field(default_factory=dict)
-
-    def __bool__(self) -> bool:
-        return bool(self.values or self.sources or self.expense_lines or self.ffb)
+LIMITS = ("max_dues_increase", "max_assessment_share")  # None is "no limit"
 
 
 @dataclass(frozen=True)
 class Adoption:
-    """The board's adoption of a scenario (spec 5.2). `baseline` is the frozen copy of the
-    baseline as the plan saw it when adopted – stored with the plan's changes already applied,
-    which applying them again leaves as it is – so the plan's figures never move."""
+    """The board's adoption of a scenario (spec 5.2) – the plan is read-only from then on."""
 
     adopted_on: date  # as entered – the board's date, not the order of adoption
     note: str
     sequence: int  # adoption order; the highest is the current adopted plan
-    baseline: Baseline
 
 
 @dataclass(frozen=True)
 class Scenario:
     name: str
+    facts: Facts
     dues: DuesPath
     assessments: tuple[Assessment, ...] = ()
     rounding: Rounding = Rounding.DOLLAR
     description: str = ""
-    changes: Changes = field(default_factory=Changes)
     adoption: Adoption | None = None
-
-
-def baseline_for(b: Baseline, s: Scenario) -> Baseline:
-    """Every input the scenario runs on (spec section 6) – for an adopted plan its frozen
-    baseline, never today's."""
-    return apply_changes(b if s.adoption is None else s.adoption.baseline, s.changes)
-
-
-def frozen_baseline(b: Baseline, s: Scenario) -> Baseline:
-    """The copy of the baseline a scenario keeps when it is adopted – as it sees it now, with
-    the Fully Funded Balance it uses (its years and one more)."""
-    own = apply_changes(b, s.changes)
-    years = range(own.start_year, own.end_year + 2)
-    return replace(own, ffb={y: v for y, v in own.ffb.items() if y in years})
 
 
 def current_adoption(scenarios: tuple[Scenario, ...]) -> Scenario | None:
@@ -179,33 +132,12 @@ def current_adoption(scenarios: tuple[Scenario, ...]) -> Scenario | None:
     return max(adopted, key=lambda s: s.adoption.sequence if s.adoption else 0, default=None)
 
 
-def apply_changes(b: Baseline, changes: Changes) -> Baseline:
-    """The baseline as one scenario sees it. Changed lines replace their baseline line where it
-    stands; the scenario's own lines follow the baseline's; a change for a line the baseline no
-    longer has stays as the scenario's own line, and leaving out such a line does nothing."""
-    if not changes:
-        return b
-    known = {line.id for line in b.expense_lines}
-    lines = [changes.expense_lines.get(line.id, line) for line in b.expense_lines]
-    lines += [
-        line for i, line in changes.expense_lines.items() if i not in known and line is not None
-    ]
-    return replace(
-        b,
-        **changes.values,  # type: ignore[arg-type]  # each key's type is checked as it is read
-        expense_lines=tuple(line for line in lines if line is not None),
-        ffb={**b.ffb, **changes.ffb},
-        sources={**b.sources, **changes.sources},
-    )
-
-
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
 class Project:
     name: str
-    baseline: Baseline
     scenarios: tuple[Scenario, ...]
     notes: str = ""
 
@@ -358,9 +290,9 @@ def _expense_lines(raw: Any) -> tuple[ExpenseLine, ...]:
     return lines
 
 
-@_reading("baseline")
-def baseline_from_dict(d: dict[str, Any]) -> Baseline:
-    return Baseline(
+@_reading("set of facts and assumptions")
+def facts_from_dict(d: dict[str, Any]) -> Facts:
+    return Facts(
         start_year=_int(d["start_year"]),
         end_year=_int(d["end_year"]),
         starting_balance=_dec(d["starting_balance"]),
@@ -380,7 +312,7 @@ def baseline_from_dict(d: dict[str, Any]) -> Baseline:
     )
 
 
-def baseline_to_dict(b: Baseline) -> dict[str, Any]:
+def facts_to_dict(b: Facts) -> dict[str, Any]:
     return {
         "start_year": b.start_year,
         "end_year": b.end_year,
@@ -409,6 +341,7 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
     return Scenario(
         name=_str(d["name"]),
         description=_str(d.get("description", "")),
+        facts=facts_from_dict(d["facts"]),
         dues=DuesPath(
             mode=DuesMode(dues["mode"]),
             explicit=_year_map(dues.get("explicit", {})),
@@ -421,7 +354,6 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
             for a in d.get("assessments", [])
         ),
         rounding=Rounding(d.get("rounding", Rounding.DOLLAR)),
-        changes=changes_from_dict(d.get("changes", {})),
         adoption=_adoption(d.get("adoption")),
     )
 
@@ -441,12 +373,12 @@ def _adoption(d: Any) -> Adoption | None:
         adopted_on=adoption_date(_str(d["date"])),
         note=note,
         sequence=sequence,
-        baseline=baseline_from_dict(d["baseline"]),
     )
 
 
 MAX_NOTE = 2000  # characters in an adoption note
 MAX_ADOPTIONS = 10_000
+MAX_SCENARIOS = 200  # in a project – far beyond any board's choices
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -462,50 +394,6 @@ def adoption_to_dict(a: Adoption) -> dict[str, Any]:
         "date": a.adopted_on.isoformat(),
         "note": a.note,
         "sequence": a.sequence,
-        "baseline": baseline_to_dict(a.baseline),
-    }
-
-
-def _changed_value(key: str, value: Any) -> Decimal | int | None:
-    if key not in CHANGEABLE:
-        raise ValueError(f"{key[:40]!r} is not a baseline input a scenario can change")
-    if value is None:
-        if key not in LIMITS:
-            raise ValueError("only a governance limit can be changed to no limit")
-        return None
-    return _int(value) if key in YEAR_VALUES else _dec(value)
-
-
-def changes_from_dict(d: Any) -> Changes:
-    if not isinstance(d, dict):
-        raise TypeError("a scenario's changes should be an object")
-    lines = d.get("expense_lines", {})
-    if not isinstance(lines, dict):
-        raise TypeError("a scenario's expense line changes should be an object")
-    return Changes(
-        values={_str(k): _changed_value(k, v) for k, v in d.get("values", {}).items()},
-        # a blank note is no note – the scenario follows the baseline's
-        sources={k: v for k, v in _sources(d.get("sources", {})).items() if v},
-        expense_lines={
-            _line_id(i): None if e is None else expense_line_from_dict(e, i)
-            for i, e in lines.items()
-        },
-        ffb=_year_map(d.get("ffb", {})),
-    )
-
-
-def changes_to_dict(c: Changes) -> dict[str, Any]:
-    return {
-        "values": {
-            k: None if v is None else v if isinstance(v, int) else str(v)
-            for k, v in c.values.items()
-        },
-        "sources": dict(c.sources),
-        "expense_lines": {
-            i: None if line is None else expense_line_to_dict(line)
-            for i, line in c.expense_lines.items()
-        },
-        "ffb": _year_map_out(c.ffb),
     }
 
 
@@ -520,51 +408,28 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
     return {
         "name": s.name,
         "description": s.description,
+        "facts": facts_to_dict(s.facts),
         "dues": dues,
         "assessments": [
             {"year": a.year, "amount": str(a.amount), "note": a.note} for a in s.assessments
         ],
         "rounding": s.rounding.value,
-        "changes": changes_to_dict(s.changes),
         "adoption": None if s.adoption is None else adoption_to_dict(s.adoption),
     }
 
 
-OPERATING_LINE_ID = "operating"
-
-
-def upgrade_v1_baseline(d: Any) -> dict[str, Any]:
-    """A schema 1 baseline in schema 2 form, with the same figures (spec 8.2) – its expense
-    lines become once lines, and its start-year operating expenses one yearly line growing at
-    the operating inflation rate from the start year."""
-    if not isinstance(d, dict):
-        raise TypeError("the baseline should be an object")
-    lines = d.get("expense_lines", [])
-    if not isinstance(lines, list) or not all(isinstance(e, dict) for e in lines):
-        raise TypeError("expense lines should be a list of objects")
-    sources = _sources(d.get("sources", {}))
-    upgraded = [{**e, "id": f"line-{i}", "frequency": "once"} for i, e in enumerate(lines, 1)]
-    if _dec(d["operating_start"]) != 0:
-        operating = {
-            "id": OPERATING_LINE_ID,
-            "frequency": "yearly",
-            "year": None,
-            "amount": d["operating_start"],
-            "description": "Operating expenses",
-            "source": sources.pop("operating_start", ""),
-        }
-        upgraded.insert(0, operating)
-    else:
-        sources.pop("operating_start", None)
-    rest = {k: v for k, v in d.items() if k != "operating_start"}
-    return {**rest, "expense_lines": upgraded, "sources": sources}
-
-
 @_reading("project")
 def project_from_dict(d: dict[str, Any]) -> Project:
+    from hoa_engine.upgrade import upgrade_v1_baseline, upgrade_v2_project
+
     version = _int(d.get("schema_version", SCHEMA_VERSION))
+    raw_scenarios = d.get("scenarios", [])
+    if isinstance(raw_scenarios, list) and len(raw_scenarios) > MAX_SCENARIOS:
+        raise ValueError(f"a project may have at most {MAX_SCENARIOS} scenarios")
     if version == 1:
         d = {**d, "baseline": upgrade_v1_baseline(d["baseline"])}
+    if version in (1, 2):
+        d = upgrade_v2_project(d)
     elif version != SCHEMA_VERSION:
         raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
     scenarios = tuple(scenario_from_dict(s) for s in d.get("scenarios", []))
@@ -577,25 +442,7 @@ def project_from_dict(d: dict[str, Any]) -> Project:
     orders = [s.adoption.sequence for s in scenarios if s.adoption is not None]
     if len(set(orders)) != len(orders):
         raise ValueError("two adopted plans have the same adoption order")
-    baseline = baseline_from_dict(d["baseline"])
-    return Project(
-        name=_str(d["name"]),
-        notes=_str(d.get("notes", "")),
-        baseline=baseline,
-        scenarios=tuple(without_stale_leave_outs(s, baseline) for s in scenarios),
-    )
-
-
-def without_stale_leave_outs(s: Scenario, b: Baseline) -> Scenario:
-    """The scenario without leave-outs of lines the baseline no longer has (spec 5.1) – they
-    do nothing, and a later line given the same id must not be left out by them."""
-    if s.adoption is not None:
-        return s  # a record of a decision – kept exactly as adopted
-    known = {line.id for line in b.expense_lines}
-    lines = {i: line for i, line in s.changes.expense_lines.items() if line or i in known}
-    if len(lines) == len(s.changes.expense_lines):
-        return s
-    return replace(s, changes=replace(s.changes, expense_lines=lines))
+    return Project(name=_str(d["name"]), notes=_str(d.get("notes", "")), scenarios=scenarios)
 
 
 def project_to_dict(p: Project) -> dict[str, Any]:
@@ -603,6 +450,5 @@ def project_to_dict(p: Project) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "name": p.name,
         "notes": p.notes,
-        "baseline": baseline_to_dict(p.baseline),
         "scenarios": [scenario_to_dict(s) for s in p.scenarios],
     }

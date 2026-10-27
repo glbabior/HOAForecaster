@@ -1,7 +1,6 @@
 """Projects on disk – one human-readable JSON file per project (spec section 8).
 
     <data folder>/projects/<id>.json   saved projects
-    <data folder>/drafts/<id>.json     autosaved unsaved edits per screen, restored after a crash
     <data folder>/trash/<id>.json      deleted projects, kept until the user empties the folder
 
 File names come only from server-generated ids, never from user text, so no
@@ -32,16 +31,13 @@ from hoa_engine.model import (
     Project,
     ProjectFormatError,
     current_adoption,
-    frozen_baseline,
     project_from_dict,
     project_to_dict,
 )
 from hoa_engine.validate import validate_run
 
 ID_PATTERN = re.compile(r"^[0-9a-f]{12}$")
-SCREEN_PATTERN = re.compile(r"^(baseline|new-scenario|scenario:[^\x00-\x1f\x7f]{1,200})$")
 MAX_PROJECT_BYTES = 5 * 1024 * 1024  # a large project is well under 100 KB
-MAX_DRAFT_BYTES = MAX_PROJECT_BYTES
 APP_DIR_NAME = "HOAForecaster"
 
 
@@ -93,7 +89,6 @@ class StoredProject:
     project: Project
     revision: int  # bumped on every save; a save must name the revision it started from
     times: Times  # the project
-    baseline_times: Times
     scenario_times: dict[str, Times]  # by scenario name – a renamed scenario is a new one
 
 
@@ -103,13 +98,6 @@ class ProjectSummary:
     name: str
     modified: str
     scenarios: int
-
-
-@dataclass(frozen=True)
-class Draft:
-    saved: str
-    base_revision: int  # the revision the edits started from
-    edits: dict[str, Any]
 
 
 def default_root() -> Path:
@@ -221,7 +209,6 @@ class ProjectStore:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.projects = root / "projects"
-        self.drafts = root / "drafts"
         self.trash = root / "trash"
         # one write at a time, so a revision check and its write cannot interleave
         self._lock = threading.RLock()
@@ -284,7 +271,6 @@ class ProjectStore:
             project=project,
             revision=revision,
             times=_times(raw.get("times"), unknown),
-            baseline_times=_times(raw.get("baseline_times"), unknown),
             scenario_times={s.name: _times(stored.get(s.name), unknown) for s in project.scenarios},
         )
 
@@ -308,7 +294,6 @@ class ProjectStore:
                 project,
                 revision=1,
                 times=_times(history.get("times"), now),
-                baseline_times=_times(history.get("baseline_times"), now),
                 scenario_times={s.name: _times(stored.get(s.name), now) for s in project.scenarios},
             )
             return self.get(project_id)
@@ -333,22 +318,22 @@ class ProjectStore:
     def adopt(
         self, project_id: str, name: str, adopted_on: date, note: str, base_revision: int
     ) -> StoredProject:
-        """Adopt a saved scenario as the board's plan (spec 5.2) – frozen with the baseline as it
-        sees it now, and the current adopted plan from now on."""
+        """Adopt a scenario as the board's plan (spec 5.2) – read-only, and the current adopted
+        plan from now on."""
         with self._lock:
             current = self._current(project_id, base_revision)
             project = current.project
             s = next((s for s in project.scenarios if s.name == name), None)
             if s is None:
-                raise NotFound("there is no scenario of that name – save it first")
+                raise NotFound("there is no scenario of that name")
             if s.adoption is not None:
                 raise ReadOnly(f"{name} is already an adopted plan")
-            if validate_run(project.baseline, s):
+            if validate_run(s):
                 raise Unusable(f"{name} has problems in its inputs – fix them before adopting it")
             order = max((x.adoption.sequence for x in project.scenarios if x.adoption), default=0)
             if order >= MAX_ADOPTIONS:
                 raise Unusable("the project has as many adopted plans as it can hold")
-            adoption = Adoption(adopted_on, note, order + 1, frozen_baseline(project.baseline, s))
+            adoption = Adoption(adopted_on, note, order + 1)
             adopted = replace(s, adoption=adoption)
             scenarios = tuple(adopted if x is s else x for x in project.scenarios)
             return self._replace(current, replace(project, scenarios=scenarios))
@@ -370,30 +355,31 @@ class ProjectStore:
         """Write `project` over `current` – the caller holds the lock and has checked it."""
         now = _now()
         before = {s.name: s for s in current.project.scenarios}
+        after = {s.name for s in project.scenarios}
+        gone = [n for n in before if n not in after]
+        new = [s.name for s in project.scenarios if s.name not in before]
+        # one name swapped for another in a save is a rename – it keeps its history
+        renamed = {new[0]: gone[0]} if len(gone) == 1 and len(new) == 1 else {}
         scenario_times = {}
         for s in project.scenarios:
-            old = current.scenario_times.get(s.name)
-            if old is None:  # new, or renamed – a rename starts a new history
+            was = renamed.get(s.name, s.name)
+            old = current.scenario_times.get(was)
+            if old is None:  # new
                 scenario_times[s.name] = {"created": now, "modified": now}
             else:
-                changed = before[s.name] != s
+                changed = before[was] != s
                 scenario_times[s.name] = {**old, "modified": now} if changed else old
-        baseline_times = current.baseline_times
-        if current.project.baseline != project.baseline:
-            baseline_times = {**baseline_times, "modified": now}
         self._write(
             current.id,
             project,
             revision=current.revision + 1,
             times={**current.times, "modified": now},
-            baseline_times=baseline_times,
             scenario_times=scenario_times,
         )
-        # other screens' drafts stay; they now show as begun before this save
         return self.get(current.id)
 
     def delete(self, project_id: str) -> None:
-        """Move a project to the trash folder; its draft is discarded."""
+        """Move a project to the trash folder."""
         with self._lock:
             path = self._path(self.projects, project_id)
             if not path.is_file():
@@ -405,7 +391,6 @@ class ProjectStore:
                 raise StoreError(
                     "the project could not be deleted – the data folder is busy"
                 ) from None
-            self.discard_draft(project_id)
 
     def _write(
         self,
@@ -414,7 +399,6 @@ class ProjectStore:
         *,
         revision: int,
         times: Times,
-        baseline_times: Times,
         scenario_times: dict[str, Times],
     ) -> None:
         payload = {
@@ -422,7 +406,6 @@ class ProjectStore:
             "id": project_id,
             "revision": revision,
             "times": times,
-            "baseline_times": baseline_times,
             "scenario_times": scenario_times,
         }
         data = _dump(payload)
@@ -444,7 +427,6 @@ class ProjectStore:
             {
                 **project_to_dict(stored.project),
                 "times": stored.times,
-                "baseline_times": stored.baseline_times,
                 "scenario_times": stored.scenario_times,
             }
         )
@@ -454,68 +436,6 @@ class ProjectStore:
         is never used."""
         project, raw = parse_project_file(data)
         return self.create(project, history=raw)
-
-    # ------------------------------------------------------------ drafts
-
-    # One file per project holding one draft per screen – "baseline", or "scenario:<name>" –
-    # so editing one screen never overwrites another screen's unsaved edits.
-
-    def _read_drafts(self, project_id: str) -> dict[str, Any]:
-        raw = _loads_object(_read_capped(self._path(self.drafts, project_id), MAX_DRAFT_BYTES))
-        screens = raw.get("screens") if raw else None
-        return screens if isinstance(screens, dict) else {}
-
-    def _write_drafts(self, project_id: str, screens: dict[str, Any]) -> None:
-        if not screens:
-            self._path(self.drafts, project_id).unlink(missing_ok=True)
-            return
-        try:
-            data = _dump({"screens": screens})
-        except (ValueError, TypeError, RecursionError):
-            raise BadProjectFile("the draft cannot be stored – not saved") from None
-        if len(data) > MAX_DRAFT_BYTES:
-            raise BadProjectFile("the draft is larger than 5 MB – not saved")
-        _atomic_write(self._path(self.drafts, project_id), data)
-
-    def save_draft(
-        self, project_id: str, screen: str, edits: dict[str, Any], base_revision: int
-    ) -> None:
-        """Autosave of one screen's unsaved edits – any JSON object, even one not yet valid.
-
-        Refused when the project was saved since the edits began, so a late autosave can
-        never resurrect edits that a save already superseded."""
-        if not isinstance(edits, dict):
-            raise BadProjectFile("a draft must be a set of edits – not saved")
-        if not SCREEN_PATTERN.fullmatch(screen):
-            raise BadProjectFile("a draft must name its screen – not saved")
-        with self._lock:
-            current = self.get(project_id)  # a draft belongs to an existing project
-            if base_revision != current.revision:
-                raise Conflict("the project was saved since these edits began – reload first")
-            screens = self._read_drafts(project_id)
-            screens[screen] = {"saved": _now(), "base_revision": base_revision, "edits": edits}
-            self._write_drafts(project_id, screens)
-
-    def get_drafts(self, project_id: str) -> dict[str, Draft]:
-        """Every screen's autosaved edits – a damaged draft is simply not offered."""
-        drafts = {}
-        for screen, raw in self._read_drafts(project_id).items():
-            if not isinstance(raw, dict):
-                continue
-            saved, base, edits = raw.get("saved"), raw.get("base_revision"), raw.get("edits")
-            if isinstance(saved, str) and isinstance(base, int) and isinstance(edits, dict):
-                drafts[screen] = Draft(saved, base, edits)
-        return drafts
-
-    def discard_draft(self, project_id: str, screen: str | None = None) -> None:
-        """Drop one screen's draft, or – with no screen – every draft of the project."""
-        with self._lock:
-            if screen is None:
-                self._path(self.drafts, project_id).unlink(missing_ok=True)
-                return
-            screens = self._read_drafts(project_id)
-            if screens.pop(screen, None) is not None:
-                self._write_drafts(project_id, screens)
 
     # ------------------------------------------------------------ first run
 

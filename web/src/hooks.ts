@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker } from "react-router-dom";
 
-import { api } from "./api";
-import type { Draft } from "./types";
-
 /** A value that settles `delay` ms after its last change. */
 export function useDebounced<T>(value: T, delay: number): T {
   const [settled, setSettled] = useState(value);
@@ -39,41 +36,104 @@ export function useUnsavedGuard(dirty: boolean, sameForm?: (pathname: string) =>
   return { blocker, allowNextNavigation };
 }
 
-export type DraftStatusValue = "idle" | "saved" | "failed";
+export type SaveStatus =
+  | { state: "saved" }
+  | { state: "saving" }
+  | { state: "waiting" } // an entry is not yet usable – saved once it is
+  | { state: "failed"; error: unknown };
 
-/** Autosave one screen's unsaved edits as a draft on the server (spec 8.2), two seconds after
- * typing stops. When the edits go back to the saved state, the draft is dropped. */
-export function useDraftAutosave(
-  projectId: string,
-  screen: string,
-  revision: number,
-  edits: Draft["edits"] | null,
-): DraftStatusValue {
-  const [status, setStatus] = useState<DraftStatusValue>("idle");
-  const settled = useDebounced(edits, 2000);
-  const kept = useRef(false);
+export interface Autosave {
+  status: SaveStatus;
+  /** the value differs from the one last saved */
+  dirty: boolean;
+  /** save now, without waiting for typing to stop – true once everything is saved */
+  flushNow: () => Promise<boolean>;
+}
+
+/** Save `value` by itself, `delay` ms after it stops changing (spec 7.2) – never while `ready`
+ * is false, one save at a time, and the latest value after a save in flight. Anything still
+ * unsaved is sent when the screen closes, and closing the tab first asks. `initial` is the
+ * value as last saved. */
+export function useAutosave<T>(
+  value: T,
+  initial: T,
+  ready: boolean,
+  save: (value: T) => Promise<void>,
+  delay = 600,
+): Autosave {
+  const [status, setStatus] = useState<SaveStatus>({ state: "saved" });
+  const [savedText, setSavedText] = useState(() => JSON.stringify(initial));
+  const saved = useRef(savedText);
+  const running = useRef<Promise<boolean> | null>(null);
+  const latest = useRef({ value, ready, save });
   useEffect(() => {
-    let cancelled = false;
-    if (settled === null) {
-      if (kept.current) {
-        kept.current = false;
-        api.discardDraft(projectId, screen).then(
-          () => !cancelled && setStatus("idle"),
-          () => undefined,
-        );
+    latest.current = { value, ready, save }; // before the effects below read it
+  });
+  const text = JSON.stringify(value);
+  const dirty = text !== savedText;
+  // a value becoming usable waits for typing to stop too – "Plan" on the way to "Plan B"
+  const settled = useDebounced(`${ready}:${text}`, delay);
+
+  const flush = useCallback((): Promise<boolean> => {
+    // the save in flight picks up the latest value when it ends
+    if (running.current) return running.current;
+    const loop = async () => {
+      for (;;) {
+        const { value: next, ready: ok, save: send } = latest.current;
+        const nextText = JSON.stringify(next);
+        if (nextText === saved.current) {
+          setStatus({ state: "saved" });
+          return true;
+        }
+        if (!ok) {
+          setStatus({ state: "waiting" });
+          return false;
+        }
+        setStatus({ state: "saving" });
+        try {
+          await send(next);
+        } catch (e) {
+          setStatus({ state: "failed", error: e });
+          return false;
+        }
+        saved.current = nextText;
+        setSavedText(nextText);
       }
-      return;
-    }
-    api.saveDraft(projectId, screen, settled, revision).then(
-      () => {
-        kept.current = true;
-        if (!cancelled) setStatus("saved");
-      },
-      () => !cancelled && setStatus("failed"),
-    );
-    return () => {
-      cancelled = true;
     };
-  }, [projectId, screen, revision, settled]);
-  return status;
+    running.current = loop().finally(() => {
+      running.current = null;
+    });
+    return running.current;
+  }, []);
+
+  const flushNow = useCallback(async () => {
+    await running.current;
+    return flush();
+  }, [flush]);
+
+  useEffect(() => {
+    void flush();
+  }, [settled, flush]);
+
+  // closing the tab before the last edit is saved asks first
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = ""; // older browsers need this as well
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  // whatever is still unsaved goes when the screen closes – a save in flight takes it itself
+  useEffect(
+    () => () => {
+      const { value: next, ready: ok, save: send } = latest.current;
+      if (ok && !running.current && JSON.stringify(next) !== saved.current)
+        void send(next).catch(() => undefined);
+    },
+    [],
+  );
+  return { status, dirty, flushNow };
 }

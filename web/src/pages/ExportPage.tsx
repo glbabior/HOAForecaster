@@ -32,8 +32,9 @@ export function ExportPage() {
       <section className="panel">
         <h2>Excel workbook</h2>
         <p className="hint">
-          The baseline, the expenses and one sheet per chosen scenario, with live formulas that
-          recalculate in Excel, and the charts – for sharing with the board.
+          One sheet per chosen scenario – its plan, its facts and assumptions, its Fully Funded
+          Balance and its expenses – with live formulas that recalculate in Excel, a comparison and
+          the charts, for sharing with the board.
         </p>
         <div className="row-actions">
           <ScenarioPicker names={names} selected={selected} onChange={setChosen} />

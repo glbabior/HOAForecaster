@@ -1,17 +1,44 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, NavLink, Outlet, createBrowserRouter, useParams } from "react-router-dom";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Link,
+  NavLink,
+  Navigate,
+  type RouteObject,
+  Outlet,
+  createBrowserRouter,
+  matchPath,
+  useLocation,
+  useParams,
+} from "react-router-dom";
 
-import { api, reloadWhenFresh } from "./api";
+import { ApiError, api, reloadWhenFresh } from "./api";
 import { Confirm, ErrorBanner } from "./components/ui";
-import { BaselineEditor } from "./pages/BaselineEditor";
 import { ChartsPage } from "./pages/ChartsPage";
 import { ComparePage } from "./pages/ComparePage";
-import { ProjectList } from "./pages/ProjectList";
 import { ExportPage } from "./pages/ExportPage";
-import { ProjectPage } from "./pages/ProjectPage";
-import { ScenarioEditor } from "./pages/ScenarioEditor";
+import { NewScenario } from "./pages/NewScenario";
+import { ProjectList } from "./pages/ProjectList";
+import {
+  AssessmentsScreen,
+  DuesScreen,
+  ExpensesScreen,
+  FactsScreen,
+  FfbScreen,
+  ResultsScreen,
+  SCENARIO_SCREENS,
+  ScenarioLayout,
+  scenarioPath,
+} from "./pages/ScenarioScreens";
 import { ScenariosPage } from "./pages/ScenariosPage";
-import type { StoredProject } from "./types";
+import type { Project, StoredProject } from "./types";
 
 /** Restart the server and reload the page – shown only when the launcher can start a fresh
  * server. The old one stops once it has answered; the page waits for the new one. */
@@ -57,8 +84,8 @@ function RestartButton() {
       >
         <p>
           The server stops and a fresh one starts – rebuilding the screens first if they changed –
-          and this page reloads once it is back. Save first: edits on the screen are kept only as a
-          draft.
+          and this page reloads once it is back. Every edit is already saved, apart from an entry
+          that is not yet a usable number.
         </p>
       </Confirm>
       {state !== "idle" && (
@@ -91,39 +118,83 @@ function Layout() {
   );
 }
 
-/** The project named in the address, with a way to load it again after a save. */
-export function useProject(): {
+interface OpenProject {
   id: string;
   stored: StoredProject | null;
   error: unknown;
-  reload: () => Promise<void>;
-  setStored: (s: StoredProject) => void;
-} {
-  const { id = "" } = useParams();
+  /** Save the project as `build` makes it from the latest saved one – one save at a time, so
+   * every screen saves on the revision the save before produced. A save that another save
+   * beat (someone saved elsewhere) is made again once on the project as it now is. */
+  save: (build: (project: Project) => Project) => Promise<StoredProject>;
+  /** Anything else that changes the project – adopting, un-adopting – in the same queue. */
+  act: (change: (current: StoredProject) => Promise<StoredProject>) => Promise<StoredProject>;
+}
+
+const ProjectContext = createContext<OpenProject | null>(null);
+
+/** The project the screens share – loaded once for all of them, so a screen opened while
+ * another's last edit is still saving sees that edit. */
+function useOpenProject(id: string): OpenProject {
   const [stored, setStored] = useState<StoredProject | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const reload = useCallback(
-    () =>
-      api.getProject(id).then(
-        (s) => {
-          setStored(s);
-          setError(null);
-        },
-        (e: unknown) => setError(e),
-      ),
-    [id],
-  );
+  const latest = useRef<StoredProject | null>(null);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     let current = true;
+    latest.current = null;
     api.getProject(id).then(
-      (s) => current && setStored(s),
+      (s) => {
+        if (!current) return;
+        latest.current = s;
+        setStored(s);
+      },
       (e: unknown) => current && setError(e),
     );
     return () => {
       current = false;
     };
   }, [id]);
-  return { id, stored, error, reload, setStored };
+
+  const act = useCallback(
+    (change: (current: StoredProject) => Promise<StoredProject>) => {
+      const run = async () => {
+        const current = latest.current ?? (await api.getProject(id));
+        const next = await change(current);
+        latest.current = next;
+        setStored(next);
+        return next;
+      };
+      const done = queue.current.then(run, run);
+      queue.current = done.catch(() => undefined);
+      return done;
+    },
+    [id],
+  );
+
+  const save = useCallback(
+    (build: (project: Project) => Project) =>
+      act(async (current) => {
+        try {
+          return await api.saveProject(id, build(current.project), current.revision);
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.status !== 409) throw e;
+          const fresh = await api.getProject(id); // saved elsewhere – once more on the new one
+          latest.current = fresh;
+          setStored(fresh);
+          return await api.saveProject(id, build(fresh.project), fresh.revision);
+        }
+      }),
+    [act, id],
+  );
+
+  return useMemo(() => ({ id, stored, error, save, act }), [id, stored, error, save, act]);
+}
+
+/** The open project, for the screens inside a project. */
+export function useProject(): OpenProject {
+  const project = useContext(ProjectContext);
+  if (!project) throw new Error("a project screen outside its project");
+  return project;
 }
 
 /** Breadcrumbs back to the project – every project screen starts with one. The screen index
@@ -152,21 +223,28 @@ export function ProjectNav({
   );
 }
 
-// The project's screens, in the order they are used.
+// The project's screens – a scenario's own screens open under Scenarios (spec 7.1, 7.2).
 const SCREENS: { path: string; label: string }[] = [
-  { path: "", label: "Overview" },
-  { path: "baseline", label: "Facts and assumptions" },
-  { path: "expenses", label: "Expenses" },
-  { path: "ffb", label: "Fully Funded Balance" },
   { path: "scenarios", label: "Scenarios" },
   { path: "compare", label: "Compare" },
   { path: "charts", label: "Charts" },
   { path: "export", label: "Export" },
 ];
 
-/** A project's screens – the index on the left, the screen beside it. */
+/** A project's screens, started afresh for each project – nothing queued for one is ever
+ * saved into another. */
 export function ProjectLayout() {
   const { id = "" } = useParams();
+  return <ProjectScreens key={id} id={id} />;
+}
+
+/** The index on the left, the screen beside it. With a scenario open, its screens are listed
+ * under Scenarios. */
+function ProjectScreens({ id }: { id: string }) {
+  const project = useOpenProject(id);
+  const { pathname } = useLocation();
+  const open = matchPath("/projects/:id/scenarios/:name/*", pathname)?.params.name;
+  const scenario = open && open !== "new" ? decodeURIComponent(open) : null;
   return (
     <div className="project-layout">
       <nav className="screen-index no-print" aria-label="Project screens">
@@ -174,17 +252,35 @@ export function ProjectLayout() {
           {SCREENS.map((s) => (
             <li key={s.path}>
               <NavLink
-                to={`/projects/${encodeURIComponent(id)}${s.path ? `/${s.path}` : ""}`}
-                end={s.path === ""}
+                to={`/projects/${encodeURIComponent(id)}/${s.path}`}
+                end={s.path !== "scenarios"}
               >
                 {s.label}
               </NavLink>
+              {s.path === "scenarios" && scenario && (
+                <div className="scenario-index">
+                  <span className="scenario-name" title={scenario}>
+                    {scenario}
+                  </span>
+                  <ul aria-label={`${scenario} – screens`}>
+                    {SCENARIO_SCREENS.map((sc) => (
+                      <li key={sc.path}>
+                        <NavLink to={scenarioPath(id, scenario, sc.path)} end>
+                          {sc.label}
+                        </NavLink>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </li>
           ))}
         </ul>
       </nav>
       <div className="screen">
-        <Outlet />
+        <ProjectContext.Provider value={project}>
+          <Outlet />
+        </ProjectContext.Provider>
       </div>
     </div>
   );
@@ -194,7 +290,8 @@ export function Loading({ error }: { error: unknown }) {
   return error ? <ErrorBanner error={error} /> : <p aria-busy="true">Loading…</p>;
 }
 
-export const router = createBrowserRouter([
+/** The app's screens – exported so the tests drive the same routes. */
+export const routes: RouteObject[] = [
   {
     element: <Layout />,
     children: [
@@ -203,15 +300,22 @@ export const router = createBrowserRouter([
         path: "/projects/:id",
         element: <ProjectLayout />,
         children: [
-          { index: true, element: <ProjectPage /> },
-          {
-            // one form across the baseline's three screens
-            element: <BaselineEditor />,
-            children: [{ path: "baseline" }, { path: "expenses" }, { path: "ffb" }],
-          },
+          { index: true, element: <Navigate to="scenarios" replace /> },
           { path: "scenarios", element: <ScenariosPage /> },
-          { path: "scenarios/new", element: <ScenarioEditor /> },
-          { path: "scenarios/:name", element: <ScenarioEditor /> },
+          { path: "scenarios/new", element: <NewScenario /> },
+          {
+            // one form across a scenario's screens, saving itself
+            path: "scenarios/:name",
+            element: <ScenarioLayout />,
+            children: [
+              { index: true, element: <ResultsScreen /> },
+              { path: "facts", element: <FactsScreen /> },
+              { path: "expenses", element: <ExpensesScreen /> },
+              { path: "ffb", element: <FfbScreen /> },
+              { path: "dues", element: <DuesScreen /> },
+              { path: "assessments", element: <AssessmentsScreen /> },
+            ],
+          },
           { path: "compare", element: <ComparePage /> },
           { path: "charts", element: <ChartsPage /> },
           { path: "export", element: <ExportPage /> },
@@ -227,4 +331,6 @@ export const router = createBrowserRouter([
       },
     ],
   },
-]);
+];
+
+export const router = createBrowserRouter(routes);

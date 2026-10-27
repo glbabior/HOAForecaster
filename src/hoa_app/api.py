@@ -14,7 +14,7 @@ import re
 import secrets
 import unicodedata
 from collections.abc import Awaitable, Callable
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass
 from datetime import date
 from decimal import Decimal
 from importlib.metadata import version
@@ -25,22 +25,22 @@ from urllib.parse import quote as url_quote
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from hoa_app.template import blank_project
+from hoa_app.template import blank_project, blank_scenario
 from hoa_engine import InvalidInputs, ProjectFormatError, ScenarioResult, run
 from hoa_engine.model import (
     MAX_NOTE,
     Project,
     adoption_date,
-    baseline_from_dict,
     project_from_dict,
     project_to_dict,
     scenario_from_dict,
+    scenario_to_dict,
 )
-from hoa_engine.validate import validate_baseline, validate_run
 from hoa_store.store import (
     BadProjectFile,
     Conflict,
@@ -87,8 +87,6 @@ def to_json(value: Any) -> Any:
         return {f.name: to_json(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, tuple | list):
         return [to_json(v) for v in value]
-    if isinstance(value, dict):
-        return {str(k): to_json(v) for k, v in value.items()}
     return value
 
 
@@ -117,7 +115,6 @@ def stored_json(stored: StoredProject) -> dict[str, Any]:
         "id": stored.id,
         "revision": stored.revision,
         "times": stored.times,
-        "baseline_times": stored.baseline_times,
         "scenario_times": stored.scenario_times,
         "project": project_to_dict(stored.project),
     }
@@ -128,23 +125,10 @@ def _results(project: Project) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for s in project.scenarios:
         try:
-            out[s.name] = {"result": result_json(run(project.baseline, s))}
+            out[s.name] = {"result": result_json(run(s))}
         except InvalidInputs as e:
             out[s.name] = {"problems": e.problems}
     return out
-
-
-def figures(result: ScenarioResult) -> Any:
-    """A result's numbers only – an expense's description or source is not a change."""
-    years = [
-        (
-            replace(y, expense_lines=(), operating_lines=()),
-            [amount for _, amount in y.expense_lines],
-            [amount for _, amount in y.operating_lines],
-        )
-        for y in result.years
-    ]
-    return years, result.summary
 
 
 def dollar_axis(project: Project, names: list[str]) -> tuple[Decimal, Decimal] | None:
@@ -153,7 +137,7 @@ def dollar_axis(project: Project, names: list[str]) -> tuple[Decimal, Decimal] |
     for s in project.scenarios:
         if s.name in names:
             try:
-                for y in run(project.baseline, s).years:
+                for y in run(s).years:
                     values += [y.expenses, y.total_from_owners, y.ending_balance]
             except InvalidInputs:
                 return None
@@ -344,6 +328,16 @@ def create_app(
             raise ApiError(422, str(e)) from None
         return stored_json(store.create(project))
 
+    @app.get("/api/blank-scenario")
+    def new_blank_scenario(name: str = "New scenario") -> dict[str, Any]:
+        """A blank scenario with the spec's defaults, for the new-scenario screen (spec 7.2)."""
+        if not name.strip() or len(name) > 200 or any(ord(c) < 32 for c in name):
+            raise ApiError(422, "a new scenario needs a usable name")
+        try:
+            return scenario_to_dict(blank_scenario(name.strip(), date.today()))
+        except ProjectFormatError:
+            raise ApiError(422, "a new scenario needs a usable name") from None
+
     @app.get("/api/about")
     def about() -> dict[str, Any]:
         return {
@@ -379,7 +373,7 @@ def create_app(
 
     @app.post("/api/projects/{project_id}/adopt")
     async def adopt(project_id: str, request: Request) -> dict[str, Any]:
-        """Adopt a saved scenario as the board's plan (spec 5.2)."""
+        """Adopt a scenario as the board's plan (spec 5.2)."""
         body = await body_json(request)
         name, note, when = body.get("name"), body.get("note", ""), body.get("date")
         if not isinstance(name, str) or not isinstance(note, str) or not isinstance(when, str):
@@ -408,89 +402,22 @@ def create_app(
 
     @app.get("/api/projects/{project_id}/results")
     def project_results(project_id: str) -> dict[str, Any]:
-        stored = store.get(project_id)
-        # every scenario still gets its own outcome – an adopted plan runs on its frozen
-        # baseline, whatever is wrong with today's
-        problems = validate_baseline(stored.project.baseline)
-        return {"baseline_problems": problems, "scenarios": _results(stored.project)}
-
-    @app.post("/api/projects/{project_id}/baseline-impact")
-    async def baseline_impact(project_id: str, request: Request) -> dict[str, Any]:
-        """Which saved scenarios a baseline edit would change (spec 7.1), before saving it.
-
-        `scenarios`, when sent, are the scenarios exactly as the save will store them (for
-        example with typed dues stretched to a new horizon); each is compared with the saved
-        scenario of the same name against the saved baseline."""
-        body = await body_json(request)
-        stored = store.get(project_id)
-        try:
-            baseline = baseline_from_dict(body.get("baseline") or {})
-            sent = body.get("scenarios")
-            proposed = (
-                [scenario_from_dict(s) for s in sent]
-                if isinstance(sent, list)
-                else list(stored.project.scenarios)
-            )
-        except ProjectFormatError as e:
-            raise ApiError(422, str(e)) from None
-        problems = validate_baseline(baseline)
-        if problems:
-            raise ApiError(422, "the baseline has problems", problems)
-        saved = {s.name: s for s in stored.project.scenarios}
-        changed: list[str] = []
-        unchanged: list[str] = []
-        invalid: list[str] = []
-        for s in proposed:
-            if validate_run(baseline, s):
-                invalid.append(s.name)
-                continue
-            after = run(baseline, s)
-            try:
-                before = run(stored.project.baseline, saved[s.name])
-            except (InvalidInputs, KeyError):
-                changed.append(s.name)  # it could not be worked out before, or is new
-                continue
-            (unchanged if figures(before) == figures(after) else changed).append(s.name)
-        return {"changed": changed, "unchanged": unchanged, "invalid": invalid}
+        return {"scenarios": _results(store.get(project_id).project)}
 
     # ------------------------------------------------------------ live results
 
     @app.post("/api/run")
     async def run_scenario(request: Request) -> dict[str, Any]:
-        """One scenario against a baseline, for the editors' live results (spec 7.2)."""
+        """One scenario as it is being edited, for the live results (spec 7.2)."""
         body = await body_json(request)
         try:
-            baseline = baseline_from_dict(body.get("baseline") or {})
             scenario = scenario_from_dict(body.get("scenario") or {})
         except ProjectFormatError as e:
             raise ApiError(422, str(e)) from None
         try:
-            return result_json(run(baseline, scenario))
+            return result_json(run(scenario))
         except InvalidInputs as e:
             raise ApiError(422, "the inputs have problems", e.problems) from None
-
-    # ------------------------------------------------------------ drafts
-
-    @app.get("/api/projects/{project_id}/drafts")
-    def get_drafts(project_id: str) -> dict[str, Any]:
-        store.get(project_id)
-        return {"drafts": to_json(store.get_drafts(project_id))}
-
-    @app.put("/api/projects/{project_id}/drafts", status_code=204)
-    async def save_draft(project_id: str, request: Request) -> Response:
-        body = await body_json(request)
-        edits, screen = body.get("edits"), body.get("screen")
-        if not isinstance(edits, dict) or not isinstance(screen, str):
-            raise ApiError(422, "a draft must name its screen and hold a set of edits")
-        store.save_draft(project_id, screen, edits, revision(body.get("base_revision")))
-        return Response(status_code=204)
-
-    @app.delete("/api/projects/{project_id}/drafts", status_code=204)
-    def discard_draft(project_id: str, screen: str | None = None) -> Response:
-        """One screen's draft with `?screen=`, otherwise every draft of the project."""
-        store.get(project_id)
-        store.discard_draft(project_id, screen)
-        return Response(status_code=204)
 
     # ------------------------------------------------------------ export and import
 
@@ -507,9 +434,6 @@ def create_app(
     def export_xlsx(project_id: str, scenario: list[str] = Query(default=[])) -> Response:  # noqa: B008
         stored = store.get(project_id)
         project = stored.project
-        problems = validate_baseline(project.baseline)
-        if problems:
-            raise ApiError(422, "fix the baseline before exporting", problems)
         names = scenario or [s.name for s in project.scenarios]
         try:
             data = export_workbook(project, None, names, dollar_axis(project, names))
@@ -524,13 +448,14 @@ def create_app(
     @app.post("/api/import/project", status_code=201)
     async def import_project(request: Request) -> dict[str, Any]:
         data = await request.body()
-        return stored_json(store.import_bytes(data))
+        # parsed off the event loop, so a slow file never holds up other requests
+        return stored_json(await run_in_threadpool(store.import_bytes, data))
 
     @app.post("/api/import/workbook", status_code=201)
     async def import_workbook(request: Request) -> dict[str, Any]:
         data = await request.body()  # held in memory only; BodyLimit has capped it
         try:
-            project = read_workbook(data)
+            project = await run_in_threadpool(read_workbook, data)
         except WorkbookFormatError as e:
             raise ApiError(422, str(e)) from None
         return stored_json(store.create(project))

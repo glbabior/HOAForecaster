@@ -71,7 +71,7 @@ def test_a_created_project_reads_back_with_its_history(
     again = store.get(saved.id)
     assert again.project == DEMO
     assert again.revision == 1
-    assert again.times == again.baseline_times == {"created": clock[0], "modified": clock[0]}
+    assert again.times == {"created": clock[0], "modified": clock[0]}
     assert set(again.scenario_times) == {s.name for s in DEMO.scenarios}
 
 
@@ -79,8 +79,9 @@ def test_the_file_is_readable_json_with_decimal_strings(store: ProjectStore) -> 
     saved = store.create(DEMO)
     raw = json.loads(_file(store, saved.id).read_text(encoding="utf-8"))
     assert raw["name"] == DEMO.name
-    assert raw["schema_version"] == 2
-    assert isinstance(raw["baseline"]["starting_balance"], str)
+    assert raw["schema_version"] == 3
+    assert "baseline" not in raw and "baseline_times" not in raw
+    assert isinstance(raw["scenarios"][0]["facts"]["starting_balance"], str)
 
 
 # ---------------------------------------------------------------- saving
@@ -105,27 +106,45 @@ def test_saving_stamps_only_what_changed(store: ProjectStore, clock: list[str]) 
     assert again.scenario_times[first.name] == {"created": created, "modified": saved_at}
     assert again.scenario_times[second.name] == saved.scenario_times[second.name]  # untouched
     assert again.scenario_times["New"] == {"created": saved_at, "modified": saved_at}
-    assert again.baseline_times == saved.baseline_times  # the baseline did not change
 
 
-def test_a_baseline_change_stamps_the_baseline_but_not_the_scenarios(
+def test_a_change_to_one_scenario_s_facts_stamps_only_that_scenario(
     store: ProjectStore, clock: list[str]
 ) -> None:
     saved = store.create(DEMO)
-    edited = replace(DEMO, baseline=replace(DEMO.baseline, units=30))
-    again = store.save(saved.id, edited, base_revision=1)
-    assert again.baseline_times["modified"] == again.times["modified"] != saved.times["modified"]
-    assert again.scenario_times == saved.scenario_times
+    first, *rest = DEMO.scenarios
+    edited = replace(first, facts=replace(first.facts, units=30))
+    again = store.save(saved.id, replace(DEMO, scenarios=(edited, *rest)), base_revision=1)
+    assert again.scenario_times[first.name]["modified"] == again.times["modified"]
+    assert all(again.scenario_times[s.name] == saved.scenario_times[s.name] for s in rest)
 
 
-def test_a_renamed_scenario_starts_a_new_history(store: ProjectStore, clock: list[str]) -> None:
+def test_a_renamed_scenario_keeps_its_history(store: ProjectStore, clock: list[str]) -> None:
     saved = store.create(DEMO)
     first, *rest = DEMO.scenarios
-    again = store.save(
-        saved.id, replace(DEMO, scenarios=(replace(first, name="Renamed"), *rest)), 1
-    )
+    renamed = replace(first, name="Renamed", description="And edited")
+    again = store.save(saved.id, replace(DEMO, scenarios=(renamed, *rest)), 1)
     assert first.name not in again.scenario_times
-    assert again.scenario_times["Renamed"]["created"] == again.times["modified"]
+    assert again.scenario_times["Renamed"] == {
+        "created": saved.scenario_times[first.name]["created"],
+        "modified": again.times["modified"],
+    }
+    # renamed back – still the same scenario, so it keeps its created time
+    back = store.save(
+        saved.id, replace(DEMO, scenarios=(replace(renamed, name=first.name), *rest)), 2
+    )
+    assert back.scenario_times[first.name]["created"] == saved.scenario_times[first.name]["created"]
+
+
+def test_two_renames_in_one_save_start_new_histories(store: ProjectStore, clock: list[str]) -> None:
+    saved = store.create(DEMO)
+    first, second, *rest = DEMO.scenarios
+    project = replace(
+        DEMO, scenarios=(replace(first, name="One"), replace(second, name="Two"), *rest)
+    )
+    again = store.save(saved.id, project, 1)
+    for name in ("One", "Two"):  # which became which cannot be told
+        assert again.scenario_times[name]["created"] == again.times["modified"]
 
 
 def test_a_save_from_a_stale_copy_is_refused(store: ProjectStore) -> None:
@@ -204,6 +223,16 @@ def test_listing_is_newest_first_and_reports_what_it_cannot_read(
     assert unreadable == ["0123456789ab.json", "notes.json"]
 
 
+def test_an_oversized_project_file_is_neither_listed_nor_opened(
+    store: ProjectStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored = store.create(DEMO)
+    monkeypatch.setattr(store_module, "MAX_PROJECT_BYTES", 100)
+    assert store.list_projects() == ([], [f"{stored.id}.json"])
+    with pytest.raises(BadProjectFile, match="damaged"):
+        store.get(stored.id)
+
+
 def test_a_project_file_copied_in_by_hand_is_listed(store: ProjectStore) -> None:
     store.projects.mkdir(parents=True)
     raw = json.loads(DEMO_FILE.read_text(encoding="utf-8"))
@@ -238,7 +267,7 @@ def test_a_missing_project(store: ProjectStore) -> None:
     [
         ("{broken", "the file is damaged"),
         pytest.param("[" * 100_000 + "]" * 100_000, "the file is damaged", id="deeply-nested"),
-        ('{"name": "x"}', "missing 'baseline'"),
+        ('{"name": "x", "scenarios": [{"name": "y"}]}', "the scenario is missing"),
     ],
 )
 def test_a_damaged_saved_file_gets_a_plain_message(
@@ -264,12 +293,12 @@ def test_damaged_timestamps_are_replaced_not_fatal(store: ProjectStore) -> None:
         store,
         saved.id,
         times="soon",
-        scenario_times=[1],
-        baseline_times={"created": 5, "modified": "not a time"},
+        scenario_times={"Dues only": {"created": 5, "modified": "not a time"}},
     )
     again = store.get(saved.id)
     assert again.project == DEMO
     assert again.times["created"][:4].isdigit()
+    assert again.scenario_times["Dues only"]["modified"][:4].isdigit()
 
 
 def test_a_byte_order_mark_is_accepted(store: ProjectStore) -> None:
@@ -282,98 +311,12 @@ def test_a_byte_order_mark_is_accepted(store: ProjectStore) -> None:
 # ---------------------------------------------------------------- delete and trash
 
 
-def test_delete_moves_to_trash_and_drops_the_draft(store: ProjectStore) -> None:
+def test_delete_moves_to_trash(store: ProjectStore) -> None:
     saved = store.create(DEMO)
-    store.save_draft(saved.id, "baseline", {"anything": 1}, base_revision=1)
     store.delete(saved.id)
     assert (store.trash / f"{saved.id}.json").is_file()
-    assert store.get_drafts(saved.id) == {}
     with pytest.raises(NotFound):
         store.get(saved.id)
-
-
-# ---------------------------------------------------------------- drafts
-
-
-def test_each_screen_keeps_its_own_draft(store: ProjectStore) -> None:
-    saved = store.create(DEMO)
-    assert store.get_drafts(saved.id) == {}
-    store.save_draft(saved.id, "baseline", {"baseline": {"units": ""}}, base_revision=1)
-    store.save_draft(saved.id, "scenario:Dues only", {"name": "x"}, base_revision=1)
-    store.save_draft(saved.id, "baseline", {"baseline": {"units": "3"}}, base_revision=1)
-    drafts = store.get_drafts(saved.id)
-    assert set(drafts) == {"baseline", "scenario:Dues only"}
-    assert drafts["baseline"].edits == {"baseline": {"units": "3"}}  # need not be valid
-    assert drafts["baseline"].base_revision == 1
-
-
-def test_a_save_keeps_other_drafts_but_late_autosaves_are_refused(store: ProjectStore) -> None:
-    saved = store.create(DEMO)
-    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
-    store.save(saved.id, DEMO, base_revision=1)
-    assert store.get_drafts(saved.id)["baseline"].base_revision == 1  # offered as begun earlier
-    with pytest.raises(Conflict, match="saved since these edits began"):
-        store.save_draft(saved.id, "baseline", {"a": 2}, base_revision=1)
-
-
-def test_discarding_one_screen_or_all(store: ProjectStore) -> None:
-    saved = store.create(DEMO)
-    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
-    store.save_draft(saved.id, "new-scenario", {"b": 1}, base_revision=1)
-    store.discard_draft(saved.id, "baseline")
-    store.discard_draft(saved.id, "baseline")  # already gone – harmless
-    assert set(store.get_drafts(saved.id)) == {"new-scenario"}
-    store.discard_draft(saved.id, "new-scenario")  # the last one – the file goes too
-    assert not (store.drafts / f"{saved.id}.json").exists()
-    store.save_draft(saved.id, "baseline", {"a": 1}, base_revision=1)
-    store.discard_draft(saved.id)
-    assert store.get_drafts(saved.id) == {}
-
-
-@pytest.mark.parametrize(
-    ("screen", "edits", "message"),
-    [
-        ("baseline", [1, 2], "must be a set of edits"),
-        ("somewhere", {}, "must name its screen"),
-        ("scenario:", {}, "must name its screen"),
-        ("scenario:a\x07", {}, "must name its screen"),
-        ("baseline", {"x": float("nan")}, "cannot be stored"),
-        ("baseline", {"x": "y" * 60}, "larger than 5 MB"),
-    ],
-)
-def test_unstorable_drafts_are_refused(
-    store: ProjectStore,
-    monkeypatch: pytest.MonkeyPatch,
-    screen: str,
-    edits: object,
-    message: str,
-) -> None:
-    saved = store.create(DEMO)
-    monkeypatch.setattr(store_module, "MAX_DRAFT_BYTES", 100)
-    with pytest.raises(BadProjectFile, match=message):
-        store.save_draft(saved.id, screen, edits, base_revision=1)  # type: ignore[arg-type]
-
-
-def test_a_draft_needs_its_project(store: ProjectStore) -> None:
-    with pytest.raises(NotFound):
-        store.save_draft("0123456789ab", "baseline", {}, base_revision=1)
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        "{broken",
-        "[1, 2]",
-        '{"screens": [1]}',
-        '{"screens": {"baseline": 5}}',
-        '{"screens": {"baseline": {"saved": "x", "base_revision": "1", "edits": {}}}}',
-    ],
-)
-def test_damaged_drafts_are_not_offered(store: ProjectStore, content: str) -> None:
-    saved = store.create(DEMO)
-    store.drafts.mkdir(parents=True, exist_ok=True)
-    (store.drafts / f"{saved.id}.json").write_text(content, encoding="utf-8")
-    assert store.get_drafts(saved.id) == {}
 
 
 # ---------------------------------------------------------------- export and import
@@ -390,11 +333,7 @@ def test_export_then_import_keeps_the_history_but_not_the_identity(
     copy = store.import_bytes(store.export_bytes(saved.id))
     assert copy.id != saved.id and copy.revision == 1
     assert copy.project == original.project
-    assert (copy.times, copy.baseline_times, copy.scenario_times) == (
-        original.times,
-        original.baseline_times,
-        original.scenario_times,
-    )
+    assert (copy.times, copy.scenario_times) == (original.times, original.scenario_times)
 
 
 @pytest.mark.parametrize(
@@ -405,7 +344,8 @@ def test_export_then_import_keeps_the_history_but_not_the_identity(
         pytest.param(b"[" * 200_000 + b"]" * 200_000, "not a readable", id="deeply-nested"),
         (b'{"name": "x", "n": NaN}', "not a readable project file"),
         (b"[]", "not a project file"),
-        (b'{"name": "x"}', "missing 'baseline'"),
+        (b'{"name": "x", "scenarios": [{"name": "y"}]}', "the scenario is missing"),
+        (b'{"name": "x", "schema_version": 2}', "missing 'baseline'"),
     ],
 )
 def test_bad_project_files_are_refused_in_plain_language(data: bytes, message: str) -> None:
@@ -464,27 +404,29 @@ def test_hoa_data_dir_overrides_the_default_as_an_absolute_path(
 # ---------------------------------------------------------------- adopted plans (spec 5.2)
 
 
-def _adopted(store: ProjectStore) -> tuple[str, int]:
-    created = store.create(DEMO)
+def _adopted(store: ProjectStore, created: object = None) -> tuple[str, int]:
+    created = created or store.create(DEMO)
+    assert isinstance(created, store_module.StoredProject)
     stored = store.adopt(created.id, "Dues only", date(2026, 11, 3), "Vote", created.revision)
     return created.id, stored.revision
 
 
-def test_adopting_freezes_the_plan_with_the_baseline_it_runs_on(store: ProjectStore) -> None:
-    pid, revision = _adopted(store)
+def test_adopting_makes_the_plan_read_only_with_its_inputs_as_they_were(
+    store: ProjectStore,
+) -> None:
+    created = store.create(DEMO)
+    before = next(s for s in DEMO.scenarios if s.name == "Dues only")
+    pid, _ = _adopted(store, created)
     stored = store.get(pid)
-    plan = stored.project.scenarios[0]
+    plan = next(s for s in stored.project.scenarios if s.name == "Dues only")
     assert plan.adoption is not None
     assert (plan.adoption.adopted_on, plan.adoption.note, plan.adoption.sequence) == (
         date(2026, 11, 3),
         "Vote",
         2,  # the demo already has an adopted plan
     )
-    before = run(stored.project.baseline, plan).summary
-    # a later baseline edit – deleting every expense line – leaves the plan's figures alone
-    edited = replace(stored.project, baseline=replace(stored.project.baseline, expense_lines=()))
-    after = store.save(pid, edited, revision)
-    assert run(after.project.baseline, after.project.scenarios[0]).summary == before
+    assert replace(plan, adoption=None) == before  # nothing else about it changed
+    assert run(plan).summary == run(before).summary
 
 
 @pytest.mark.parametrize(
@@ -532,11 +474,11 @@ def test_adoption_refuses_what_it_cannot_adopt(store: ProjectStore) -> None:
     pid, revision = _adopted(store)
     with pytest.raises(ReadOnly, match="already an adopted plan"):
         store.adopt(pid, "Dues only", date(2026, 1, 1), "", revision)
-    with pytest.raises(NotFound, match="save it first"):
+    with pytest.raises(NotFound, match="no scenario of that name"):
         store.adopt(pid, "Nobody", date(2026, 1, 1), "", revision)
     project = store.get(pid).project
-    broken = replace(project.scenarios[1], changes=replace(project.scenarios[1].changes, ffb={}))
-    broken = replace(broken, changes=replace(broken.changes, values={"end_year": 2050}))
+    other = project.scenarios[1]
+    broken = replace(other, facts=replace(other.facts, ffb={}))
     revision = store.save(
         pid,
         replace(project, scenarios=(project.scenarios[0], broken, *project.scenarios[2:])),

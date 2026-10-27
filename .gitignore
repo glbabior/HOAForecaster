@@ -14,3 +14,5 @@ PRIVATE_APPENDIX.md
 .mypy_cache/
 .ruff_cache/
 coverage/
+# Windows shortcuts – they hold the machine's name and paths
+*.lnk

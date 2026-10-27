@@ -148,7 +148,7 @@ def test_project_lifecycle(client: TestClient, demo_id: str) -> None:
     [
         ({}, 422, "a new project needs a name"),
         ({"project": None}, 422, "the project is missing"),
-        ({"project": {"name": "x"}}, 422, "missing 'baseline'"),
+        ({"project": {"name": "x", "scenarios": [{"name": "y"}]}}, 422, "scenario is missing"),
     ],
 )
 def test_bad_projects_are_refused(client: TestClient, body: Any, status: int, message: str) -> None:
@@ -174,7 +174,7 @@ def test_ids_that_are_not_ours_are_not_found(client: TestClient) -> None:
 
 def test_project_results_cover_every_scenario(client: TestClient, demo_id: str) -> None:
     body = client.get(f"/api/projects/{demo_id}/results").json()
-    assert body["baseline_problems"] == []
+    assert set(body) == {"scenarios"}
     assert set(body["scenarios"]) == {s.name for s in DEMO.scenarios}
     first = body["scenarios"]["Dues only"]["result"]
     assert first["summary"]["low_years"] == 1
@@ -184,140 +184,39 @@ def test_project_results_cover_every_scenario(client: TestClient, demo_id: str) 
     )
 
 
-def test_results_report_problems_instead_of_failing(
-    client: TestClient, store: ProjectStore
-) -> None:
+def test_results_report_each_scenario_s_problems_instead_of_failing(client: TestClient) -> None:
     raw = json.loads(json.dumps(DEMO_RAW))
     raw["scenarios"][0]["dues"]["overrides"] = {"2099": "5"}  # outside the horizon
+    raw["scenarios"][1]["facts"]["units"] = 0
     created = client.post("/api/projects", json={"project": raw}).json()
-    body = client.get(f"/api/projects/{created['id']}/results").json()
-    assert "outside" in body["scenarios"][raw["scenarios"][0]["name"]]["problems"][0]
-
-    raw["baseline"]["units"] = 0
-    bad = client.post("/api/projects", json={"project": raw}).json()
-    assert client.get(f"/api/projects/{bad['id']}/results").json()["baseline_problems"]
+    body = client.get(f"/api/projects/{created['id']}/results").json()["scenarios"]
+    first, second, third = (s["name"] for s in raw["scenarios"][:3])
+    assert "outside" in body[first]["problems"][0]
+    assert body[second]["problems"] == ["there must be at least one unit"]
+    assert "result" in body[third]  # one scenario's problems are its own
 
 
 def test_live_run_for_the_editors(client: TestClient) -> None:
-    body = {"baseline": DEMO_RAW["baseline"], "scenario": DEMO_RAW["scenarios"][0]}
-    result = client.post("/api/run", json=body).json()
-    assert len(result["years"]) == DEMO.baseline.end_year - DEMO.baseline.start_year + 1
+    scenario = DEMO_RAW["scenarios"][0]
+    result = client.post("/api/run", json={"scenario": scenario}).json()
+    facts = DEMO.scenarios[0].facts
+    assert len(result["years"]) == facts.end_year - facts.start_year + 1
 
-    bad = {**body, "baseline": {**DEMO_RAW["baseline"], "units": 0}}
-    response = client.post("/api/run", json=bad)
+    bad = {**scenario, "facts": {**scenario["facts"], "units": 0}}
+    response = client.post("/api/run", json={"scenario": bad})
     assert response.status_code == 422 and "at least one unit" in response.json()["problems"][0]
-    assert client.post("/api/run", json={"baseline": {}}).status_code == 422
+    assert client.post("/api/run", json={"scenario": {}}).status_code == 422
+    assert client.post("/api/run", json={}).status_code == 422
 
 
-def test_baseline_impact_names_the_scenarios_that_would_change(
-    client: TestClient, demo_id: str
-) -> None:
-    same = client.post(
-        f"/api/projects/{demo_id}/baseline-impact", json={"baseline": DEMO_RAW["baseline"]}
-    )
-    assert same.json()["changed"] == [] and len(same.json()["unchanged"]) == len(DEMO.scenarios)
-
-    more_units = {**DEMO_RAW["baseline"], "units": 30}
-    moved = client.post(
-        f"/api/projects/{demo_id}/baseline-impact", json={"baseline": more_units}
-    ).json()
-    # an adopted plan keeps its frozen baseline, so it never changes
-    working = [s.name for s in DEMO.scenarios if s.adoption is None]
-    assert sorted(moved["changed"]) == sorted(working)
-
-    shorter = {**DEMO_RAW["baseline"], "end_year": DEMO.baseline.start_year + 4}
-    cut = client.post(f"/api/projects/{demo_id}/baseline-impact", json={"baseline": shorter}).json()
-    assert set(cut["changed"]) | set(cut["invalid"]) == set(working)
-
-
-def test_baseline_impact_refuses_a_broken_baseline(client: TestClient, demo_id: str) -> None:
-    bad = {**DEMO_RAW["baseline"], "units": 0}
-    response = client.post(f"/api/projects/{demo_id}/baseline-impact", json={"baseline": bad})
-    assert response.status_code == 422 and response.json()["problems"]
-    unreadable = client.post(
-        f"/api/projects/{demo_id}/baseline-impact", json={"baseline": {"x": 1}}
-    )
-    assert unreadable.status_code == 422
-
-
-def test_baseline_impact_spares_a_scenario_with_its_own_value(client: TestClient) -> None:
-    raw = json.loads(json.dumps(DEMO_RAW))
-    raw["scenarios"][0]["changes"] = {"values": {"interest_rate": "0.03"}}
-    raw["scenarios"][1]["changes"] = {"values": {"end_year": DEMO.baseline.end_year + 1}}
-    created = client.post("/api/projects", json={"project": raw}).json()
-    new_rate = {**DEMO_RAW["baseline"], "interest_rate": "0.02"}
-    impact = client.post(
-        f"/api/projects/{created['id']}/baseline-impact", json={"baseline": new_rate}
-    ).json()
-    first, second = (s["name"] for s in raw["scenarios"][:2])
-    assert first in impact["unchanged"]  # it keeps its own rate
-    # the second runs a year past the baseline and has no Fully Funded Balance for it
-    assert second in impact["invalid"]
-
-
-def test_baseline_impact_counts_a_scenario_that_now_runs_as_changed(client: TestClient) -> None:
-    raw = json.loads(json.dumps(DEMO_RAW))
-    raw["baseline"]["units"] = 0  # every scenario fails against the saved baseline
-    created = client.post("/api/projects", json={"project": raw}).json()
-    fixed = client.post(
-        f"/api/projects/{created['id']}/baseline-impact", json={"baseline": DEMO_RAW["baseline"]}
-    ).json()
-    assert len(fixed["changed"]) == len([s for s in DEMO.scenarios if s.adoption is None])
-
-
-# ---------------------------------------------------------------- drafts
-
-
-def test_drafts_round_trip_per_screen_and_are_discarded(client: TestClient, demo_id: str) -> None:
-    url = f"/api/projects/{demo_id}/drafts"
-    assert client.get(url).json() == {"drafts": {}}
-    body = {"screen": "baseline", "edits": {"name": ""}, "base_revision": 1}
-    assert client.put(url, json=body).status_code == 204
-    other = {"screen": "scenario:Dues only", "edits": {"x": 1}, "base_revision": 1}
-    assert client.put(url, json=other).status_code == 204
-    drafts = client.get(url).json()["drafts"]
-    assert drafts["baseline"]["edits"] == {"name": ""} and drafts["baseline"]["base_revision"] == 1
-    assert client.delete(url, params={"screen": "baseline"}).status_code == 204
-    assert set(client.get(url).json()["drafts"]) == {"scenario:Dues only"}
-    assert client.delete(url).status_code == 204
-    assert client.get(url).json() == {"drafts": {}}
-
-
-def test_bad_and_stale_drafts_are_refused(client: TestClient, demo_id: str) -> None:
-    url = f"/api/projects/{demo_id}/drafts"
-    bad = client.put(url, json={"screen": "baseline", "edits": [1], "base_revision": 1})
-    assert bad.status_code == 422
-    nameless = client.put(url, json={"edits": {}, "base_revision": 1})
-    assert nameless.status_code == 422
-    client.put(f"/api/projects/{demo_id}", json={"project": DEMO_RAW, "base_revision": 1})
-    stale = client.put(url, json={"screen": "baseline", "edits": {}, "base_revision": 1})
-    assert stale.status_code == 409
-    assert client.get("/api/projects/0123456789ab/drafts").status_code == 404
-
-
-def test_baseline_impact_judges_the_scenarios_as_they_will_be_saved(
-    client: TestClient, demo_id: str
-) -> None:
-    longer = {**DEMO_RAW["baseline"], "end_year": DEMO.baseline.end_year + 2}
-    longer["ffb"] = {
-        **longer["ffb"],
-        str(DEMO.baseline.end_year + 2): "1",
-        str(DEMO.baseline.end_year + 3): "1",
-    }
-    url = f"/api/projects/{demo_id}/baseline-impact"
-    as_saved = client.post(url, json={"baseline": longer}).json()
-    assert "Hold then catch up" in as_saved["invalid"]  # typed dues stop short of the new end
-    stretched = json.loads(json.dumps(DEMO_RAW["scenarios"]))
-    hold = next(s for s in stretched if s["name"] == "Hold then catch up")
-    last = hold["dues"]["explicit"][str(DEMO.baseline.end_year)]
-    for y in (DEMO.baseline.end_year + 1, DEMO.baseline.end_year + 2):
-        hold["dues"]["explicit"][str(y)] = last
-    stretched.append({**stretched[0], "name": "Brand new"})
-    proposed = client.post(url, json={"baseline": longer, "scenarios": stretched}).json()
-    assert proposed["invalid"] == []
-    assert "Hold then catch up" in proposed["changed"] and "Brand new" in proposed["changed"]
-    bad = client.post(url, json={"baseline": longer, "scenarios": [{"name": "x"}]})
-    assert bad.status_code == 422
+def test_removed_addresses_are_gone(client: TestClient, demo_id: str) -> None:
+    for method, path in (
+        ("post", f"/api/projects/{demo_id}/baseline-impact"),
+        ("get", f"/api/projects/{demo_id}/drafts"),
+        ("put", f"/api/projects/{demo_id}/drafts"),
+    ):
+        response = client.request(method.upper(), path, json={})
+        assert response.status_code in (404, 405)
 
 
 # ---------------------------------------------------------------- export and import
@@ -347,27 +246,27 @@ def test_workbook_export_carries_the_chosen_scenarios_and_a_shared_scale(
     assert wb.sheetnames[-2:] == ["Dues only", "Steady increase"]
     assert "the same dollar scale" in str(wb["Charts"]["A2"].value)
     everything = client.get(f"/api/projects/{demo_id}/export.xlsx")
-    assert len(openpyxl.load_workbook(BytesIO(everything.content)).sheetnames) == 5 + len(
+    # Method, Project, Compare and Charts, then one sheet per scenario
+    assert len(openpyxl.load_workbook(BytesIO(everything.content)).sheetnames) == 4 + len(
         DEMO.scenarios
     )
     unknown = client.get(f"/api/projects/{demo_id}/export.xlsx?scenario=Nope")
     assert unknown.status_code == 422 and "no scenario named" in unknown.json()["message"]
 
 
-def test_workbook_export_needs_a_valid_baseline_and_skips_the_scale_for_bad_scenarios(
-    client: TestClient,
-) -> None:
+def test_workbook_export_refuses_a_chosen_scenario_with_problems(client: TestClient) -> None:
     raw = json.loads(json.dumps(DEMO_RAW))
     raw["scenarios"][0]["dues"]["overrides"] = {"2099": "5"}
+    raw["scenarios"][1]["facts"]["units"] = 0
     created = client.post("/api/projects", json={"project": raw}).json()
-    response = client.get(f"/api/projects/{created['id']}/export.xlsx")
-    assert response.status_code == 200
-    wb = openpyxl.load_workbook(BytesIO(response.content))
-    assert "each its own dollar scale" in str(wb["Charts"]["A2"].value)
-
-    raw["baseline"]["units"] = 0
-    bad = client.post("/api/projects", json={"project": raw}).json()
-    assert client.get(f"/api/projects/{bad['id']}/export.xlsx").status_code == 422
+    url = f"/api/projects/{created['id']}/export.xlsx"
+    first, second, third = (s["name"] for s in raw["scenarios"][:3])
+    for name, problem in ((first, "outside"), (second, "at least one unit")):
+        response = client.get(url, params={"scenario": name})
+        assert response.status_code == 422
+        assert name in response.json()["message"] and problem in response.json()["message"]
+    assert client.get(url).status_code == 422  # all of them, including the two with problems
+    assert client.get(url, params={"scenario": third}).status_code == 200
 
 
 def test_workbook_import(client: TestClient) -> None:
@@ -447,14 +346,37 @@ def test_a_blank_project_from_the_specs_defaults(client: TestClient) -> None:
     created = client.post("/api/projects", json={"name": "  New building  "})
     assert created.status_code == 201
     project = created.json()["project"]
-    b = project["baseline"]
-    assert project["name"] == "New building"
-    assert b["end_year"] - b["start_year"] == 13
-    assert (b["expense_inflation"], b["interest_rate"], b["target"]) == ("0.03", "0.02", "0.7")
+    assert project["name"] == "New building" and project["schema_version"] == 3
+    assert "baseline" not in project
+    (scenario,) = project["scenarios"]
+    f = scenario["facts"]
+    assert f["end_year"] - f["start_year"] == 13
+    assert (f["expense_inflation"], f["interest_rate"], f["target"]) == ("0.03", "0.02", "0.7")
+    assert set(f["ffb"]) == {str(y) for y in range(f["start_year"], f["end_year"] + 2)}
+    assert scenario["adoption"] is None
     for name in (None, "", "   ", 5):
         assert client.post("/api/projects", json={"name": name}).status_code == 422
     bad = client.post("/api/projects", json={"name": "bell\u0007"})
     assert bad.status_code == 422 and "control characters" in bad.json()["message"]
+
+
+def test_a_blank_scenario_from_the_specs_defaults(client: TestClient) -> None:
+    blank = client.get("/api/blank-scenario", params={"name": "  Option C  "})
+    assert blank.status_code == 200
+    scenario = blank.json()
+    assert scenario["name"] == "Option C" and scenario["adoption"] is None
+    f = scenario["facts"]
+    assert f["end_year"] - f["start_year"] == 13 and f["expense_lines"] == []
+    assert scenario["dues"] == {
+        "mode": "rate",
+        "first_value": "0",
+        "annual_increase": "0.03",
+        "overrides": {},
+    }
+    for name in ("", "   ", "x" * 201, "bell\a", "del\x7f"):
+        refused = client.get("/api/blank-scenario", params={"name": name})
+        assert refused.status_code == 422, name
+        assert refused.json()["message"] == "a new scenario needs a usable name"
 
 
 def test_about_names_the_data_folder(client: TestClient, store: ProjectStore) -> None:
@@ -463,18 +385,9 @@ def test_about_names_the_data_folder(client: TestClient, store: ProjectStore) ->
 
 
 def test_revisions_are_positive(client: TestClient, demo_id: str) -> None:
-    body = {"screen": "baseline", "edits": {}, "base_revision": 0}
-    assert client.put(f"/api/projects/{demo_id}/drafts", json=body).status_code == 422
-
-
-def test_editing_only_an_expense_description_changes_no_scenario(
-    client: TestClient, demo_id: str
-) -> None:
-    baseline = json.loads(json.dumps(DEMO_RAW["baseline"]))
-    baseline["expense_lines"][0]["description"] = "Renamed"
-    baseline["expense_lines"][0]["source"] = "Another study"
-    impact = client.post(f"/api/projects/{demo_id}/baseline-impact", json={"baseline": baseline})
-    assert impact.json()["changed"] == []
+    for base in (0, -1):
+        body = {"project": DEMO_RAW, "base_revision": base}
+        assert client.put(f"/api/projects/{demo_id}", json=body).status_code == 422
 
 
 def test_download_names_drop_invisible_direction_marks() -> None:
@@ -533,17 +446,34 @@ def test_adoption_requests_are_checked(
     assert response.status_code == 422 and message in response.json()["message"]
 
 
-def test_an_adopted_plan_still_has_figures_when_the_baseline_has_problems(
-    client: TestClient, demo_id: str
-) -> None:
+def test_an_adopted_plan_keeps_its_inputs_and_figures(client: TestClient, demo_id: str) -> None:
+    before = client.get(f"/api/projects/{demo_id}/results").json()["scenarios"]["Dues only"]
     body = {"name": "Dues only", "date": "2026-11-03", "note": "", "base_revision": 1}
     project = client.post(f"/api/projects/{demo_id}/adopt", json=body).json()["project"]
-    project["baseline"]["units"] = 0
-    client.put(f"/api/projects/{demo_id}", json={"project": project, "base_revision": 2})
-    results = client.get(f"/api/projects/{demo_id}/results").json()
-    assert results["baseline_problems"] == ["there must be at least one unit"]
-    assert "result" in results["scenarios"]["Dues only"]
-    assert "problems" in results["scenarios"]["Two-part assessment"]
+    plan = next(s for s in project["scenarios"] if s["name"] == "Dues only")
+    original = next(s for s in DEMO_RAW["scenarios"] if s["name"] == "Dues only")
+    assert set(plan["adoption"]) == {"date", "note", "sequence"}  # no frozen copy of anything
+    assert plan["facts"] == original["facts"]
+    after = client.get(f"/api/projects/{demo_id}/results").json()["scenarios"]["Dues only"]
+    assert after == before
+    # its facts cannot be edited by a save
+    plan["facts"]["units"] = 1
+    edit = client.put(f"/api/projects/{demo_id}", json={"project": project, "base_revision": 2})
+    assert edit.status_code == 409
+
+
+def test_a_rename_keeps_the_scenario_s_created_time(client: TestClient, demo_id: str) -> None:
+    stored = client.get(f"/api/projects/{demo_id}").json()
+    project = stored["project"]
+    name = next(s["name"] for s in project["scenarios"] if s["adoption"] is None)
+    created = stored["scenario_times"][name]["created"]
+    for s in project["scenarios"]:
+        if s["name"] == name:
+            s["name"] = "Renamed"
+    saved = client.put(f"/api/projects/{demo_id}", json={"project": project, "base_revision": 1})
+    assert saved.status_code == 200
+    assert saved.json()["scenario_times"]["Renamed"]["created"] == created
+    assert "baseline_times" not in saved.json()
 
 
 # ---------------------------------------------------------------- restarting

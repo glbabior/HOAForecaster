@@ -4,12 +4,71 @@ import { Link } from "react-router-dom";
 import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
 import { CsvButton } from "../components/CsvButton";
-import { ErrorBanner, Problems } from "../components/ui";
+import { Confirm, ErrorBanner, Field } from "../components/ui";
 import { date, longDate, money, percent } from "../format";
+import { useAutosave, useUnsavedGuard } from "../hooks";
 import { currentAdoption } from "../template";
-import type { ProjectResults } from "../types";
+import type { ProjectResults, StoredProject } from "../types";
 
-/** The project's scenarios with their key results – each opens in the scenario editor. */
+/** The project's name and notes – saved as they are typed. */
+function ProjectDetails({ stored }: { stored: StoredProject }) {
+  const { save } = useProject();
+  const initial = { name: stored.project.name, notes: stored.project.notes };
+  const [form, setForm] = useState(initial);
+  const { status } = useAutosave(form, initial, form.name.trim() !== "", async (f) => {
+    await save((project) => ({ ...project, name: f.name.trim(), notes: f.notes }));
+  });
+  const { blocker } = useUnsavedGuard(!form.name.trim() || status.state === "failed");
+  return (
+    <section className="panel">
+      <h2>Project</h2>
+      <div className="grid-2">
+        <Field
+          label="Name"
+          error={
+            form.name.trim() ? null : "The project needs a name – nothing is saved until it has one"
+          }
+        >
+          {(fid, d) => (
+            <input
+              id={fid}
+              aria-describedby={d}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+            />
+          )}
+        </Field>
+        <Field label="Notes">
+          {(fid) => (
+            <textarea
+              id={fid}
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            />
+          )}
+        </Field>
+      </div>
+      {status.state === "failed" && <ErrorBanner error={status.error} />}
+      <Confirm
+        open={blocker.state === "blocked"}
+        title="Leave this screen?"
+        confirmLabel="Leave"
+        onCancel={() => blocker.reset?.()}
+        onConfirm={() => blocker.proceed?.()}
+      >
+        <p>
+          {form.name.trim()
+            ? "The last change to the project's name or notes could not be saved – it will be lost."
+            : "The project needs a name, so the changes to its name and notes are not saved and will be lost."}
+        </p>
+      </Confirm>
+    </section>
+  );
+}
+
+/** The project's scenarios with their key results – each opens on its own screens. */
 export function ScenariosPage() {
   const { id, stored, error } = useProject();
   const [results, setResults] = useState<ProjectResults | null>(null);
@@ -39,16 +98,12 @@ export function ScenariosPage() {
       <ProjectNav stored={stored} here="Scenarios" />
       <h1>Scenarios</h1>
       <p className="hint">
-        A scenario is one way to pay for the plan – its dues each year (a yearly increase, pinned
-        years, or a figure typed for every year), any special assessments, and any fact or
-        assumption it sets for itself. Open one to change it, or start a new one – blank or from any
-        scenario here.
+        A scenario is one way to pay for the plan, complete in itself – its facts and assumptions,
+        its expenses, the reserve study's Fully Funded Balance, its dues each year and any special
+        assessments. Open one to see and change it; every edit is saved as you make it. Start a new
+        one blank, or as a copy of any scenario here.
       </p>
       <ErrorBanner error={loadError} />
-      <Problems
-        title="The baseline has problems – fix them to see results"
-        items={results?.baseline_problems ?? []}
-      />
       <section className="panel">
         <div className="section-head">
           <Link className="button primary" to={`/projects/${id}/scenarios/new`}>
@@ -110,6 +165,7 @@ export function ScenariosPage() {
           </tbody>
         </table>
       </section>
+      <ProjectDetails key={stored.id} stored={stored} />
     </>
   );
 }

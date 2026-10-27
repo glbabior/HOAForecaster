@@ -1,6 +1,8 @@
 # HOAForecaster – Application Requirements
 
-Version 1.5 – October 24, 2026 (v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+Version 1.6 – October 27, 2026 (v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+
+Changes in v1.6 – the shared baseline is gone – every scenario holds all of its own inputs (its facts and assumptions, its expenses and its Fully Funded Balance as well as its dues and assessments), so a scenario's changes to the baseline (v1.5 section 5.1) are gone too; a new scenario copies everything from the scenario it starts from, and a fact, an expense line or the Fully Funded Balance can be copied into chosen scenarios later (section 7.2); an adopted plan is a scenario made read-only (section 5.2); the project's screens are organised by scenario (section 7); every edit is saved as it is made, with no Save button (sections 7.2 and 8.2); the workbook carries each scenario's inputs on its own sheet (section 7.6); project files move to schema version 3 (section 8.2).
 
 Changes in v1.5 – expenses are categorised by how often they occur (monthly, yearly, every few years, once), and monthly and yearly expenses replace the single operating-expense figure (sections 4 and 6); a scenario can change any baseline assumption, line by line for the tables (section 5.1); a scenario can be adopted as the board's decision – the adopted plan – which is read-only and keeps the baseline it was adopted against (sections 3 and 5.2); a new scenario can start from any other (section 7.2); Compare, Charts and the workbook handle scenarios over different years (sections 7.4–7.6); project files move to schema version 2 (section 8.2); acceptance tests cover the new inputs and the version 1 upgrade (section 9).
 
@@ -14,7 +16,7 @@ Changes in v1.1 – full-year start (no partial start year); one editable baseli
 
 ## 1. Purpose
 
-A small application that replaces a hand-built Excel reserve funding model ("the reference workbook") with an editable, persistent tool. A board member enters a building's reserve facts once (the baseline), then creates, edits, saves and compares any number of funding scenarios – dues paths and special assessments, with any assumption changed for that scenario – adopts one as the board's decision, and sees, for each, the year-by-year reserve balance, percent funded, owner cost and warning flags, as tables and charts. The app also exports the same Excel workbook the board already knows.
+A small application that replaces a hand-built Excel reserve funding model ("the reference workbook") with an editable, persistent tool. A board member enters a building's reserve facts – balance, expenses, the reserve study's Fully Funded Balance – into a scenario with its dues path and special assessments, copies it into any number of other funding scenarios that differ in any input, compares them, adopts one as the board's decision, and sees, for each, the year-by-year reserve balance, percent funded, owner cost and warning flags, as tables and charts. The app also exports the same Excel workbook the board already knows.
 
 The calculation logic is defined by the reference workbook's formulas and described in the handoff notes that accompany it. Both belong to a real association and live in the private data repository (section 8.1), with a private appendix that names them and records their figures. The app must reproduce the reference workbook's numbers exactly (section 9).
 
@@ -28,15 +30,14 @@ The calculation logic is defined by the reference workbook's formulas and descri
 
 ```
 Project            – one building / association
-  ├─ Baseline      – the one set of static inputs for the project, edited in place
-  └─ Scenarios     – any number of funding plans (dues path + assessments + changes to the baseline), each run against the current baseline
-       └─ Adopted plans – scenarios the board has adopted, each frozen with the baseline it was adopted against; the most recently adopted is the current adopted plan
+  └─ Scenarios     – any number of funding plans, each complete in itself – its facts and assumptions (section 4), its expenses and Fully Funded Balance, its dues path and special assessments (section 5)
+       └─ Adopted plans – scenarios the board has adopted, each read-only; the most recently adopted is the current adopted plan
 ```
 
-- One baseline per project. When a fact changes (a new reserve study, a contractor estimate, an updated balance) the user edits the baseline and every saved scenario recalculates against it – except adopted plans, which keep the baseline they were adopted against (section 5.2). There is no baseline versioning – the purpose is to see the shape of the choices from here forward. An adopted plan's frozen baseline is part of that plan, a record of the facts the board decided on; it is read only through its plan and is never a way to restore the live baseline. "Export project" (section 8) is the way to keep a snapshot before a large change.
+- Every scenario holds all of its own inputs; nothing is shared between scenarios. A new scenario starts from a copy of another (section 7.2), so facts entered once carry into every scenario made from it. A fact that changes later (a new reserve study, a contractor estimate, an updated balance) is edited in one scenario and copied into the others that should use it (section 7.2) – scenarios are alternatives, and each says exactly what it assumes. "Export project" (section 8) is the way to keep a snapshot before a large change.
 - Everything has a name, free-text notes, created and modified timestamps.
 
-## 4. Static inputs (the baseline)
+## 4. Facts and assumptions (in every scenario)
 
 Every numeric input carries an optional `source` text field (where the number came from and when) – this mirrors the cell comments in the spreadsheet and matters for a board audience.
 
@@ -69,10 +70,12 @@ Validation – FFB present for every year from the start year to end year + 1, r
 
 - Monthly and yearly lines are the operating expenses. Each grows from its first year (or the start year, when it has none) at its own inflation rate, or at input 7 when it has none.
 - Once and every-few-years lines are the reserve expenses, inflated from the base year at input 4.
-- Every line has a stable identifier, so a scenario can change or leave out a line (section 5.1) and still pick up lines added to the baseline later.
+- Every line has a stable identifier, kept when a scenario is copied, so a line copied into other scenarios (section 7.2) replaces the same line there.
 - Lines and occurrences outside the horizon are kept and ignored. An every-few-years line needs an interval of at least 1; a last year may not come before the first year.
 
 ## 5. Scenario inputs
+
+Besides its facts and assumptions (section 4), each scenario has –
 
 | # | Input | Type | Notes |
 |---|---|---|---|
@@ -83,30 +86,19 @@ Validation – FFB present for every year from the start year to end year + 1, r
 
 The dues path must be shown resolved (the actual number for every year) next to the inputs so the user sees what mode b produced.
 
-### 5.1 Changes to the baseline
-
-A scenario can change any baseline input (section 4) for itself alone – the horizon, the starting balance, units, current dues, the rates, the expense base year, the cushion, the target, the governance limits and their source notes. A scenario stores only what it changes; everything else follows the baseline, so a later baseline edit reaches every scenario except where that scenario set its own value.
-
-- A governance limit can be changed to "no limit"; that is stored as a change, distinct from following the baseline.
-- A scenario with its own start year moves what the start year means for it – its starting balance is as of January 1 of its start year, and its monthly and yearly lines without a first year start there.
-- Expense lines are changed line by line – a scenario can change a baseline line, leave one out, or add its own. A changed line is the scenario's own full copy of that line and no longer follows later edits to the baseline line. Untouched lines follow the baseline, including lines added to the baseline after the scenario was made. A changed line whose baseline line is later deleted stays as the scenario's own line; a leave-out for a deleted line is dropped.
-- The Fully Funded Balance is changed year by year.
-- The scenario editor marks every value that differs from the baseline and can put any one back to the baseline's.
-- A scenario is checked against the baseline with its changes applied – a horizon of its own needs Fully Funded Balance through its end year + 1, and its typed dues, pinned years and assessments must fall within it. A baseline edit that leaves a scenario with problems is named in the save confirmation (section 7.1); the scenario keeps its inputs and shows its problems until fixed.
-
 ### 5.2 The adopted plan
 
 The board's decision is the **adopted plan** – a scenario that has been adopted.
 
-- Any saved scenario can be adopted, with an adoption date (default today) and a note (for example the meeting and vote); a scenario with unsaved edits is saved first.
-- An adopted plan keeps its own inputs – dues, assessments, rounding and its changes to the baseline, as before – and a frozen copy of the baseline as it stood when it was adopted. Its figures are worked out from its inputs against that frozen copy, with its changes applied, so they never change when the baseline is edited later.
+- Any scenario can be adopted, with an adoption date (default today) and a note (for example the meeting and vote).
+- An adopted plan keeps all of its inputs as they were when it was adopted, so its figures never change. Nothing is copied into it (section 7.2).
 - An adopted plan is read-only and cannot be renamed or deleted. To revise it, start a new scenario from it (section 7.2), edit that and adopt it.
 - Adopting another scenario makes it the current adopted plan – the current plan is always the one adopted most recently, whatever adoption date was entered. Earlier adopted plans stay, read-only, as a record of past decisions, each with its adoption date.
-- The current adopted plan can be un-adopted to correct a mistake – it becomes an ordinary, editable scenario again, with its inputs and changes as they were, running against today's baseline, and the plan adopted before it becomes current. Earlier adopted plans cannot be un-adopted.
+- The current adopted plan can be un-adopted to correct a mistake – it becomes an ordinary, editable scenario again, with its inputs as they were, and the plan adopted before it becomes current. Earlier adopted plans cannot be un-adopted.
 
 ## 6. Calculation engine
 
-Implement as a pure function `run(baseline, scenario) -> results` with no UI or storage dependencies, so it can be unit-tested and reused by the exporter. Per year, in this order –
+Implement as a pure function `run(scenario) -> results` with no UI or storage dependencies, so it can be unit-tested and reused by the exporter. Per year, in this order –
 
 ```
 total_dues          = dues_per_unit_per_month × units × 12
@@ -132,7 +124,7 @@ operating_shortfall = total_dues < operating   (warning only – the shortfall i
 
 The starting balance of the first year is input 1; of each later year, the prior year's ending balance.
 
-Every input in these formulas is the scenario's own – the baseline with the scenario's changes applied (section 5.1); for an adopted plan, the frozen baseline it was adopted with, its changes applied (section 5.2).
+Every input in these formulas is the scenario's own (sections 4 and 5).
 
 Scenario summary measures (used by the Compare view) –
 
@@ -150,20 +142,20 @@ All percentages are stored as fractions; money as decimal or integer cents, neve
 
 ## 7. Screens
 
-### 7.1 Project and baseline
+### 7.1 Project
 
-- Project list → project page showing the project's baseline (name, last modified, reserve study reference) and its scenarios.
-- Baseline editor – a form for the scalar inputs and two editable tables (expenses with their frequency, FFB by year). Table editing supports add/delete rows, paste from clipboard (tab-separated), and sorting by year (lines without a year first).
-- **Import** – (a) CSV for the expense table and the FFB table, its columns to be fixed when this is built – a row without a frequency is a once line; (b) a workbook in the reference layout – read Inputs, Expenses (baseline row, item rows, FFB row) and each Plan sheet's input rows into a baseline plus one scenario per Plan sheet, dropping a partial first-year column if present and using that year's ending balance as the next January 1 starting balance. Its item rows become once lines and its operating-expense input one yearly line, as in the version 1 upgrade (section 8.2).
-- Saving a changed baseline shows which saved scenarios will change and asks for confirmation, naming any scenario the edit leaves with problems. Adopted plans never change.
-- The project page shows the current adopted plan first, marked as such, and earlier adopted plans with their adoption dates.
+- Project list → a project's screens, with an index on the left – **Scenarios**, **Compare**, **Charts** and **Export**.
+- Scenarios – the current adopted plan first, marked as such, then the working scenarios, then earlier adopted plans with their adoption dates; and New scenario.
+- **Import** – (a) CSV for a scenario's expense table and Fully Funded Balance table, its columns to be fixed when this is built – a row without a frequency is a once line; (b) a workbook in the reference layout – read Inputs, Expenses (baseline row, item rows, FFB row) and each Plan sheet's input rows into one scenario per Plan sheet, each with the Inputs and Expenses facts, dropping a partial first-year column if present and using that year's ending balance as the next January 1 starting balance. Its item rows become once lines and its operating-expense input one yearly line, as in the version 1 upgrade (section 8.2).
 
-### 7.2 Scenario editor
+### 7.2 A scenario's screens
 
-- Left – inputs (section 5), including the scenario's changes to the baseline (section 5.1). Right – live results: the Plan table (section 7.3) and the two charts (section 7.5) recalculating as inputs change (debounced).
-- Save, Save as copy (the scenario as edited, unsaved edits included), Delete, Adopt.
-- Unsaved-changes guard.
-- A new scenario starts blank or from any saved scenario – the adopted plan, an earlier adopted plan or any other. Starting from one copies its saved dues, assessments, rounding, description and changes to the baseline, but not its adoption; the new scenario runs against today's baseline.
+- Opening a scenario shows its own index of screens – **Results** (the Plan table of section 7.3 and the two charts of section 7.5), **Facts and assumptions** (the scalar inputs of section 4), **Expenses** (the expense table, with each line's frequency), **Fully Funded Balance** (by year), **Dues** (section 5 inputs 2 and 4, with the dues path shown resolved) and **Special assessments**. The inputs screens show key results alongside, recalculating as inputs change (debounced).
+- Table editing supports add/delete rows, paste from clipboard (tab-separated), and sorting by year (lines without a year first).
+- Every edit is saved as it is made – there is no Save button. An entry that is not yet a usable value (text that is not a number, a name another scenario has) is shown as a problem and saved once it is fixed. A scenario with other problems (section 4's validation) is saved and shows its problems until they are fixed.
+- **Copy to scenarios** – any fact or assumption (with its source note), any expense line, or the whole Fully Funded Balance table can be copied into other scenarios, chosen in a dialog with a checkbox for each and one for all. An expense line replaces the line with the same identifier there, or is added. Adopted plans are listed but cannot be chosen.
+- Copy (a new scenario starting from this one), Delete, Adopt.
+- A new scenario starts blank (the defaults of section 4) or from any scenario – the adopted plan, an earlier adopted plan or any other. Starting from one copies all of its inputs – facts and assumptions, expenses, Fully Funded Balance, dues, assessments, rounding and description – but not its name, its adoption or its timestamps.
 - An adopted plan opens read-only, with its adoption date and note, a way to start a new scenario from it and – for the current adopted plan – Un-adopt.
 
 ### 7.3 Plan view (per scenario) – the equivalent of a Plan tab
@@ -194,11 +186,11 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 
 ### 7.6 Export
 
-- **Excel workbook** matching the v1.3 layout – Method, Inputs, Compare, Charts, Expenses, one sheet per selected scenario (named by scenario), each scenario sheet carrying its own assumptions (linked to Inputs unless changed), its Fully Funded Balance and its expense changes, with live formulas (not pasted values), the same colour conventions, number formats and cell comments carrying the source notes, and the same charts. Generated server-side or in-browser; must open in Excel without repair prompts and recalculate to the same numbers the app shows.
-- The Expenses sheet lists every line with its frequency and identifier, operating and reserve lines in one table with a total of each.
-- An adopted plan's sheet carries its frozen baseline as typed values (nothing linked to Inputs), marks which of them are the plan's own changes, and shows its adoption date and note; the sheet is protected as a reminder that it is read-only.
+- **Excel workbook** following the v1.3 layout – Method, Project (the association's name and notes), Compare, Charts, then one sheet per selected scenario (named by scenario), each carrying the scenario's Plan table, its facts and assumptions, its Fully Funded Balance and its expense table, with live formulas (not pasted values), the same colour conventions, number formats and cell comments carrying the source notes, and the same charts. Generated server-side or in-browser; must open in Excel without repair prompts and recalculate to the same numbers the app shows.
+- Each scenario's expense table lists every line with its frequency and identifier, operating and reserve lines in one table with a total of each.
+- An adopted plan's sheet shows its adoption date and note and is protected as a reminder that it is read-only.
 - When the chosen scenarios cover different years, the Compare sheet runs its by-year tables over every year any of them covers and labels its summary measures by year of each horizon; each chart covers its own scenario's years.
-- Re-import brings back everything the app holds for the project except ids, revisions and drafts – expense frequencies and line identifiers, scenario changes, and adoptions with their frozen baselines.
+- Re-import brings back everything the app holds for the project except ids, revisions and timestamps – every scenario's inputs, expense frequencies and line identifiers, and adoptions.
 - CSV of any table.
 - PDF/print stylesheet for the Plan, Compare and Charts views.
 
@@ -217,16 +209,16 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 
 
 - Local file store – one JSON file per project in a user-chosen folder (or app data directory), human-readable, with a schema version field. SQLite is acceptable instead if simpler for the chosen stack.
-- Schema version 2 (v1.5) adds expense frequencies and identifiers, scenario changes and adoptions. A version 1 file still opens – its expense lines become once lines and its operating-expense figure one yearly line with no first year and no rate of its own, so it grows at input 7 from the start year and the figures are the same – and is saved as version 2.
-- Autosave of unsaved edits as a draft (restored after a crash); explicit Save commits the baseline or scenario. No version history apart from adopted plans' frozen baselines – "Export project" is the snapshot.
+- Schema version 3 (v1.6) moves the baseline into every scenario. A version 2 file still opens – each scenario receives the baseline with its own changes applied (an adopted plan, its frozen baseline), so every figure is the same; a project with no scenarios gets one holding the baseline, with dues starting at its current dues. A version 1 file also opens – first its expense lines become once lines and its operating-expense figure one yearly line with no first year and no rate of its own, so it grows at input 7 from the start year and the figures are the same. Either is saved as version 3.
+- Every edit is saved as it is made (section 7.2). No version history – "Export project" is the snapshot.
 - Backup – "Export project" bundles the project JSON; "Import project" restores it.
 
 ## 9. Acceptance tests (must pass)
 
 Two fixture sets, one engine.
 
-- **Public – demo project** (`demo/` in the public repo, tests always run). A fictional association – invented name, unit count, balance, expense schedule and FFB – with scenarios that between them exercise every dues mode (explicit, first-year value + rate, rate with per-year overrides), a special assessment, nominal and inflated expense lines, every expense frequency (with a line's own rate and a first and last year), a scenario that changes the baseline (a rate, an expense line changed, one left out, one added, a Fully Funded Balance year), an adopted plan whose frozen baseline differs from the current one, a LOW year, an operating shortfall year, a needs-vote year, a target met and a target never met. Expected figures come from a demo workbook built with the reference formulas – extended with formulas of the same kind for expense frequencies, scenario changes and frozen baselines – and recalculated in LibreOffice headless, never from the engine itself. The demo workbook and the script that builds it are committed with the fixtures.
-- **Private – real project** (private appendix, section A3). Runs when `HOA_PRIVATE_DIR` points at the private repo; skipped otherwise. Must pass before every release. Its project file is version 1, so it also checks that the version 1 upgrade (section 8.2) keeps the reference workbook's figures.
+- **Public – demo project** (`demo/` in the public repo, tests always run). A fictional association – invented name, unit count, balance, expense schedule and FFB – with scenarios that between them exercise every dues mode (explicit, first-year value + rate, rate with per-year overrides), a special assessment, nominal and inflated expense lines, every expense frequency (with a line's own rate and a first and last year), scenarios whose facts differ (a rate, an expense line changed, one left out, one added, a Fully Funded Balance year), an adopted plan, a LOW year, an operating shortfall year, a needs-vote year, a target met and a target never met. Expected figures come from a demo workbook built with the reference formulas – extended with formulas of the same kind for expense frequencies and each scenario's own inputs – and recalculated in LibreOffice headless, never from the engine itself. The demo workbook and the script that builds it are committed with the fixtures.
+- **Private – real project** (private appendix, section A3). Runs when `HOA_PRIVATE_DIR` points at the private repo; skipped otherwise. Must pass before every release. Its project file is version 1, so it also checks that the version 1 and version 2 upgrades (section 8.2) keep the reference workbook's figures.
 
 Also – a round-trip export → re-import reproduces the same results for both projects; the exported workbook recalculates in LibreOffice headless with zero formula errors.
 
@@ -266,7 +258,7 @@ Original suggestions, kept for context –
 
 ## 12. Out of scope for v1
 
-Partial start years, baseline versioning (an adopted plan's frozen baseline is not a version of the live baseline – section 3), unequal ownership shares, multiple reserve funds, loan financing of projects, tax, multi-user editing and permissions, hosting, mobile layout.
+Partial start years, version history (section 8.2), keeping scenarios' facts in step automatically (section 3), unequal ownership shares, multiple reserve funds, loan financing of projects, tax, multi-user editing and permissions, hosting, mobile layout.
 
 ## 13. Reference files
 

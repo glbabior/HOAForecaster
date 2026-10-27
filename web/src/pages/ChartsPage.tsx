@@ -4,7 +4,7 @@ import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
 import { BALANCE_LEGEND, BalanceChart, ChartFrame, balanceSummary } from "../components/charts";
 import { ScenarioPicker } from "../components/ScenarioPicker";
-import { ErrorBanner, Problems } from "../components/ui";
+import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
 import { sharedGrid } from "../scale";
 import type { ProjectResults, ScenarioResult } from "../types";
@@ -41,7 +41,6 @@ export function ChartsPage() {
       <ProjectNav stored={stored} here="Charts" />
       <h1>Charts</h1>
       <ErrorBanner error={loadError} />
-      <Problems title="The baseline has problems" items={results.baseline_problems} />
       <div className="row-actions no-print">
         <ScenarioPicker names={names} selected={chosen ?? names} onChange={setChosen} />
         <button type="button" onClick={() => window.print()}>

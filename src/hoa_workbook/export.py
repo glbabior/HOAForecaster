@@ -1,6 +1,6 @@
 """Write a project as an Excel workbook with live formulas (spec section 7.6).
 
-Every result cell is a formula over the Inputs, Expenses and Plan input rows,
+Every result cell is a formula over the input cells of its scenario's sheet,
 so the workbook recalculates on its own when a board member edits it. This
 module never runs the engine; its formulas are a second, independent
 implementation of section 6, and the tests hold the two to the same figures.
@@ -24,18 +24,8 @@ from openpyxl.utils import get_column_letter as col_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hoa_engine.model import (
-    LIMITS,
-    Baseline,
-    Changes,
-    DuesMode,
-    ExpenseLine,
-    Project,
-    Rounding,
-    Scenario,
-    baseline_for,
-)
-from hoa_engine.validate import horizon_problem, validate_baseline
+from hoa_engine.model import DuesMode, ExpenseLine, Facts, Project, Rounding, Scenario
+from hoa_engine.validate import validate_run
 from hoa_workbook import charts
 from hoa_workbook.layout import (
     ADOPTED_ON_LABEL,
@@ -47,44 +37,32 @@ from hoa_workbook.layout import (
     ASSESS_HEADING_ROW,
     ASSESS_NOTE_COL,
     ASSESS_YEAR_COL,
-    ASSUMPTION_ROWS,
-    ASSUMPTIONS_HEADING,
-    CHANGE_SPARE_ROWS,
-    CHANGE_YEAR_COL,
-    CHANGES_HEADING,
     CHARTS,
     COMPARE,
     EXPENSE_COL,
     EXPENSE_COLUMNS,
-    EXPENSE_TOTAL_LABEL,
+    EXPENSE_SPARE_ROWS,
     EXPENSE_YEAR_COL,
-    EXPENSES,
-    FFB_HEADER_LABEL,
+    EXPENSES_HEADING,
+    FACT_ROWS,
+    FACTS_HEADING,
     FFB_LABEL,
-    FFB_NOTE_MARK_COL,
-    FIRST_EXPENSE_ROW,
-    FIRST_INPUT_ROW,
+    FIRST_PROJECT_ROW,
     FREQUENCY_TEXT,
     HEADER_ROW,
-    INPUT_ROW,
-    INPUT_ROWS,
-    INPUTS,
-    LEAVE_OUT_COL,
-    LEAVE_OUT_HEADING,
-    MARK_COL,
     METHOD,
     MODE_GROWN,
     MODE_TYPED,
-    OPERATING_TOTAL_LABEL,
-    OWN_COL,
-    OWN_HEADING,
+    NAME_LABEL,
+    NOTES_LABEL,
     PLAN_FFB_HEADING,
-    PLAN_FFB_OWN_LABEL,
     PLAN_FFB_YEARS_LABEL,
     PLAN_FIRST_COL,
     PLAN_OPERATING_LABEL,
     PLAN_RESERVE_LABEL,
     PLAN_ROWS,
+    PROJECT,
+    PROJECT_ROW,
     ROUND_DOLLAR,
     ROUND_NONE,
     ROW,
@@ -92,7 +70,6 @@ from hoa_workbook.layout import (
     SOURCE_COL,
     VALUE_COL,
     assess_last_row,
-    input_ref,
     plan_chart_row,
     plan_inputs_row,
     quote,
@@ -183,8 +160,8 @@ def _at(ws: Worksheet, row: int, col: int) -> Cell:
 
 
 ROW_NOTES = {
-    "operating": "The monthly and yearly lines on the Expenses sheet, each grown at its own "
-    "inflation rate or the operating rate on Inputs. Any dues above operating cost go to "
+    "operating": "The monthly and yearly lines in this sheet's expenses, below the charts, each "
+    "grown at its own inflation rate or the operating rate. Any dues above operating cost go to "
     "reserves.",
     "contribution": "Total dues less operating expenses, never below zero. A shortfall is flagged "
     "below, not taken from reserves.",
@@ -197,52 +174,40 @@ ROW_NOTES = {
 class _Plan:
     scenario: Scenario
     sheet: str
-    baseline: Baseline  # as the scenario sees it, its changes applied
+
+    @property
+    def facts(self) -> Facts:
+        return self.scenario.facts
 
 
-# ---------------------------------------------------------------- Inputs
+# ---------------------------------------------------------------- Project
 
 
-def _inputs(wb: Workbook, project: Project) -> None:
-    b = project.baseline
-    ws = wb.create_sheet(INPUTS)
-    _widths(ws, [52, 18, 80])
-    _text(ws["A1"], f"{project.name} – Inputs", bold=True, size=13)
+def _project(wb: Workbook, project: Project) -> None:
+    ws = wb.create_sheet(PROJECT)
+    _widths(ws, [30, 90])
+    _text(ws["A1"], f"{project.name} – Project", bold=True, size=13)
     _text(
         ws["A2"],
-        "Blue text on yellow – inputs to edit. Black – formulas. Green – pulled from another "
-        "sheet. Update inputs as facts are confirmed and everything else recalculates.",
+        "Each scenario's facts, assumptions and expenses are on its own sheet, below its charts.",
         italic=True,
         size=9,
     )
-    for col, heading in enumerate(("Assumption", "Value", "Source / note"), start=1):
-        ws.cell(FIRST_INPUT_ROW - 1, col, heading)
-    _header(ws, FIRST_INPUT_ROW - 1, 1, 3)
-    formats = {"money": CUR, "rate": PCT, "year": YEAR, "count": "0"}
-    for i, row in enumerate(INPUT_ROWS):
-        r = FIRST_INPUT_ROW + i
-        _text(ws.cell(r, 1), row.label)
-        if row.kind == "text":
-            _text(ws.cell(r, 2), project.name if row.key == "name" else project.notes, color=BLUE)
-            ws.cell(r, 2).fill = YELLOW
-            ws.cell(r, 2).alignment = Alignment(wrap_text=True, vertical="top")
-        else:
-            value = getattr(b, row.key)
-            _input(
-                ws.cell(r, 2), value, CUR_CENTS if row.key == "current_dues" else formats[row.kind]
-            )
-        _text(ws.cell(r, 3), b.sources.get(row.key, ""), size=9)
-        ws.cell(r, 3).alignment = Alignment(wrap_text=True, vertical="top")
+    for col, heading in enumerate(("Item", "Value"), start=1):
+        ws.cell(FIRST_PROJECT_ROW - 1, col, heading)
+    _header(ws, FIRST_PROJECT_ROW - 1, 1, 2)
+    for key, label, value in (
+        ("name", NAME_LABEL, project.name),
+        ("notes", NOTES_LABEL, project.notes),
+    ):
+        r = PROJECT_ROW[key]
+        _text(ws.cell(r, 1), label)
+        _text(ws.cell(r, 2), value, color=BLUE)
+        ws.cell(r, 2).fill = YELLOW
+        ws.cell(r, 2).alignment = Alignment(wrap_text=True, vertical="top")
 
 
-# ---------------------------------------------------------------- Expenses
-
-
-@dataclass(frozen=True)
-class _ExpenseRefs:
-    lines: tuple[int, int]  # the first and last row of the line table
-    ffb_col: dict[int, str]
-    ffb_row: int
+# ---------------------------------------------------------------- expense lines
 
 
 @dataclass(frozen=True)
@@ -307,232 +272,48 @@ def _frequency_choice(ws: Worksheet) -> DataValidation:
     return choice
 
 
-def _totals(ws: Worksheet, rows: tuple[int, int], year_cols: Sequence[str], at: int) -> None:
-    """The operating total at row `at` and the reserve total two rows below, for each year
-    column – sums of the lines in `rows` by frequency."""
-    first, last = rows
-    freq = col_letter(EXPENSE_COL["frequency"])
-    span = f"${freq}${first}:${freq}${last}"
-    t = FREQUENCY_TEXT
-    for row, kinds in ((at, ("monthly", "yearly")), (at + 2, ("once", "every"))):
-        for c in year_cols:
-            cells = f"{c}{first}:{c}{last}"
-            parts = "+".join(f'SUMIF({span},"{t[k]}",{cells})' for k in kinds)
-            _formula(ws[f"{c}{row}"], f"={parts}", CUR, bold=True)
-            ws[f"{c}{row}"].fill = TOTAL_FILL
-
-
-def _expenses(wb: Workbook, b: Baseline) -> _ExpenseRefs:
-    ws = wb.create_sheet(EXPENSES)
-    years = list(b.years)
-    _widths(ws, [44, 15, 14, 11, 11, 9, 11, 13, 9] + [12] * (len(years) + 1))
-    _text(ws["A1"], "Expenses by year ($)", bold=True, size=13)
-    _text(
-        ws["A2"],
-        "One row per expense. Monthly and yearly lines are operating costs paid from dues; they "
-        "grow from their first year (blank – the start year) at their own inflation rate or "
-        "the operating rate on Inputs. Once and every-few-years lines are reserve expenses in "
-        "the expense base year's dollars, grown at the reserve expense inflation rate unless "
-        "marked as already in that year's dollars. To add an expense, copy a whole row and "
-        "insert it inside the table, so its year formulas come with it, and clear its line id.",
-        italic=True,
-        size=9,
-    )
-    ws.row_dimensions[2].height = 36
-    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
-    year_col = {y: col_letter(EXPENSE_YEAR_COL + i) for i, y in enumerate(years)}
-    for col, column in enumerate(EXPENSE_COLUMNS, start=1):
-        ws.cell(HEADER_ROW, col, column.heading).alignment = Alignment(wrap_text=True)
-    for y in years:
-        ws[f"{year_col[y]}{HEADER_ROW}"] = y
-        ws[f"{year_col[y]}{HEADER_ROW}"].number_format = YEAR
-    _header(ws, HEADER_ROW, 1, EXPENSE_YEAR_COL + len(years) - 1)
-
-    rates = _Rates(
-        input_ref("operating_inflation"),
-        input_ref("expense_inflation"),
-        input_ref("expense_base_year"),
-        input_ref("start_year"),
-    )
-    if b.expense_lines:  # Excel repairs a dropdown that covers no cells
-        _frequency_choice(ws).add(
-            f"{col_letter(EXPENSE_COL['frequency'])}{FIRST_EXPENSE_ROW}:"
-            f"{col_letter(EXPENSE_COL['frequency'])}{FIRST_EXPENSE_ROW + len(b.expense_lines) - 1}"
-        )
-    r = FIRST_EXPENSE_ROW
-    for line in b.expense_lines:  # the user's order, so a re-import is identical
-        _expense_inputs(ws, r, line)
-        for y in years:
-            c = year_col[y]
-            _formula(ws[f"{c}{r}"], _expense_formula(r, f"{c}${HEADER_ROW}", rates), CUR)
-        r += 1
-    last_line = max(r - 1, FIRST_EXPENSE_ROW)  # an empty table still sums one blank row
-    operating_row, total_row = last_line + 2, last_line + 4
-    _text(ws.cell(operating_row, 1), OPERATING_TOTAL_LABEL, bold=True)
-    _text(ws.cell(total_row, 1), EXPENSE_TOTAL_LABEL, bold=True)
-    _totals(ws, (FIRST_EXPENSE_ROW, last_line), list(year_col.values()), operating_row)
-
-    ffb_head, ffb_row = total_row + 2, total_row + 3
-    _text(ws.cell(ffb_head, 1), FFB_HEADER_LABEL, bold=True)
-    _text(ws.cell(ffb_row, 1), FFB_LABEL)
-    _comment(ws.cell(ffb_row, 1), b.sources.get("ffb", ""))
-    ffb_col = {
-        y: col_letter(EXPENSE_YEAR_COL + i)
-        for i, y in enumerate(range(b.start_year, b.end_year + 2))
-    }
-    for y, c in ffb_col.items():
-        ws[f"{c}{ffb_head}"] = y
-        ws[f"{c}{ffb_head}"].number_format = YEAR
-        _input(ws[f"{c}{ffb_row}"], b.ffb[y], CUR)
-    _header(ws, ffb_head, 1, EXPENSE_YEAR_COL + len(ffb_col) - 1)
-    ws.freeze_panes = ws.cell(FIRST_EXPENSE_ROW, EXPENSE_YEAR_COL)
-    return _ExpenseRefs((FIRST_EXPENSE_ROW, last_line), ffb_col, ffb_row)
-
-
 # ---------------------------------------------------------------- Plan sheets
 
 
 _FORMATS = {"money": CUR, "rate": PCT, "year": YEAR, "count": "0"}
 
 
-def _link(key: str) -> str:
-    """A Plan cell that follows Inputs. A blank governance limit must stay blank (no limit) –
-    a plain link would read it as 0."""
-    cell = f"{INPUTS}!$B${INPUT_ROW[key]}"
-    return f'=IF({cell}="","",{cell})' if key in LIMITS else f"={cell}"
-
-
-def _plan_assumptions(
-    ws: Worksheet, own: Baseline, changes: Changes, frozen: bool, top: int
-) -> tuple[dict[str, str], int]:
-    """The scenario's assumptions – a link to Inputs, or its own value (spec 5.1); for an
-    adopted plan, its frozen baseline's every value, marked where it is the plan's own.
-    Returns the cell of each, and the next free row."""
-    _text(_at(ws, top, 1), ASSUMPTIONS_HEADING, bold=True)
+def _plan_facts(ws: Worksheet, facts: Facts, top: int) -> tuple[dict[str, str], int]:
+    """The scenario's facts and assumptions, each with its source note. Returns the cell of
+    each, and the next free row."""
+    _text(_at(ws, top, 1), FACTS_HEADING, bold=True)
     headings = [(1, "Assumption"), (VALUE_COL, "Value"), (SOURCE_COL, "Source / note")]
-    for col, heading in headings + ([(MARK_COL, OWN_HEADING)] if frozen else []):
+    for col, heading in headings:
         ws.cell(top + 1, col, heading)
-    _header(ws, top + 1, 1, MARK_COL if frozen else SOURCE_COL)
+    _header(ws, top + 1, 1, SOURCE_COL)
     refs = {}
-    for r, row in enumerate(ASSUMPTION_ROWS, start=top + 2):
+    for r, row in enumerate(FACT_ROWS, start=top + 2):
         _text(_at(ws, r, 1), row.label)
-        value, fmt = _at(ws, r, VALUE_COL), _FORMATS[row.kind]
-        fmt = CUR_CENTS if row.key == "current_dues" else fmt
+        fmt = CUR_CENTS if row.key == "current_dues" else _FORMATS[row.kind]
         refs[row.key] = f"${col_letter(VALUE_COL)}${r}"
-        source = _at(ws, r, SOURCE_COL)
-        if frozen:
-            _input(value, getattr(own, row.key), fmt)
-            _text(source, own.sources.get(row.key, ""), size=9)
-            mark = " and ".join(
-                word
-                for word, part in (("value", changes.values), ("note", changes.sources))
-                if row.key in part
-            )
-            _text(_at(ws, r, MARK_COL), mark, color=GREY, size=9)
-            continue
-        if row.key in changes.values:
-            _input(value, changes.values[row.key], fmt)
-        else:
-            _formula(value, _link(row.key), fmt, color=GREEN)
-        if row.key in changes.sources:
-            _text(source, changes.sources[row.key], size=9)
-        else:
-            note = f"{INPUTS}!$C${INPUT_ROW[row.key]}"
-            _formula(source, f'=IF({note}="","",{note})', "General", color=GREEN)
-            source.alignment = Alignment(horizontal="left")
-    return refs, top + 2 + len(ASSUMPTION_ROWS) + 1
+        _input(_at(ws, r, VALUE_COL), getattr(facts, row.key), fmt)
+        _text(_at(ws, r, SOURCE_COL), facts.sources.get(row.key, ""), size=9)
+    return refs, top + 2 + len(FACT_ROWS) + 1
 
 
-def _plan_ffb(
-    ws: Worksheet, own: Baseline, changes: Changes, frozen: bool, ex: _ExpenseRefs, top: int
-) -> tuple[dict[int, str], int]:
-    """The scenario's Fully Funded Balance for its own years and one more – a link to the
-    Expenses sheet, or its own figure; an adopted plan's frozen figures, with a row marking its
-    own. Returns the cell of each year, and the next free row."""
+def _plan_ffb(ws: Worksheet, facts: Facts, top: int) -> tuple[dict[int, str], int]:
+    """The scenario's Fully Funded Balance – its own years and one more, and any other year it
+    holds (kept, though the horizon does not reach it). Returns the cell of each year, and the
+    next free row."""
     _text(_at(ws, top, 1), PLAN_FFB_HEADING, bold=True)
     _text(_at(ws, top + 1, 1), PLAN_FFB_YEARS_LABEL)
     _text(_at(ws, top + 2, 1), FFB_LABEL)
-    _comment(_at(ws, top + 2, 1), (own.sources if frozen else changes.sources).get("ffb", ""))
-    if frozen:
-        _text(_at(ws, top + 3, 1), PLAN_FFB_OWN_LABEL, color=GREY, size=9)
-        _text(
-            _at(ws, top + 3, FFB_NOTE_MARK_COL),
-            "note" if "ffb" in changes.sources else "",
-            color=GREY,
-            size=9,
-        )
+    _comment(_at(ws, top + 2, 1), facts.sources.get("ffb", ""))
     cells = {}
-    years = range(own.start_year, own.end_year + 2)
+    years = sorted({*facts.ffb, *range(facts.start_year, facts.end_year + 2)})
     for i, y in enumerate(years):
         c = col_letter(VALUE_COL + i)
         ws[f"{c}{top + 1}"] = y
         ws[f"{c}{top + 1}"].number_format = YEAR
-        value = ws[f"{c}{top + 2}"]
-        if frozen:
-            _input(value, own.ffb.get(y), CUR)
-            _text(ws[f"{c}{top + 3}"], "yes" if y in changes.ffb else "", color=GREY, size=9)
-        elif y not in changes.ffb and y in ex.ffb_col:
-            _formula(value, f"={EXPENSES}!{ex.ffb_col[y]}${ex.ffb_row}", CUR, color=GREEN)
-        else:  # its own figure – or the baseline's for a year the Expenses sheet does not show
-            _input(value, own.ffb.get(y), CUR)
+        _input(ws[f"{c}{top + 2}"], facts.ffb.get(y), CUR)
         cells[y] = f"{c}${top + 2}"
     _header(ws, top + 1, 1, VALUE_COL + len(years) - 1)
-    return cells, top + (5 if frozen else 4)
-
-
-@dataclass(frozen=True)
-class _ChangeTable:
-    """The columns of a Plan sheet's expense changes table that say which lines it replaces."""
-
-    ids: str
-    frequency: str
-    leave_out: str
-
-
-def _baseline_lines(
-    kind: str, ex: _ExpenseRefs, year: str, rates: _Rates, table: _ChangeTable
-) -> str:
-    """The Expenses sheet's operating or reserve lines in one year, at the scenario's own rates –
-    leaving out every line the scenario changes (a row with its id and a frequency) or leaves
-    out (its id and "yes"); a row with only an id does neither, as on import. One array
-    formula, so a line added on Expenses reaches every scenario."""
-    first, last = ex.lines
-
-    def column(key: str) -> str:
-        c = col_letter(EXPENSE_COL[key])
-        return f"{EXPENSES}!${c}${first}:${c}${last}"
-
-    f, amount, start, end = (
-        column("frequency"),
-        column("amount"),
-        column("year"),
-        column("end_year"),
-    )
-    line_id, t = column("id"), FREQUENCY_TEXT
-    replaced = (
-        f'COUNTIFS({table.ids},{line_id},{table.leave_out},"yes")'
-        f'+COUNTIFS({table.ids},{line_id},{table.frequency},"<>")'
-    )
-    kept = f'((({line_id}="")+(({replaced})=0))>0)'
-    until = f'((({end}="")+({year}<={end}))>0)'
-    if kind == "operating":
-        own_rate = column("inflation")
-        weight = f'(({f}="{t["monthly"]}")*12+({f}="{t["yearly"]}"))*({year}>={start})*{until}'
-        growth = (
-            f'(1+{own_rate}+({own_rate}="")*{rates.operating_inflation})'
-            f'^({year}-({start}+({start}="")*{rates.start_year}))'
-        )
-    else:
-        interval, nominal = column("interval"), column("nominal")
-        weight = (
-            f'(({f}="{t["once"]}")*({year}={start})+({f}="{t["every"]}")*({year}>={start})'
-            f'*(MOD({year}-{start},{interval}+({interval}=""))=0)*{until})'
-        )
-        growth = (
-            f'(({nominal}="yes")+({nominal}<>"yes")'
-            f"*(1+{rates.expense_inflation})^({year}-{rates.base_year}))"
-        )
-    return f"SUMPRODUCT({weight}*{kept}*{amount}*{growth})"
+    return cells, top + 4
 
 
 @dataclass(frozen=True)
@@ -542,117 +323,70 @@ class _Totals:
     last_row: int
 
 
-def _plan_changes(
-    ws: Worksheet,
-    b: Baseline,
-    own: Baseline,
-    changes: Changes,
-    frozen: bool,
-    ex: _ExpenseRefs,
-    rates: _Rates,
-    top: int,
-) -> _Totals:
-    """The scenario's expense changes, one row each with its year formulas, and its operating
-    and reserve totals – the Expenses lines it keeps plus its own rows. An adopted plan's table
-    holds every line of its frozen baseline instead, marked where it is the plan's own, and its
-    totals are those rows alone."""
-    years = list(own.years)
-    _text(_at(ws, top, 1), CHANGES_HEADING, bold=True)
+def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Totals:
+    """The scenario's expenses, one row each with its year formulas and spare rows below, and
+    its operating and reserve totals."""
+    years = list(facts.years)
+    _text(_at(ws, top, 1), EXPENSES_HEADING, bold=True)
     head = top + 1
     for col, column in enumerate(EXPENSE_COLUMNS, start=1):
         ws.cell(head, col, column.heading).alignment = Alignment(wrap_text=True)
-    ws.cell(head, LEAVE_OUT_COL, LEAVE_OUT_HEADING)
-    if frozen:
-        ws.cell(head, OWN_COL, OWN_HEADING)
-    year_col = {y: col_letter(CHANGE_YEAR_COL + i) for i, y in enumerate(years)}
+    year_col = {y: col_letter(EXPENSE_YEAR_COL + i) for i, y in enumerate(years)}
     for y, c in year_col.items():
         ws[f"{c}{head}"] = y
         ws[f"{c}{head}"].number_format = YEAR
-    _header(ws, head, 1, CHANGE_YEAR_COL + len(years) - 1)
+    _header(ws, head, 1, EXPENSE_YEAR_COL + len(years) - 1)
 
-    described = {line.id: line.description for line in b.expense_lines}
-    if frozen:  # every line it runs on, then the lines it leaves out
-        entries: list[tuple[str, ExpenseLine | None]] = [(x.id, x) for x in own.expense_lines]
-        entries += [(i, None) for i, line in changes.expense_lines.items() if line is None]
-        spare = 0
-    else:
-        entries = list(changes.expense_lines.items())
-        spare = CHANGE_SPARE_ROWS
+    lines = facts.expense_lines  # the user's order, so a re-import is identical
     first = head + 1
-    last = max(first, first + len(entries) + spare - 1)  # an empty table still sums a row
-    leave_out = col_letter(LEAVE_OUT_COL)
+    last = first + len(lines) + EXPENSE_SPARE_ROWS - 1
     frequency = col_letter(EXPENSE_COL["frequency"])
     for k, r in enumerate(range(first, last + 1)):
-        line_id, line = entries[k] if k < len(entries) else ("", None)
-        if frozen and line_id:
-            mark = "yes" if line_id in changes.expense_lines else "no"
-            _text(_at(ws, r, OWN_COL), mark, color=GREY, size=9)
-        if line is not None:
-            _expense_inputs(ws, r, line)
-        else:  # a line left out, or a spare row – inputs to fill in
-            _text(_at(ws, r, EXPENSE_COL["description"]), described.get(line_id, ""))
+        if k < len(lines):
+            _expense_inputs(ws, r, lines[k])
+        else:  # a spare row – inputs to fill in
             for key in ("frequency", "amount", "year", "end_year", "interval", "inflation"):
                 ws.cell(r, EXPENSE_COL[key]).fill = YELLOW
                 ws.cell(r, EXPENSE_COL[key]).font = _font(color=BLUE)
-            _text(_at(ws, r, EXPENSE_COL["id"]), line_id, color=GREY, size=8)
-        out = ws.cell(r, LEAVE_OUT_COL)
-        out.value = "yes" if line_id and line is None else "no" if line_id else None
-        out.font, out.fill = _font(color=BLUE), YELLOW
-        out.alignment = Alignment(horizontal="center")
         for c in year_col.values():
             inner = _expense_formula(r, f"{c}${head}", rates)[1:]
-            formula = f'=IF(OR(${leave_out}{r}="yes",${frequency}{r}=""),0,{inner})'
-            _formula(ws[f"{c}{r}"], formula, CUR)
+            _formula(ws[f"{c}{r}"], f'=IF(${frequency}{r}="",0,{inner})', CUR)
     _frequency_choice(ws).add(f"{frequency}{first}:{frequency}{last}")
 
-    id_col = col_letter(EXPENSE_COL["id"])
-    ids = f"${id_col}${first}:${id_col}${last}"
-    table = _ChangeTable(
-        ids,
-        f"${frequency}${first}:${frequency}${last}",
-        f"${leave_out}${first}:${leave_out}${last}",
-    )
     span = f"${frequency}${first}:${frequency}${last}"
     t = FREQUENCY_TEXT
     operating_row, reserve_row = last + 2, last + 4
     _text(_at(ws, operating_row, 1), PLAN_OPERATING_LABEL, bold=True)
     _text(_at(ws, reserve_row, 1), PLAN_RESERVE_LABEL, bold=True)
     totals: tuple[dict[int, str], dict[int, str]] = ({}, {})
-    for (row, kind, kinds), out_cells in zip(
-        (
-            (operating_row, "operating", ("monthly", "yearly")),
-            (reserve_row, "reserve", ("once", "every")),
-        ),
+    for (row, kinds), out_cells in zip(
+        ((operating_row, ("monthly", "yearly")), (reserve_row, ("once", "every"))),
         totals,
         strict=True,
     ):
         for y, c in year_col.items():
-            year = f"{c}${head}"
             rows = "+".join(f'SUMIF({span},"{t[k]}",{c}{first}:{c}{last})' for k in kinds)
-            shared = "" if frozen else f"{_baseline_lines(kind, ex, year, rates, table)}+"
-            _formula(ws[f"{c}{row}"], f"={shared}{rows}", CUR, bold=True)
+            _formula(ws[f"{c}{row}"], f"={rows}", CUR, bold=True)
             ws[f"{c}{row}"].fill = TOTAL_FILL
             out_cells[y] = f"{c}${row}"
     return _Totals(*totals, reserve_row)
 
 
-def _plan(wb: Workbook, b: Baseline, plan: _Plan, ex: _ExpenseRefs) -> None:
-    s, own = plan.scenario, plan.baseline
-    years = list(own.years)
+def _plan(wb: Workbook, plan: _Plan) -> None:
+    s, facts = plan.scenario, plan.facts
+    years = list(facts.years)
     ws = wb.create_sheet(plan.sheet)
-    _widths(ws, [52, 15] + [12] * (CHANGE_YEAR_COL + len(years)))
+    _widths(ws, [52, 15] + [12] * (EXPENSE_YEAR_COL + len(years)))
     _text(ws["A1"], s.name, bold=True, size=13)
     _text(ws["A2"], s.description, italic=True)
-    frozen = s.adoption is not None
     on = s.adoption.adopted_on if s.adoption else None
     guide = (
-        f"Adopted plan – adopted {MONTHS[on.month - 1]} {on.day}, {on.year}. Its figures are "
-        "frozen with the baseline it was adopted against, typed below the charts. Read-only in "
-        "the app – start a new scenario from it there to revise it."
+        f"Adopted plan – adopted {MONTHS[on.month - 1]} {on.day}, {on.year}. Read-only in the "
+        "app – start a new scenario from it there to revise it."
         if on
         else "Edit the blue cells – dues, special assessments and the dues settings below the "
-        "table, and below the charts this scenario's own assumptions, Fully Funded Balance and "
-        "expense changes. Everything else is calculated."
+        "table, and below the charts this scenario's facts and assumptions, Fully Funded Balance "
+        "and expenses. Everything else is calculated."
     )
     _text(ws["A3"], guide, italic=True, size=9)
     pc = {y: col_letter(PLAN_FIRST_COL + i) for i, y in enumerate(years)}
@@ -665,15 +399,15 @@ def _plan(wb: Workbook, b: Baseline, plan: _Plan, ex: _ExpenseRefs) -> None:
     for key, (row, label) in PLAN_ROWS.items():
         _text(ws.cell(row, 1), label, bold=key in ("end", "pf"))
 
-    ref, row = _plan_assumptions(ws, own, s.changes, frozen, plan_inputs_row(len(s.assessments)))
-    ffb, row = _plan_ffb(ws, own, s.changes, frozen, ex, row)
+    ref, row = _plan_facts(ws, facts, plan_inputs_row(len(s.assessments)))
+    ffb, row = _plan_ffb(ws, facts, row)
     rates = _Rates(
         ref["operating_inflation"],
         ref["expense_inflation"],
         ref["expense_base_year"],
         ref["start_year"],
     )
-    totals = _plan_changes(ws, b, own, s.changes, frozen, ex, rates, row)
+    totals = _plan_expenses(ws, facts, rates, row)
     operating, reserve = totals.operating, totals.reserve
     if s.adoption:
         r = totals.last_row + 2
@@ -823,15 +557,14 @@ def _plan(wb: Workbook, b: Baseline, plan: _Plan, ex: _ExpenseRefs) -> None:
 
 def _compare(wb: Workbook, plans: list[_Plan]) -> None:
     ws = wb.create_sheet(COMPARE)
-    spans = {(p.baseline.start_year, p.baseline.end_year) for p in plans}
+    spans = {(p.facts.start_year, p.facts.end_year) for p in plans}
     shared = len(spans) == 1  # calendar years in the labels only when every plan has them
     start, end = next(iter(spans)) if shared else (0, 0)
     _widths(ws, [58] + [18] * len(plans))
     _text(ws["A1"], "Scenario comparison", bold=True, size=13)
     _text(
         ws["A2"],
-        "All figures are pulled from the Plan sheets. Change inputs there or on Inputs and "
-        "Expenses and this updates."
+        "All figures are pulled from the scenario sheets. Change inputs there and this updates."
         + (
             ""
             if shared
@@ -843,19 +576,19 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
     )
 
     def span(p: _Plan, key: str, a: int = 0, z: int | None = None) -> str:
-        z = len(p.baseline.years) - 1 if z is None else z
+        z = len(p.facts.years) - 1 if z is None else z
         return (
             f"{quote(p.sheet)}!{col_letter(PLAN_FIRST_COL + a)}{ROW[key]}"
             f":{col_letter(PLAN_FIRST_COL + z)}{ROW[key]}"
         )
 
     def at(p: _Plan, key: str, offset: int) -> str:
-        if offset >= len(p.baseline.years):
+        if offset >= len(p.facts.years):
             return ""  # the plan is shorter than this measure
         return f"={quote(p.sheet)}!{col_letter(PLAN_FIRST_COL + offset)}{ROW[key]}"
 
     def header(p: _Plan) -> str:
-        n = len(p.baseline.years)
+        n = len(p.facts.years)
         return (
             f"{quote(p.sheet)}!{col_letter(PLAN_FIRST_COL)}{HEADER_ROW}"
             f":{col_letter(PLAN_FIRST_COL + n - 1)}{HEADER_ROW}"
@@ -866,7 +599,7 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
 
     whole = f"{start}–{end}" if shared else "whole projection"
     final = str(end) if shared else "the projection"
-    longest = max(len(p.baseline.years) for p in plans)
+    longest = max(len(p.facts.years) for p in plans)
     Measure = tuple[str, Callable[[_Plan], str], str]
     measures: list[Measure] = [
         (f"Dues per unit per month – {year(0)}", lambda p: at(p, "dues", 0), CUR_CENTS),
@@ -914,19 +647,19 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
     measures += [
         (
             f"Reserve balance end of {final}",
-            lambda p: at(p, "end", len(p.baseline.years) - 1),
+            lambda p: at(p, "end", len(p.facts.years) - 1),
             CUR,
         ),
         (
             f"Percent funded end of {final}",
-            lambda p: at(p, "pf", len(p.baseline.years) - 1),
+            lambda p: at(p, "pf", len(p.facts.years) - 1),
             PCT,
         ),
         (
             "First year percent-funded target is met",
             lambda p: (
                 f"=IFERROR(INDEX({header(p)},"
-                f'MATCH("yes",{span(p, "met")},0)),"not by {p.baseline.end_year}")'
+                f'MATCH("yes",{span(p, "met")},0)),"not by {p.facts.end_year}")'
             ),
             YEAR,
         ),
@@ -981,7 +714,7 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
                 ws.cell(i, 2 + j).alignment = Alignment(horizontal="right")
 
     r = head + len(measures) + 2
-    every_year = sorted({y for p in plans for y in p.baseline.years})
+    every_year = sorted({y for p in plans for y in p.facts.years})
     for title, key, fmt in (
         ("Year-end reserve balance by year", "end", CUR),
         ("Percent funded at year end, by year", "pf", PCT),
@@ -997,8 +730,8 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
             ws.cell(r, 1, y).number_format = YEAR
             ws.cell(r, 1).alignment = Alignment(horizontal="left")
             for j, plan in enumerate(plans):
-                if y in plan.baseline.years:
-                    offset = y - plan.baseline.start_year
+                if y in plan.facts.years:
+                    offset = y - plan.facts.start_year
                     _formula(ws.cell(r, 2 + j), at(plan, key, offset), fmt, color=GREEN)
             r += 1
         r += 1
@@ -1011,19 +744,11 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
 def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
     ws = wb.create_sheet(METHOD, 0)
     _widths(ws, [120])
-    b = project.baseline
-    vote_limits = []
-    if b.max_dues_increase is not None:
-        vote_limits.append(f"a dues increase above {b.max_dues_increase:.0%} in a year")
-    if b.max_assessment_share is not None:
-        vote_limits.append(
-            f"a special assessment above {b.max_assessment_share:.0%} of the year's budget"
-        )
     lines: list[tuple[str, bool, int]] = [
         (f"{project.name} – Reserve Funding Model", True, 13),
         (
-            f"Projection {b.start_year}–{b.end_year}, exported from HOAForecaster. "
-            "A planning tool, not a reserve study. All assumptions are editable and marked.",
+            "Exported from HOAForecaster. A planning tool, not a reserve study. All assumptions "
+            "are editable and marked.",
             False,
             9,
         ),
@@ -1039,40 +764,35 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
         ("", False, 10),
         ("How it works", True, 11),
         (
-            "1. Inputs – starting balance, units, current dues, operating cost inflation, reserve "
-            "expense inflation, interest, the minimum cushion, the percent-funded target and the "
-            "owner-vote limits.",
+            "1. One sheet per scenario, each complete in itself. At the top, the board sets dues "
+            "per unit per month, either typed for each year or grown from a first-year figure, "
+            "and any special assessment per unit. Dues above operating cost flow to reserves. The "
+            "sheet projects the reserve balance each year, compares it to the Fully Funded "
+            "Balance and flags years below the cushion, years that need an owner vote and years "
+            "when dues do not cover operating cost.",
             False,
             10,
         ),
         (
-            "2. Expenses – one row per expense and how often it falls. Monthly and yearly lines "
-            "are operating costs paid from dues, each grown at its own inflation rate or the "
-            "operating rate. Once and every-few-years lines are reserve expenses, grown from the "
-            "expense base year at the reserve expense inflation rate unless marked as already in "
-            "that year's dollars. Below them is the reserve study's Fully Funded Balance for each "
-            "year.",
+            "2. Below each scenario's charts are its facts and assumptions – starting balance, "
+            "units, current dues, operating cost inflation, reserve expense inflation, interest, "
+            "the minimum cushion, the percent-funded target and the owner-vote limits – then the "
+            "reserve study's Fully Funded Balance for each year, then its expenses. Monthly and "
+            "yearly lines are operating costs paid from dues, each grown at its own inflation "
+            "rate or the operating rate. Once and every-few-years lines are reserve expenses, "
+            "grown from the expense base year at the reserve expense inflation rate unless marked "
+            "as already in that year's dollars.",
             False,
             10,
         ),
         (
-            "3. One sheet per scenario – the board sets dues per unit per month, either typed for "
-            "each year or grown from a first-year figure, and any special assessment per unit. "
-            "Dues above operating cost flow to reserves. The sheet projects the reserve balance "
-            "each year, compares it to the Fully Funded Balance and flags years below the "
-            "cushion, years that need an owner vote and years when dues do not cover operating "
-            "cost.",
-            False,
-            10,
-        ),
-        (
-            "4. Compare – the key results side by side, then year-end balance and percent funded "
+            "3. Compare – the key results side by side, then year-end balance and percent funded "
             "by year for every scenario.",
             False,
             10,
         ),
         (
-            "5. Charts – the first chart from each scenario sheet, stacked for comparison.",
+            "4. Charts – the first chart from each scenario sheet, stacked for comparison.",
             False,
             10,
         ),
@@ -1092,25 +812,14 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
             10,
         ),
     ]
-    sources = [(row.label, b.sources[row.key]) for row in INPUT_ROWS if b.sources.get(row.key)]
-    if b.sources.get("ffb"):
-        sources.append(("Fully Funded Balance", b.sources["ffb"]))
-    if sources:
-        lines += [("", False, 10), ("Sources", True, 11)]
-        lines += [(f"{label} – {text}", False, 10) for label, text in sources]
     if project.notes:
         lines += [("", False, 10), ("Notes", True, 11), (project.notes, False, 10)]
     limits = (
         "The expense schedule is a forecast – real costs and timing will differ. Percent funded "
         "uses the reserve study's Fully Funded Balance, which a new study will change. "
-        "Operating inflation is an assumption."
+        "Operating inflation is an assumption. A dues increase or special assessment above the "
+        "limits on a scenario's sheet needs an owner vote – the sheet flags those years."
     )
-    if vote_limits:
-        limits += (
-            " Under the limits on Inputs, "
-            + " or ".join(vote_limits)
-            + " needs an owner vote – the scenario sheets flag those years."
-        )
     lines += [("", False, 10), ("Limits", True, 11), (limits, False, 10)]
     for i, (text, bold, size) in enumerate(lines, start=1):
         _text(ws.cell(i, 1), text, bold=bold, size=size)
@@ -1134,9 +843,6 @@ def build_workbook(
     stacked charts compare visually; the caller supplies it from the engine's
     results, since this module never runs the engine.
     """
-    problems = validate_baseline(project.baseline)
-    if problems:  # an impossible horizon would also make the sheets absurdly wide
-        raise ValueError("; ".join(problems))
     names = [sc.name for sc in project.scenarios]
     if len(set(names)) != len(names):
         raise ValueError("scenario names must be unique")
@@ -1148,25 +854,26 @@ def build_workbook(
         if scenario_names is None
         else [next(sc for sc in project.scenarios if sc.name == n) for n in scenario_names]
     )
+    if not chosen:
+        raise ValueError("there are no scenarios to export")
     plans = [
-        _Plan(s, sheet, baseline_for(project.baseline, s))
+        _Plan(s, sheet)
         for s, sheet in zip(chosen, sheet_names([s.name for s in chosen]), strict=True)
     ]
     for plan in plans:
-        horizon = horizon_problem(plan.baseline)
-        if horizon:  # its sheet could not be laid out
-            raise ValueError(f"{plan.scenario.name} – {horizon}")
+        problems = validate_run(plan.scenario)
+        if problems:  # an impossible horizon would also make its sheet absurdly wide
+            raise ValueError(f"{plan.scenario.name} – " + "; ".join(problems))
     wb = Workbook()
     wb.remove(wb.worksheets[0])
-    _inputs(wb, project)
-    refs = _expenses(wb, project.baseline)
+    _project(wb, project)
     for plan in plans:
-        _plan(wb, project.baseline, plan, refs)
+        _plan(wb, plan)
     _compare(wb, plans)
     charts.add_charts_sheet(
         wb,
         CHARTS,
-        [(p.sheet, p.scenario.name, len(p.baseline.years)) for p in plans],
+        [(p.sheet, p.scenario.name, len(p.facts.years)) for p in plans],
         dollar_axis,
     )
     _method(wb, project, plans)

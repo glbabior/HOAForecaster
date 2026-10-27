@@ -33,6 +33,13 @@ export function ErrorBanner({ error }: { error: unknown }) {
     typeof error === "object" && error !== null && "problems" in error
       ? ((error as { problems: string[] }).problems ?? [])
       : [];
+  if (problems.length === 0)
+    // an error with no list of problems is still shown – Problems alone would show nothing
+    return (
+      <div className="problems" role="alert">
+        <strong>{capitalise(message)}</strong>
+      </div>
+    );
   return <Problems title={capitalise(message)} items={problems} />;
 }
 
@@ -140,7 +147,7 @@ export function DecimalInput({
   const [seen, setSeen] = useState(value);
   useReportValidity(name, invalid);
   if (value !== seen) {
-    // follow outside changes (restoring a draft, pasting into a table) but not our own typing
+    // follow outside changes (pasting into a table, a copy) but not our own typing
     setSeen(value);
     setText(shown);
     setInvalid(false);

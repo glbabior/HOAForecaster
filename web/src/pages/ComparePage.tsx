@@ -4,7 +4,7 @@ import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
 import { CsvButton } from "../components/CsvButton";
 import { ScenarioPicker } from "../components/ScenarioPicker";
-import { ErrorBanner, Problems } from "../components/ui";
+import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
 import { dues, money, percent } from "../format";
 import type { ProjectResults, ScenarioResult, Summary } from "../types";
@@ -231,7 +231,6 @@ export function ComparePage() {
       <ProjectNav stored={stored} here="Compare" />
       <h1>Compare scenarios</h1>
       <ErrorBanner error={loadError} />
-      <Problems title="The baseline has problems" items={results.baseline_problems} />
       {failing.length > 0 && (
         <p className="warning">
           Left out because of problems in their inputs – {failing.join(", ")}.

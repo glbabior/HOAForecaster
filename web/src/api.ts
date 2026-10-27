@@ -2,8 +2,6 @@
 // this page, so no other web page can talk to the app.
 
 import type {
-  Baseline,
-  Draft,
   Project,
   ProjectResults,
   ProjectSummary,
@@ -93,13 +91,7 @@ export const api = {
     }),
   deleteProject: (id: string) => call<undefined>(projectUrl(id), { method: "DELETE" }),
   results: (id: string) => call<ProjectResults>(`${projectUrl(id)}/results`),
-  /** Which saved scenarios change, given the baseline and the scenarios as they will be saved. */
-  baselineImpact: (id: string, baseline: Baseline, scenarios: Scenario[], signal?: AbortSignal) =>
-    call<{ changed: string[]; unchanged: string[]; invalid: string[] }>(
-      `${projectUrl(id)}/baseline-impact`,
-      { method: "POST", body: json({ baseline, scenarios }), signal },
-    ),
-  /** Adopt a saved scenario as the board's plan (spec 5.2). */
+  /** Adopt a scenario as the board's plan (spec 5.2). */
   adopt: (id: string, name: string, date: string, note: string, baseRevision: number) =>
     call<StoredProject>(`${projectUrl(id)}/adopt`, {
       method: "POST",
@@ -111,22 +103,11 @@ export const api = {
       method: "POST",
       body: json({ base_revision: baseRevision }),
     }),
-  run: (baseline: Baseline, scenario: Scenario, signal?: AbortSignal) =>
-    call<ScenarioResult>("/api/run", {
-      method: "POST",
-      body: json({ baseline, scenario }),
-      signal,
-    }),
-  getDrafts: (id: string) => call<{ drafts: Record<string, Draft> }>(`${projectUrl(id)}/drafts`),
-  saveDraft: (id: string, screen: string, edits: Draft["edits"], baseRevision: number) =>
-    call<undefined>(`${projectUrl(id)}/drafts`, {
-      method: "PUT",
-      body: json({ screen, edits, base_revision: baseRevision }),
-    }),
-  discardDraft: (id: string, screen: string) =>
-    call<undefined>(`${projectUrl(id)}/drafts?screen=${encodeURIComponent(screen)}`, {
-      method: "DELETE",
-    }),
+  /** A blank scenario with the spec's defaults (section 4), made by the server. */
+  blankScenario: (name: string) =>
+    call<Scenario>(`/api/blank-scenario?name=${encodeURIComponent(name)}`),
+  run: (scenario: Scenario, signal?: AbortSignal) =>
+    call<ScenarioResult>("/api/run", { method: "POST", body: json({ scenario }), signal }),
   exportProject: (id: string) => download(`${projectUrl(id)}/export.json`),
   exportWorkbook: (id: string, scenarios: string[]) =>
     download(

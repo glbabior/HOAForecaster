@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { PlanTable } from "./components/PlanTable";
 import { ScenarioPicker } from "./components/ScenarioPicker";
-import { DecimalInput, YearInput, useInvalidFields } from "./components/ui";
+import { DecimalInput, ErrorBanner, YearInput, useInvalidFields } from "./components/ui";
 import type { ScenarioResult, YearResult } from "./types";
 
 function year(y: number, change: Partial<YearResult> = {}): YearResult {
@@ -195,6 +195,13 @@ describe("decimal inputs", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "4.5");
     expect(screen.getByText("0.045")).toBeTruthy();
+  });
+});
+
+describe("errors", () => {
+  it("are shown even with no list of problems", () => {
+    render(<ErrorBanner error={new Error("the project was saved elsewhere")} />);
+    expect(screen.getByRole("alert").textContent).toBe("The project was saved elsewhere");
   });
 });
 

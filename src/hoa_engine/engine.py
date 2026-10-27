@@ -1,4 +1,4 @@
-"""`run(baseline, scenario)` – the year-by-year projection and its summary (spec section 6)."""
+"""`run(scenario)` – the year-by-year projection and its summary (spec section 6)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 
 from hoa_engine.dues import resolve_dues
-from hoa_engine.model import Baseline, ExpenseLine, Frequency, Scenario, baseline_for
+from hoa_engine.model import ExpenseLine, Facts, Frequency, Scenario
 from hoa_engine.validate import validate_run
 
 ZERO = Decimal(0)
@@ -88,12 +88,12 @@ def falls_in(line: ExpenseLine, year: int) -> bool:
     if line.end_year is not None and year > line.end_year:
         return False
     if line.frequency is Frequency.EVERY:
-        assert line.year is not None and line.interval  # validate_baseline guarantees both
+        assert line.year is not None and line.interval  # validate_facts guarantees both
         return year >= line.year and (year - line.year) % line.interval == 0
     return line.year is None or year >= line.year
 
 
-def line_amount(line: ExpenseLine, year: int, b: Baseline) -> Decimal:
+def line_amount(line: ExpenseLine, year: int, b: Facts) -> Decimal:
     """The line's amount in `year`, in that year's dollars."""
     if line.frequency.operating:
         rate = b.operating_inflation if line.inflation is None else line.inflation
@@ -106,7 +106,7 @@ def line_amount(line: ExpenseLine, year: int, b: Baseline) -> Decimal:
 
 
 def _needs_vote(
-    b: Baseline, dues: Decimal, prior_dues: Decimal, assessment: Decimal, budget: Decimal
+    b: Facts, dues: Decimal, prior_dues: Decimal, assessment: Decimal, budget: Decimal
 ) -> bool:
     dues_jump = (
         b.max_dues_increase is not None
@@ -119,7 +119,7 @@ def _needs_vote(
     return dues_jump or big_assessment
 
 
-def project_years(b: Baseline, s: Scenario) -> tuple[YearResult, ...]:
+def project_years(b: Facts, s: Scenario) -> tuple[YearResult, ...]:
     dues_by_year = resolve_dues(s, b.years)
     assessment_by_year: dict[int, Decimal] = {}
     for a in s.assessments:
@@ -219,12 +219,12 @@ def summarise(years: tuple[YearResult, ...]) -> Summary:
     )
 
 
-def run(baseline: Baseline, scenario: Scenario) -> ScenarioResult:
-    """Project one scenario against the baseline. Raises InvalidInputs on bad inputs."""
+def run(scenario: Scenario) -> ScenarioResult:
+    """Project one scenario on its own inputs. Raises InvalidInputs on bad inputs."""
     # A fixed context, so a caller's decimal settings can never change the figures.
     with localcontext(prec=28, rounding=ROUND_HALF_EVEN):
-        problems = validate_run(baseline, scenario)
+        problems = validate_run(scenario)
         if problems:
             raise InvalidInputs(problems)
-        years = project_years(baseline_for(baseline, scenario), scenario)
+        years = project_years(scenario.facts, scenario)
         return ScenarioResult(years=years, summary=summarise(years))

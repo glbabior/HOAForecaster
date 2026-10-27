@@ -28,7 +28,8 @@ export interface ExpenseLine {
 
 export const isOperating = (f: Frequency): boolean => f === "monthly" || f === "yearly";
 
-export interface Baseline {
+/** A scenario's facts and assumptions (spec section 4). */
+export interface Facts {
   start_year: number;
   end_year: number;
   starting_balance: Dec;
@@ -57,51 +58,22 @@ export type DuesPath =
   | { mode: "explicit"; explicit: Record<string, Dec> }
   | { mode: "rate"; first_value: Dec; annual_increase: Dec; overrides: Record<string, Dec> };
 
-/** The baseline inputs a scenario can change for itself (spec 5.1). */
-export type ChangeableKey =
-  | "start_year"
-  | "end_year"
-  | "starting_balance"
-  | "units"
-  | "current_dues"
-  | "operating_inflation"
-  | "expense_inflation"
-  | "expense_base_year"
-  | "interest_rate"
-  | "cushion"
-  | "target"
-  | "max_dues_increase"
-  | "max_assessment_share";
-
-/** A scenario's own values – only what it changes; the rest follows the baseline. */
-export interface Changes {
-  /** years and counts as numbers, money and rates as decimal strings; null for "no limit" */
-  values: Partial<Record<ChangeableKey, Dec | number | null>>;
-  sources: Record<string, string>;
-  /** by line id – its own full copy of a baseline line, a line of its own, or null to leave a
-   * baseline line out */
-  expense_lines: Record<string, Omit<ExpenseLine, "id"> | null>;
-  ffb: Record<string, Dec>;
-}
-
 /** The board's adoption of a scenario (spec 5.2). */
 export interface Adoption {
   date: string; // YYYY-MM-DD, as entered
   note: string;
   /** adoption order – the highest is the current adopted plan */
   sequence: number;
-  /** the baseline as the plan saw it when adopted, its changes already applied */
-  baseline: Baseline;
 }
 
 export interface Scenario {
   name: string;
   description: string;
+  facts: Facts;
   dues: DuesPath;
   assessments: Assessment[];
   rounding: "dollar" | "none";
-  changes: Changes;
-  /** set once the board has adopted it – then read-only, run on its frozen baseline */
+  /** set once the board has adopted it – then read-only */
   adoption?: Adoption | null;
 }
 
@@ -109,7 +81,6 @@ export interface Project {
   schema_version: number;
   name: string;
   notes: string;
-  baseline: Baseline;
   scenarios: Scenario[];
 }
 
@@ -122,7 +93,6 @@ export interface StoredProject {
   id: string;
   revision: number;
   times: Times;
-  baseline_times: Times;
   scenario_times: Record<string, Times>;
   project: Project;
 }
@@ -207,18 +177,5 @@ export interface ScenarioResult {
 export type ScenarioOutcome = { result: ScenarioResult } | { problems: string[] };
 
 export interface ProjectResults {
-  baseline_problems: string[];
   scenarios: Record<string, ScenarioOutcome>;
-}
-
-export interface Draft {
-  saved: string;
-  base_revision: number;
-  edits:
-    | { kind: "baseline"; baseline: Baseline; name: string; notes: string }
-    | {
-        kind: "scenario";
-        original: string | null;
-        scenario: Scenario;
-      };
 }

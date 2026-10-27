@@ -31,7 +31,8 @@ export function ProjectList() {
     setBusy(true);
     try {
       const stored = await api.createBlank(name.trim());
-      navigate(`/projects/${stored.id}/baseline`);
+      const first = stored.project.scenarios[0]?.name ?? "";
+      navigate(`/projects/${stored.id}/scenarios/${encodeURIComponent(first)}/facts`);
     } catch (err) {
       setError(err);
       setBusy(false);
@@ -98,8 +99,8 @@ export function ProjectList() {
           </button>
         </form>
         <p className="hint">
-          Starts on January 1 of next year with the usual assumptions – 3% inflation, 2% interest, a
-          70% target – ready for the building's own facts.
+          Starts with one scenario on January 1 of next year with the usual assumptions – 3%
+          inflation, 2% interest, a 70% target – ready for the building's own facts.
         </p>
       </section>
 

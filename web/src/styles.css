@@ -328,22 +328,6 @@ legend {
   padding-left: 1.2em;
 }
 
-.draft-banner {
-  background: var(--caution-bg);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.draft-banner p {
-  margin: 0;
-  flex: 1 1 300px;
-}
-
 /* ---------------------------------------------------------------- tables */
 
 .table-scroll {
@@ -460,11 +444,122 @@ td.flag {
 
 /* ---------------------------------------------------------------- editor layout */
 
+/* an inputs screen – its inputs, and the key results beside them */
 .split {
   display: grid;
-  grid-template-columns: minmax(300px, 420px) 1fr;
+  grid-template-columns: minmax(0, 1fr) 220px;
   gap: 20px;
   align-items: start;
+}
+
+.key-results {
+  position: sticky;
+  top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+
+.key-results dl {
+  margin: 0 0 8px;
+}
+
+.key-results dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.key-results dt {
+  color: var(--muted);
+}
+
+.key-results dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.key-results .negative {
+  color: var(--warn-text);
+}
+
+/* a scenario's name, the screen and whether everything is saved */
+.scenario-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.scenario-head h1 {
+  margin-bottom: 4px;
+}
+
+.screen-title {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.save-note {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.save-note.waiting,
+.save-note.failed {
+  color: var(--warn-text);
+}
+
+.row-buttons,
+button.small {
+  white-space: nowrap;
+}
+
+/* above a wide table, the key results run across in one row */
+.wide-inputs .key-results {
+  position: static;
+  margin-bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+}
+
+.wide-inputs .key-results dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  margin: 0;
+}
+
+.wide-inputs .key-results dl > div {
+  border-bottom: 0;
+  gap: 6px;
+}
+
+.row-buttons button + button {
+  margin-left: 4px;
+}
+
+.copy-choices .check {
+  display: block;
+  padding: 3px 0;
+}
+
+.copy-choices .check.all {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.panel.narrow {
+  max-width: 560px;
 }
 
 .split > * {
@@ -579,7 +674,6 @@ dialog::backdrop {
   }
   .no-print,
   .sticky-actions,
-  .draft-banner,
   .row-actions,
   form.inputs {
     display: none !important;
@@ -613,7 +707,7 @@ dialog::backdrop {
   }
 }
 
-/* Adopted plans (spec 5.2) and a scenario's own changes to the baseline (spec 5.1) */
+/* Adopted plans (spec 5.2) and fieldsets that only group inputs */
 fieldset.plain {
   border: 0;
   margin: 0;
@@ -636,22 +730,7 @@ fieldset.plain {
   border-left: 4px solid var(--good-text);
 }
 
-tr.own th,
-tr.own td {
-  background: var(--good-bg);
-}
-
-tr.left-out td {
-  color: var(--muted);
-}
-
-.own-value {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-
-/* The baseline's facts and assumptions – one aligned row per figure, in groups */
+/* A scenario's facts and assumptions – one aligned row per figure, in groups */
 table.facts {
   width: 100%;
   max-width: 980px;
@@ -756,6 +835,32 @@ table.facts .unit-prefix {
   background: var(--surface);
   border-left: 3px solid var(--accent);
   font-weight: 600;
+}
+
+/* an open scenario's own screens, under Scenarios */
+.scenario-index {
+  margin: 4px 0 8px 12px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.scenario-index .scenario-name {
+  display: block;
+  padding: 4px 10px 0;
+  font-size: 0.85em;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screen-index .scenario-index ul {
+  margin-top: 2px;
+}
+
+.scenario-index a {
+  padding: 4px 10px;
+  font-size: 0.95em;
 }
 
 @media (max-width: 900px) {
