@@ -100,6 +100,13 @@ function RestartButton() {
 }
 
 function Layout() {
+  useEffect(() => {
+    const openAll = () => {
+      for (const d of document.querySelectorAll("details")) d.open = true;
+    };
+    window.addEventListener("beforeprint", openAll);
+    return () => window.removeEventListener("beforeprint", openAll);
+  }, []);
   return (
     <>
       <a className="skip" href="#main">

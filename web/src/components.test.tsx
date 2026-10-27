@@ -75,9 +75,50 @@ describe("the plan table", () => {
     const rows = within(table)
       .getAllByRole("rowheader")
       .map((h) => h.textContent);
-    expect(rows[0]).toBe("Dues per unit per month");
-    expect(rows.at(-1)).toBe("Percent-funded target");
-    expect(rows).toHaveLength(23);
+    expect(rows).toEqual([
+      "Dues per unit per month",
+      "Special assessment per unit",
+      "Operating expenses",
+      "Reserve expenses",
+      "Ending reserve balance",
+      "Percent funded",
+      "Owner cost – dues + assessment",
+      "Below cushion?",
+    ]);
+    // the rest of the spec's 23 rows, in its order, in the details beneath
+    const details = screen.getByRole("table", { name: "Dues only – year by year – details" });
+    const more = within(details)
+      .getAllByRole("rowheader")
+      .map((h) => h.textContent);
+    expect(more[0]).toBe("Total dues collected");
+    expect(more.at(-1)).toBe("Percent-funded target");
+    expect(rows.length + more.length).toBe(23);
+  });
+
+  it("downloads every row in the spec's order", () => {
+    let csv = "";
+    const real = URL.createObjectURL;
+    URL.createObjectURL = (blob: Blob) => {
+      void blob.text().then((t) => (csv = t));
+      return "blob:x";
+    };
+    render(<PlanTable result={result} caption="Dues only – year by year" filename="t.csv" />);
+    screen.getByRole("button", { name: "Download CSV" }).click();
+    URL.createObjectURL = real;
+    return new Promise<void>((done) =>
+      setTimeout(() => {
+        const labels = csv
+          .trim()
+          .split("\n")
+          .map((line) => line.split(",")[0]?.replace(/"/g, ""));
+        expect(labels[0]).toBe("Year");
+        expect(labels[1]).toBe("Dues per unit per month");
+        expect(labels[3]).toBe("Total dues collected"); // the spec's order, not the screen's
+        expect(labels.at(-1)).toBe("Percent-funded target");
+        expect(labels).toHaveLength(24);
+        done();
+      }),
+    );
   });
 
   it("shows flags as words, marks warnings, and keeps exact values for CSV", () => {

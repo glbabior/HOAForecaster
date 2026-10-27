@@ -443,10 +443,10 @@ td.flag {
   margin-left: 1.1em;
 }
 
-.expense-kind > summary h3 {
-  display: inline;
+.expense-kind > summary .summary-title,
+.plan-details > summary .summary-title {
   font-size: 1.05rem;
-  margin: 0;
+  font-weight: 700;
 }
 
 .expense-kind .count {
@@ -973,4 +973,14 @@ ol.steps p {
   color: var(--good-text);
   border-radius: var(--radius);
   padding: 8px 12px;
+}
+
+/* the Results table – headline figures, and the details beneath, each collapsible */
+.plan-details {
+  margin: 12px 0 16px;
+}
+
+.plan-details > summary {
+  cursor: pointer;
+  margin-left: 1.1em;
 }

@@ -21,29 +21,56 @@ interface Row {
   strong?: boolean;
   /** for flags – the value that is a warning; for the target, "yes" is good and "no" neutral */
   warnWhen?: boolean;
+  /** shown first, in the headline table (spec 7.3) – the rest are the details */
+  headline?: boolean;
 }
 
 // Spec 7.3, in its order.
 const ROWS: Row[] = [
-  { label: "Dues per unit per month", value: (y) => y.dues, kind: "dues", input: true },
+  {
+    label: "Dues per unit per month",
+    value: (y) => y.dues,
+    kind: "dues",
+    input: true,
+    headline: true,
+  },
   {
     label: "Special assessment per unit",
     value: (y) => y.assessment_per_unit,
     kind: "dues",
     input: true,
+    headline: true,
   },
   { label: "Total dues collected", value: (y) => y.total_dues, kind: "money" },
-  { label: "Operating expenses", value: (y) => y.operating, kind: "money" },
+  { label: "Operating expenses", value: (y) => y.operating, kind: "money", headline: true },
   { label: "Reserve contribution from dues", value: (y) => y.contribution, kind: "money" },
   { label: "Special assessment to reserves", value: (y) => y.assessment, kind: "money" },
   { label: "Total collected from owners", value: (y) => y.total_from_owners, kind: "money" },
   { label: "Interest earned", value: (y) => y.interest, kind: "money" },
-  { label: "Reserve expenses", value: (y) => y.expenses, kind: "money" },
+  { label: "Reserve expenses", value: (y) => y.expenses, kind: "money", headline: true },
   { label: "Starting reserve balance", value: (y) => y.starting_balance, kind: "money" },
-  { label: "Ending reserve balance", value: (y) => y.ending_balance, kind: "money", strong: true },
+  {
+    label: "Ending reserve balance",
+    value: (y) => y.ending_balance,
+    kind: "money",
+    strong: true,
+    headline: true,
+  },
   { label: "Fully funded balance (start of next year)", value: (y) => y.ffb_next, kind: "money" },
-  { label: "Percent funded", value: (y) => y.percent_funded, kind: "percent", strong: true },
-  { label: "Below cushion?", value: (y) => y.low_flag, kind: "flag", warnWhen: true },
+  {
+    label: "Percent funded",
+    value: (y) => y.percent_funded,
+    kind: "percent",
+    strong: true,
+    headline: true,
+  },
+  {
+    label: "Below cushion?",
+    value: (y) => y.low_flag,
+    kind: "flag",
+    warnWhen: true,
+    headline: true,
+  },
   { label: "Meets target?", value: (y) => y.target_met, kind: "flag" },
   { label: "Needs owner vote?", value: (y) => y.needs_vote, kind: "flag", warnWhen: true },
   {
@@ -53,7 +80,12 @@ const ROWS: Row[] = [
     warnWhen: true,
   },
   { label: "Owner cost – dues per year", value: (y) => y.owner_dues_year, kind: "money" },
-  { label: "Owner cost – dues + assessment", value: (y) => y.owner_cost_year, kind: "money" },
+  {
+    label: "Owner cost – dues + assessment",
+    value: (y) => y.owner_cost_year,
+    kind: "money",
+    headline: true,
+  },
   { label: "Increase vs current dues", value: (y) => y.dues_increase_vs_current, kind: "money" },
   { label: "Cumulative owner cost", value: (y) => y.cumulative_owner_cost, kind: "money" },
   { label: "Cumulative extra cost", value: (y) => y.cumulative_extra, kind: "money" },
@@ -81,6 +113,18 @@ function cell(row: Row, y: YearResult): { text: string; csv: string; className: 
   return { text, csv: raw, className: `num${negative}` };
 }
 
+// the headline rows in the order shown first – dues, then the money, then what it leaves
+const HEADLINE_ORDER = [
+  "Dues per unit per month",
+  "Special assessment per unit",
+  "Operating expenses",
+  "Reserve expenses",
+  "Ending reserve balance",
+  "Percent funded",
+  "Owner cost – dues + assessment",
+  "Below cushion?",
+];
+
 type LineKind = "operating" | "reserve";
 
 /** The rows whose figure is a sum of expense lines, which a click opens. */
@@ -99,7 +143,8 @@ const FREQUENCY_WORDS: Record<Frequency, string> = {
   once: "once",
 };
 
-/** The year-by-year Plan table for one scenario – the equivalent of a Plan sheet. */
+/** The year-by-year Plan table for one scenario – the equivalent of a Plan sheet: the headline
+ * rows, then the rest in a details table that opens beneath. The CSV holds every row. */
 export function PlanTable({
   result,
   caption,
@@ -110,18 +155,21 @@ export function PlanTable({
   filename: string;
 }) {
   const [opened, setOpened] = useState<{ year: number; kind: LineKind } | null>(null);
-  const table = useRef<HTMLTableElement>(null);
+  const headline = useRef<HTMLTableElement>(null);
+  const details = useRef<HTMLTableElement>(null);
   const open = result.years.find((y) => y.year === opened?.year);
   const openLines = open && opened ? linesOf(open, opened.kind) : [];
-  return (
-    <div>
-      <div className="section-head">
-        <span />
-        <CsvButton table={table} filename={filename} />
-      </div>
+  // the headline rows in the order a board reads them; the details in the spec's order
+  const headlineRows = HEADLINE_ORDER.flatMap((label) =>
+    ROWS.filter((r) => r.headline && r.label === label),
+  );
+  const detailRows = ROWS.filter((r) => !r.headline);
+
+  function table(rows: Row[], ref: typeof headline, title: string) {
+    return (
       <div className="table-scroll">
-        <table className="plan" ref={table}>
-          <caption>{caption}</caption>
+        <table className="plan" ref={ref}>
+          <caption>{title}</caption>
           <thead>
             <tr>
               <th scope="col">Year</th>
@@ -133,7 +181,7 @@ export function PlanTable({
             </tr>
           </thead>
           <tbody>
-            {ROWS.map((row) => (
+            {rows.map((row) => (
               <tr
                 key={row.label}
                 className={[row.input ? "input-row" : "", row.strong ? "strong" : ""].join(" ")}
@@ -174,6 +222,25 @@ export function PlanTable({
           </tbody>
         </table>
       </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="section-head">
+        <span />
+        <CsvButton
+          table={[headline, details]}
+          filename={filename}
+          order={ROWS.map((r) => r.label)}
+        />
+      </div>
+      <details className="plan-details" open>
+        <summary>
+          <span className="summary-title">Headline figures</span>
+        </summary>
+        {table(headlineRows, headline, caption)}
+      </details>
       {open && opened && (
         <section className="expense-detail" aria-live="polite">
           <h4>
@@ -195,6 +262,13 @@ export function PlanTable({
           </ul>
         </section>
       )}
+      <details className="plan-details">
+        <summary>
+          <span className="summary-title">Details</span>
+        </summary>
+        <p className="hint">Collections, interest, balances, flags and owner costs.</p>
+        {table(detailRows, details, `${caption} – details`)}
+      </details>
     </div>
   );
 }
