@@ -396,7 +396,7 @@ table.plan tr.strong {
 }
 
 td.flag {
-  text-align: center;
+  text-align: right;
 }
 
 .flag-warn {
