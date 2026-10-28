@@ -381,6 +381,20 @@ table.compare thead th:first-child {
   z-index: 3;
 }
 
+/* Compare – every scenario column the same width, a long name wrapping onto more lines */
+table.compare thead th:not(:first-child),
+table.compare td {
+  width: 9rem;
+  min-width: 9rem;
+  max-width: 9rem;
+}
+
+table.compare thead th:not(:first-child) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: bottom;
+}
+
 table.plan th[scope="row"],
 table.compare th[scope="row"] {
   position: sticky;
