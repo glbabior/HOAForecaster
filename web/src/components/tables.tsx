@@ -1,7 +1,8 @@
-import { useState, type ClipboardEvent, type ReactNode } from "react";
+import { Fragment, useState, type ClipboardEvent, type ReactNode } from "react";
 
 import { parsePasted } from "../csv";
-import { parseDecimal } from "../decimal";
+import { num, parseDecimal } from "../decimal";
+import { money } from "../format";
 import { isOperating, type ExpenseLine, type Frequency } from "../types";
 import { numberOf, useSort } from "./sort";
 import { DecimalInput, OptionalYearInput, YearInput } from "./ui";
@@ -144,10 +145,13 @@ export function ExpenseTable({
   defaultYear,
   onCopy,
   taken = [],
+  horizon,
 }: {
   lines: ExpenseLine[];
   onChange: (lines: ExpenseLine[]) => void;
   defaultYear: number;
+  /** the scenario's years and reserve inflation – to show each every-few-years line's repeats */
+  horizon?: Horizon;
   /** offer each line for copying into other scenarios */
   onCopy?: (line: ExpenseLine) => void;
   /** ids other scenarios use – a new line never takes one, so copying it never replaces a
@@ -155,6 +159,7 @@ export function ExpenseTable({
   taken?: string[];
 }) {
   const [notice, setNotice] = useState("");
+  const [showRepeats, setShowRepeats] = useState(true);
   const rows = useRowIds(lines.length);
   const ids = () => [...taken, ...lines.map((l) => l.id)];
 
@@ -205,8 +210,19 @@ export function ExpenseTable({
               <span className="count">({shown.length})</span>
             </summary>
             <p className="hint">{kind.hint}</p>
+            {kind.frequency === "every" && horizon && shown.length > 0 && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={showRepeats}
+                  onChange={(e) => setShowRepeats(e.target.checked)}
+                />{" "}
+                Show each one's repeats in {horizon.start}–{horizon.end}, beneath it
+              </label>
+            )}
             {shown.length > 0 && (
               <KindTable
+                repeats={kind.frequency === "every" && showRepeats ? horizon : undefined}
                 frequency={kind.frequency}
                 title={kind.title}
                 lines={lines}
@@ -220,6 +236,7 @@ export function ExpenseTable({
                       key={rows.ids[i]}
                       line={line}
                       index={i}
+                      number={kind.frequency === "every" ? shown.indexOf(i) + 1 : undefined}
                       defaultYear={defaultYear}
                       onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
                       onMoved={(to) => {
@@ -262,6 +279,30 @@ export function ExpenseTable({
 
 const ALREADY_INFLATED = "Already in that year's dollars – not grown by reserve inflation";
 
+/** A scenario's years and reserve inflation, as the expense tables need them. */
+export interface Horizon {
+  start: number;
+  end: number;
+  inflation: string;
+  baseYear: number;
+}
+
+/** The years after its first that an every-few-years line falls in the scenario, each with
+ * its cost in that year's dollars – what the engine charges (spec 4.1). */
+export function repeatsOf(line: ExpenseLine, h: Horizon): { year: number; amount: number }[] {
+  if (line.frequency !== "every" || line.year === null || !line.interval || line.interval < 1)
+    return [];
+  const last = Math.min(line.end_year ?? h.end, h.end);
+  const out = [];
+  // from its first occurrence after the line's own row that falls in the scenario
+  const skip = Math.max(1, Math.ceil((h.start - line.year) / line.interval));
+  for (let y = line.year + skip * line.interval; y <= last; y += line.interval) {
+    const grown = line.nominal ? 1 : (1 + num(h.inflation)) ** (y - h.baseYear);
+    out.push({ year: y, amount: num(line.amount) * grown });
+  }
+  return out;
+}
+
 /** One kind's table, its headers sorting what is shown (never the saved order). */
 function KindTable({
   frequency,
@@ -271,9 +312,12 @@ function KindTable({
   rowKey,
   defaultYear,
   row,
+  repeats,
 }: {
   frequency: Frequency;
   title: string;
+  /** given, each every-few-years line's later years show beneath it, read-only */
+  repeats?: Horizon;
   lines: ExpenseLine[];
   /** the positions in `lines` of this kind's lines */
   shown: number[];
@@ -305,6 +349,11 @@ function KindTable({
         <caption className="visually-hidden">{title}</caption>
         <thead>
           <tr>
+            {frequency === "every" && (
+              <th scope="col" title="Each line's number – its repeats beneath name it">
+                #
+              </th>
+            )}
             {header("year", frequency === "once" ? "Year" : "First year")}
             {frequency === "every" &&
               header("interval", "Every … years (its useful life)", {
@@ -333,7 +382,38 @@ function KindTable({
             </th>
           </tr>
         </thead>
-        <tbody>{order.map((k) => row(shown[k] as number))}</tbody>
+        <tbody>
+          {order.map((k) => {
+            const i = shown[k] as number;
+            const line = at(i);
+            const n = shown.indexOf(i) + 1;
+            return (
+              <Fragment key={rowKey(i)}>
+                {row(i)}
+                {repeats &&
+                  repeatsOf(line, repeats).map((r) => (
+                    <tr key={r.year} className="repeat">
+                      <td className="line-number" aria-hidden="true">
+                        ↳
+                      </td>
+                      <td>{r.year}</td>
+                      <td />
+                      <td />
+                      <td className="num" title="In that year's dollars">
+                        {money(String(r.amount))}
+                      </td>
+                      <td>
+                        Repeat of #{n}
+                        {line.description ? ` – ${line.description}` : ""}
+                      </td>
+                      <td />
+                      <td />
+                    </tr>
+                  ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
       </table>
     </div>
   );
@@ -348,9 +428,12 @@ function ExpenseRow({
   onRemove,
   onCopy,
   onMoved,
+  number,
 }: {
   line: ExpenseLine;
   index: number;
+  /** its number in the every-few-years table, which its repeats name */
+  number?: number;
   defaultYear: number;
   onChange: (line: ExpenseLine) => void;
   onRemove: () => void;
@@ -364,6 +447,7 @@ function ExpenseRow({
   const update = (change: Partial<ExpenseLine>) => onChange({ ...line, ...change });
   return (
     <tr>
+      {number !== undefined && <td className="line-number">#{number}</td>}
       <td>
         {operating ? (
           <OptionalYearInput

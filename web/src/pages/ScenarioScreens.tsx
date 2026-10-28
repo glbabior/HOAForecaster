@@ -531,6 +531,8 @@ export function ResultsScreen() {
         <>
           <PlanTable
             result={result}
+            cushion={form.facts.cushion}
+            target={form.facts.target}
             caption={`${form.name} – year by year`}
             filename={`${form.name} - plan.csv`}
           />
@@ -920,6 +922,12 @@ export function ExpensesScreen() {
           onChange={(expense_lines) => setForm({ ...form, facts: { ...f, expense_lines } })}
           onCopy={readOnly || blocked ? undefined : setCopying}
           taken={others.flatMap((s) => s.facts.expense_lines.map((l) => l.id))}
+          horizon={{
+            start: f.start_year,
+            end: f.end_year,
+            inflation: f.expense_inflation,
+            baseYear: f.expense_base_year,
+          }}
         />
         {done && (
           <p className="hint" role="status">

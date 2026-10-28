@@ -903,3 +903,38 @@ describe("yearly increases by period", () => {
     );
   });
 });
+
+describe("repeats of every-few-years costs", () => {
+  it("number each line and show its later years beneath it, following its first year", async () => {
+    const plan = scenario("Plan A");
+    plan.facts.expense_lines = [
+      {
+        id: "p",
+        frequency: "every",
+        year: 2027,
+        interval: 2,
+        end_year: null,
+        amount: "1000",
+        description: "Plumbing",
+        source: "",
+        nominal: false,
+      },
+    ];
+    serve(projectOf(plan, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const every = await screen.findByRole("table", { name: "Every few years" });
+    const repeats = () =>
+      Array.from(every.querySelectorAll("tr.repeat")).map(
+        (r) => `${r.children[1]?.textContent} ${r.children[5]?.textContent}`,
+      );
+    // 2027–2031, base year 2026 at 3%: the 2029 and 2031 occurrences
+    expect(repeats()).toEqual(["2029 Repeat of #1 – Plumbing", "2031 Repeat of #1 – Plumbing"]);
+    expect(every.querySelector("tr.repeat td.num")?.textContent).toBe("$1,093"); // 1000 × 1.03³
+    const first = within(every).getByRole("textbox", { name: "Year of expense 1" });
+    await userEvent.clear(first);
+    await userEvent.type(first, "2028");
+    expect(repeats()).toEqual(["2030 Repeat of #1 – Plumbing"]);
+    await userEvent.click(screen.getByRole("checkbox", { name: /Show each one's repeats/ }));
+    expect(repeats()).toEqual([]);
+  });
+});

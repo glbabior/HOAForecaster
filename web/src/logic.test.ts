@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { reloadWhenFresh, tokenIn } from "./api";
-import { linesFromPaste, newLineId, withFrequency } from "./components/tables";
+import { linesFromPaste, newLineId, repeatsOf, withFrequency } from "./components/tables";
 import { csvCell, parsePasted, toCsv } from "./csv";
 import { fromPercent, grouped, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
 import { dues, money, percent, span } from "./format";
@@ -425,5 +425,39 @@ describe("reloading after a restart", () => {
   it("reads the token a page carries", () => {
     expect(tokenIn(page("abc"))).toBe("abc");
     expect(tokenIn("<html></html>")).toBe("");
+  });
+});
+
+describe("an every-few-years line's repeats", () => {
+  const h = { start: 2027, end: 2040, inflation: "0.03", baseYear: 2026 };
+  const every = (change: Partial<ExpenseLine>): ExpenseLine => ({
+    id: "x",
+    frequency: "every",
+    year: 2027,
+    interval: 5,
+    end_year: null,
+    amount: "1000",
+    description: "",
+    source: "",
+    nominal: false,
+    ...change,
+  });
+  const years = (line: ExpenseLine) => repeatsOf(line, h).map((r) => r.year);
+
+  it("fall every interval after the first, to the scenario's end or the line's last year", () => {
+    expect(years(every({}))).toEqual([2032, 2037]);
+    expect(years(every({ end_year: 2034 }))).toEqual([2032]);
+    expect(years(every({ year: 2016 }))).toEqual([2031, 2036]); // none before the start
+    expect(years(every({ year: 2026 }))).toEqual([2031, 2036]); // the 2026 row itself is not one
+    expect(repeatsOf({ ...every({}), frequency: "once" }, h)).toEqual([]);
+  });
+
+  it("cost that year's dollars – grown from the base year, or flat when already inflated", () => {
+    // 1000 × 1.03^(2032 − 2026) = 1194.05…
+    expect(repeatsOf(every({}), h)[0]?.amount).toBeCloseTo(1194.0523, 3);
+    expect(repeatsOf(every({ nominal: true }), h)[0]?.amount).toBe(1000);
+    // a base year after the line's year deflates it: 1000 × 1.03^(2032 − 2034)
+    const later = repeatsOf(every({}), { ...h, baseYear: 2034 })[0]?.amount;
+    expect(later).toBeCloseTo(942.5959, 3);
   });
 });

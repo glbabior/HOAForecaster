@@ -95,6 +95,12 @@ describe("the plan table", () => {
     expect(rows.length + more.length).toBe(23);
   });
 
+  it("names the scenario's cushion and target in their rows", () => {
+    render(<PlanTable result={result} caption="c" filename="t.csv" cushion="75000" target="0.6" />);
+    expect(screen.getByRole("rowheader", { name: "Below cushion ($75,000)?" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "Meets target (60.0% funded)?" })).toBeTruthy();
+  });
+
   it("downloads every row in the spec's order", () => {
     let csv = "";
     const real = URL.createObjectURL;

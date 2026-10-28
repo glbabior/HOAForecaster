@@ -149,11 +149,23 @@ export function PlanTable({
   result,
   caption,
   filename,
+  cushion,
+  target,
 }: {
   result: ScenarioResult;
   caption: string;
   filename: string;
+  /** the scenario's cushion and target, shown in their rows' labels */
+  cushion?: string;
+  target?: string;
 }) {
+  // a row's label as shown – the flags name the figure they are judged against
+  const labelOf = (row: Row): string =>
+    row.label === "Below cushion?" && cushion !== undefined
+      ? `Below cushion (${money(cushion)})?`
+      : row.label === "Meets target?" && target !== undefined
+        ? `Meets target (${percent(target)} funded)?`
+        : row.label;
   const [opened, setOpened] = useState<{ year: number; kind: LineKind } | null>(null);
   const headline = useRef<HTMLTableElement>(null);
   const details = useRef<HTMLTableElement>(null);
@@ -186,7 +198,7 @@ export function PlanTable({
                 key={row.label}
                 className={[row.input ? "input-row" : "", row.strong ? "strong" : ""].join(" ")}
               >
-                <th scope="row">{row.label}</th>
+                <th scope="row">{labelOf(row)}</th>
                 {result.years.map((y) => {
                   const c = cell(row, y);
                   const kind = LINE_ROWS[row.label];
@@ -229,11 +241,7 @@ export function PlanTable({
     <div>
       <div className="section-head">
         <span />
-        <CsvButton
-          table={[headline, details]}
-          filename={filename}
-          order={ROWS.map((r) => r.label)}
-        />
+        <CsvButton table={[headline, details]} filename={filename} order={ROWS.map(labelOf)} />
       </div>
       <details className="plan-details" open>
         <summary>
