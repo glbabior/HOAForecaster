@@ -1086,7 +1086,6 @@ table.expenses td.line-number {
 /* a screen's explanation, above its inputs */
 .panel.explainer p,
 .panel.explainer li {
-  max-width: 70ch;
   line-height: 1.5;
 }
 
