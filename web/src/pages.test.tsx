@@ -736,23 +736,34 @@ describe("sortable tables", () => {
 });
 
 describe("renaming a scenario", () => {
-  it("is offered on every screen, refuses a taken name, and moves the address", async () => {
+  it("is offered on a scenario's screens, refuses a blank or taken name, and moves the address", async () => {
     const router = start(`${A}/dues`);
     await userEvent.click(await screen.findByRole("button", { name: "Rename…" }));
     const box = screen.getByRole("textbox", { name: "New name" });
     await userEvent.clear(box);
+    expect(screen.getByText("A scenario needs a name.")).toBeTruthy();
     await userEvent.type(box, "Plan B");
     expect(screen.getByText("Another scenario is already called “Plan B”.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Rename" }));
     expect(screen.getByRole("textbox", { name: "New name" })).toBeTruthy(); // still open
     await userEvent.clear(box);
-    await userEvent.type(box, "Steady dues");
-    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await userEvent.type(box, "Steady dues{Enter}"); // Enter confirms
     await waitFor(
       () => expect(at(router)).toBe("/projects/abcdefabcdef/scenarios/Steady%20dues/dues"),
       SLOW,
     );
     expect(lastSaved().scenarios.map((s) => s.name)).toEqual(["Steady dues", "Plan B"]);
+  });
+
+  it("waits while an entry is not usable, since nothing could be saved", async () => {
+    start(`${A}/facts`);
+    await userEvent.type(
+      await screen.findByRole("textbox", { name: "Starting reserve balance" }),
+      "x",
+    );
+    expect((screen.getByRole("button", { name: "Rename…" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it("is not offered on an adopted plan", async () => {

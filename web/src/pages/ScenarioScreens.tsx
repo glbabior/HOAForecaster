@@ -161,7 +161,6 @@ function ScenarioForm({
       ? `Another scenario is already called “${name}” – choose another name on Facts and assumptions.`
       : null;
 
-  /** Save the project's scenarios as `build` makes them from the latest saved ones. */
   const renameProblem =
     renaming === null
       ? null
@@ -170,7 +169,16 @@ function ScenarioForm({
         : others.some((s) => s.name === renaming.trim())
           ? `Another scenario is already called “${renaming.trim()}”.`
           : null;
+  const renameHint = useId();
 
+  function rename() {
+    // the form takes the new name; it saves itself and the address follows
+    if (renaming === null || renameProblem) return;
+    setForm({ ...form, name: renaming.trim() });
+    setRenaming(null);
+  }
+
+  /** Save the project's scenarios as `build` makes them from the latest saved ones. */
   async function saveScenarios(build: (scenarios: Scenario[]) => Scenario[]): Promise<void> {
     await saveProject((project) => ({ ...project, scenarios: build(project.scenarios) }));
   }
@@ -300,7 +308,12 @@ function ScenarioForm({
             >
               Adopt…
             </button>
-            <button type="button" onClick={() => setRenaming(form.name)}>
+            <button
+              type="button"
+              disabled={blocked}
+              title={blocked ? "Fix the entries below first" : undefined}
+              onClick={() => setRenaming(form.name)}
+            >
               Rename…
             </button>
             <button type="button" onClick={() => setConfirmDelete(true)}>
@@ -359,25 +372,21 @@ function ScenarioForm({
         title={`Rename ${savedName}`}
         confirmLabel="Rename"
         onCancel={() => setRenaming(null)}
-        onConfirm={() => {
-          // the form takes the new name; it saves itself and the address follows
-          if (renaming !== null && !renameProblem) {
-            setForm({ ...form, name: renaming.trim() });
-            setRenaming(null);
-          }
-        }}
+        onConfirm={rename}
       >
         <label className="field">
           <span>New name</span>
           <input
             value={renaming ?? ""}
             onChange={(e) => setRenaming(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && rename()}
             aria-invalid={renameProblem ? true : undefined}
+            aria-describedby={renameProblem ? renameHint : undefined}
             autoFocus
           />
         </label>
         {renameProblem && (
-          <p className="warning" role="alert">
+          <p id={renameHint} className="warning" role="alert">
             {renameProblem}
           </p>
         )}
