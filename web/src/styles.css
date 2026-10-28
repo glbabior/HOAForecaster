@@ -790,6 +790,28 @@ dialog::backdrop {
     overflow: visible;
     max-height: none;
   }
+  /* a panel holding a table may run onto the next page – between rows, with the header
+     row repeated – rather than leave the rest of the page empty */
+  .panel:has(table) {
+    break-inside: auto;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  h1,
+  h2,
+  .section-head {
+    break-after: avoid;
+  }
+  /* a printed screen's title and what it is of, on one line */
+  h1.print-title {
+    font-size: 13pt;
+    margin: 0 0 0.5rem;
+  }
+  h1.print-title .print-only {
+    display: inline;
+    font-weight: normal;
+  }
   table.plan,
   table.compare {
     font-size: 8pt;

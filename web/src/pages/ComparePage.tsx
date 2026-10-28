@@ -291,10 +291,13 @@ export function ComparePage() {
   return (
     <>
       <ProjectNav stored={stored} here="Compare" />
-      <h1>Compare scenarios</h1>
-      <p className="print-only">
-        {name} – {longDate(today())}
-      </p>
+      <h1 className="print-title">
+        Compare scenarios
+        <span className="print-only">
+          {" "}
+          – {name} – {longDate(today())}
+        </span>
+      </h1>
       <ErrorBanner error={loadError ?? moveError} />
       {failing.length > 0 && (
         <p className="warning">

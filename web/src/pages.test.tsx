@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { tableRows } from "./csv";
 import userEvent from "@testing-library/user-event";
 import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -458,6 +459,14 @@ describe("the project's screens", () => {
       expect(lastSaved().scenarios.map((s) => s.name)).toEqual(["Plan B", "Plan C", "Plan A"]),
     );
     await waitFor(() => expect(heads()).toEqual(["Measure", "Plan B", "Plan C", "Plan A"]));
+    // a sortable header's CSV is its label alone – not its sort mark or its printed copy
+    const byYear = screen.getByRole("table", { name: "Year-end reserve balance by year" });
+    expect(tableRows(byYear as HTMLTableElement)[0]).toEqual([
+      "Year",
+      "Plan B",
+      "Plan C",
+      "Plan A",
+    ]);
     expect(screen.getByRole("checkbox", { name: /Show differences from Plan B/ })).toBeTruthy();
   });
 

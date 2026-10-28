@@ -71,13 +71,27 @@ export function useSort<T>(
   ) {
     const direction = sort?.key === by ? sort.direction : undefined;
     return (
-      <th scope="col" className={props.className} aria-sort={direction}>
-        <button type="button" className="sort" title={props.title} onClick={() => toggle(by)}>
+      <th
+        scope="col"
+        className={props.className}
+        aria-sort={direction}
+        data-csv={typeof label === "string" ? label : undefined}
+      >
+        <button
+          type="button"
+          className="sort no-print"
+          title={props.title}
+          onClick={() => toggle(by)}
+        >
           {label}
           <span className="sort-mark" aria-hidden="true">
             {direction === "ascending" ? " ▲" : direction === "descending" ? " ▼" : " ↕"}
           </span>
         </button>
+        {/* on paper, plain text – a header row repeated on each page leaves a button's out */}
+        <span className="print-only" aria-hidden="true">
+          {label}
+        </span>
       </th>
     );
   }
