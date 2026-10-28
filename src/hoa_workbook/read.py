@@ -42,10 +42,15 @@ from hoa_workbook.layout import (
     FFB_WORKED_OUT,
     FREQUENCY_TEXT,
     HEADER_ROW,
+    INCREASE_FROM_COL,
+    INCREASE_RATE_COL,
+    INCREASE_TO_COL,
+    INCREASES_HEADING,
     MODE_GROWN,
     MODE_TYPED,
     NAME_LABEL,
     NOTES_LABEL,
+    OLD_RATE_LABEL,
     OLD_SHEETS,
     PLAN_FFB_HEADING,
     PLAN_FIRST_COL,
@@ -264,8 +269,11 @@ _TITLE_ROWS = 3
 
 
 def _plan_rows(ws: Worksheet) -> dict[str, int]:
-    """Plan rows by label, so a row a board member inserts moves nothing out of reach."""
+    """Plan rows by label, so a row a board member inserts moves nothing out of reach. A sheet
+    exported before yearly increases had periods has its one rate under the old label."""
     rows = _first_rows(ws, _TITLE_ROWS)
+    if OLD_RATE_LABEL in rows and PLAN_ROWS["rate"][1] not in rows:
+        rows[PLAN_ROWS["rate"][1]] = rows[OLD_RATE_LABEL]
     missing = [label for _, label in PLAN_ROWS.values() if label not in rows]
     if missing:
         raise WorkbookFormatError(f"{ws.title} is missing the row '{missing[0]}'")
@@ -433,6 +441,50 @@ def _ffb_mode(ws: Worksheet, r: int) -> bool:
     return value == FFB_WORKED_OUT
 
 
+def _ends_assessments(label: str) -> bool:
+    return label == INCREASES_HEADING or label.startswith(CHARTS_LABEL)
+
+
+# the rows of the increases list a year's rate adds up – the From column's range
+_COVERED = re.compile(r"SUMPRODUCT\(\(\(\(\$?[A-Z]{1,3}\$?(\d+):\$?[A-Z]{1,3}\$?(\d+)")
+
+
+def _increases(ws: Worksheet, rate_formula: Any) -> list[dict[str, Any]]:
+    """The yearly dues increases (spec 5.1) – the rows of the list below the assessments that
+    the yearly rate formula adds up; blank rows are spare."""
+    heading = _first_rows(ws, _TITLE_ROWS).get(INCREASES_HEADING)
+    match = _COVERED.match(rate_formula[1:]) if _is_formula(rate_formula) else None
+    if heading is None or match is None:
+        raise WorkbookFormatError(
+            f"{ws.title} – the yearly dues increases list or its formula has been changed – "
+            "export again from the app"
+        )
+    listed = range(int(match[1]), int(match[2]) + 1)
+    out = []
+    r = heading + 2
+    while r <= ws.max_row and not _text(ws.cell(r, 1).value).startswith(CHARTS_LABEL):
+        cells = [
+            ws.cell(r, c).value for c in (INCREASE_FROM_COL, INCREASE_TO_COL, INCREASE_RATE_COL)
+        ]
+        if any(v is not None for v in cells):
+            where = f"{ws.title} yearly dues increase row {r}"
+            if r not in listed:
+                raise WorkbookFormatError(
+                    f"{where} is outside the increases list, so the sheet does not count it – "
+                    "insert new increases between two rows of the list"
+                )
+            first, last, rate = cells
+            out.append(
+                {
+                    "first_year": _optional_whole(first, where + " From"),
+                    "last_year": _optional_whole(last, where + " To"),
+                    "rate": _number(rate, where + " increase"),
+                }
+            )
+        r += 1
+    return out
+
+
 def _scenario(ws: Worksheet) -> dict[str, Any]:
     read = _inputs(ws)
     horizon = read["horizon"]
@@ -455,7 +507,9 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
     def at(key: str, c: int) -> Any:
         return ws.cell(row[key], c).value
 
-    calculated = _CALCULATED + (["dues", "grown"] if mode == MODE_GROWN else [])
+    old_rate = OLD_RATE_LABEL in _first_rows(ws, _TITLE_ROWS)
+    grown = ["dues", "grown"] + ([] if old_rate else ["rate"])
+    calculated = _CALCULATED + (grown if mode == MODE_GROWN else [])
     for key in calculated:
         for y, c in years.items():
             if not _is_formula(at(key, c)):
@@ -478,11 +532,15 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
         }
     else:
         first = ws.cell(row["first"], PLAN_FIRST_COL).value
-        rate = ws.cell(row["rate"], PLAN_FIRST_COL).value
+        if old_rate:  # one rate over every year, as exported before increases had periods
+            rate = _number(ws.cell(row["rate"], PLAN_FIRST_COL).value, f"{ws.title} dues increase")
+            increases = [{"first_year": None, "last_year": None, "rate": rate}]
+        else:
+            increases = _increases(ws, at("rate", PLAN_FIRST_COL))
         dues = {
             "mode": "rate",
             "first_value": _number(first, f"{ws.title} first-year dues"),
-            "annual_increase": _number(rate, f"{ws.title} annual dues increase"),
+            "increases": increases,
             "overrides": {
                 str(y): _number(at("pinned", c), f"{ws.title} pinned dues {y}")
                 for y, c in years.items()
@@ -493,7 +551,7 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
     listed = _summed_rows(at("sa", PLAN_FIRST_COL), f"{ws.title} special assessment")
     assessments = []
     r = listed.start
-    while r <= ws.max_row and not _text(ws.cell(r, 1).value).startswith(CHARTS_LABEL):
+    while r <= ws.max_row and not _ends_assessments(_text(ws.cell(r, 1).value)):
         year, amount = ws.cell(r, ASSESS_YEAR_COL).value, ws.cell(r, ASSESS_AMOUNT_COL).value
         if year is not None or amount is not None:
             where = f"{ws.title} assessment row {r}"

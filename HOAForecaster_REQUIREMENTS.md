@@ -1,6 +1,8 @@
 # HOAForecaster – Application Requirements
 
-Version 1.7 – October 27, 2026 (v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+Version 1.8 – October 28, 2026 (v1.7 and v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+
+Changes in v1.8 – a grown dues path can have different yearly increases for stretches of years (section 5.1).
 
 Changes in v1.7 – a one-time expense can carry its useful life, and a scenario's Fully Funded Balance can be worked out from its expenses instead of typed from the reserve study (sections 4, 4.1 and 6).
 
@@ -97,11 +99,15 @@ Besides its facts and assumptions (section 4), each scenario has –
 | # | Input | Type | Notes |
 |---|---|---|---|
 | 1 | Name, description | text | |
-| 2 | Dues path | one of three modes | (a) **explicit** – dues per unit per month for each year; (b) **first-year value + annual increase %** – e.g. $900 in year 1 then +4%; (c) **mode b with per-year overrides** – any year can be pinned to a value, later years continue the rate from the pinned value |
+| 2 | Dues path | one of three modes | (a) **explicit** – dues per unit per month for each year; (b) **first-year value + yearly increase %** – e.g. $900 in year 1 then +4%, or different increases for stretches of years, e.g. +8% a year for 2028–2030 then +3% (section 5.1); (c) **mode b with per-year overrides** – any year can be pinned to a value, later years continue the rate from the pinned value |
 | 3 | Special assessments | table – year, amount per unit, note | Zero or more. Multiple installments are separate rows |
 | 4 | Dues rounding | choice | Round to whole dollars (default) or no rounding |
 
 The dues path must be shown resolved (the actual number for every year) next to the inputs so the user sees what mode b produced.
+
+### 5.1 Yearly increases by period
+
+A grown dues path (modes b and c) has one or more yearly increases, each a rate with a first and a last year – blank meaning the scenario's start and end. A period's years are the years whose dues rise by its rate over the year before; the start year is the first-year value and is never raised. Every year after the start year must be in exactly one period – overlapping periods, and years no period covers, are problems naming the years – and a period may not end before it starts, nor name a year outside the scenario. A pinned year takes its value, and later years grow from it at their own periods' rates.
 
 ### 5.2 The adopted plan
 

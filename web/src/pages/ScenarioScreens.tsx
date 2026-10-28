@@ -20,6 +20,7 @@ import {
   DecimalInput,
   ErrorBanner,
   Field,
+  OptionalYearInput,
   Problems,
   YearInput,
   useInvalidFields,
@@ -37,7 +38,14 @@ import {
   withHorizon,
   type FactKey,
 } from "../template";
-import type { Assessment, Facts, Scenario, ScenarioResult, StoredProject } from "../types";
+import type {
+  Assessment,
+  Facts,
+  Increase,
+  Scenario,
+  ScenarioResult,
+  StoredProject,
+} from "../types";
 
 // ---------------------------------------------------------------- the screens of a scenario
 
@@ -1053,8 +1061,124 @@ const modeOf = (s: Scenario): Mode =>
       ? "pinned"
       : "rate";
 
+/** The increases with the last stretch split in two at its middle year – the new second half
+ * at the same rate, so adding one never makes an overlap or a gap. A stretch of one year
+ * cannot be split; the new one then follows it to the end, and the problem is listed. */
+export function splitLast(increases: Increase[], start: number, end: number): Increase[] {
+  const last = increases.at(-1);
+  const rate = last?.rate ?? "0.03";
+  if (!last) return [{ first_year: null, last_year: null, rate }];
+  const from = last.first_year ?? start + 1; // the start year is never raised
+  const to = last.last_year ?? end;
+  if (to <= from) return [...increases, { first_year: to + 1, last_year: null, rate }];
+  const middle = Math.floor((from + to) / 2);
+  return [
+    ...increases.slice(0, -1),
+    { ...last, last_year: middle },
+    { first_year: middle + 1, last_year: last.last_year, rate },
+  ];
+}
+
+/** A grown path's yearly increases (spec 5.1) – a rate for each stretch of years, every year
+ * after the start in exactly one; the server names overlaps and gaps. */
+function Increases({
+  increases,
+  start,
+  end,
+  problems,
+  onChange,
+}: {
+  increases: Increase[];
+  start: number;
+  end: number;
+  problems: string[];
+  onChange: (increases: Increase[]) => void;
+}) {
+  const rows = useRowIds(increases.length);
+  const set = (i: number, change: Partial<Increase>) =>
+    onChange(increases.map((x, j) => (j === i ? { ...x, ...change } : x)));
+  return (
+    <div className="increases">
+      <table className="edit-table">
+        <caption>
+          Yearly increases – each year's dues rise by the increase whose years include it; a blank
+          from or to year is the start or end
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">From</th>
+            <th scope="col">To</th>
+            <th scope="col">Increase</th>
+            <th scope="col">
+              <span className="visually-hidden">Remove</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {increases.map((inc, i) => (
+            <tr key={rows.ids[i]}>
+              <td>
+                <OptionalYearInput
+                  label={`First year of yearly increase ${i + 1}`}
+                  name={`First year of yearly increase ${i + 1}`}
+                  value={inc.first_year}
+                  placeholder={`start (${start})`}
+                  onChange={(first_year) => set(i, { first_year })}
+                />
+              </td>
+              <td>
+                <OptionalYearInput
+                  label={`Last year of yearly increase ${i + 1}`}
+                  name={`Last year of yearly increase ${i + 1}`}
+                  value={inc.last_year}
+                  placeholder={`end (${end})`}
+                  onChange={(last_year) => set(i, { last_year })}
+                />
+              </td>
+              <td>
+                <DecimalInput
+                  label={`Yearly increase ${i + 1}`}
+                  name={`Yearly increase ${i + 1}`}
+                  percent
+                  value={inc.rate}
+                  onChange={(v) => v !== null && set(i, { rate: v })}
+                />
+              </td>
+              <td>
+                {increases.length > 1 && (
+                  <button
+                    type="button"
+                    className="small"
+                    aria-label={`Remove yearly increase ${i + 1}`}
+                    onClick={() => {
+                      rows.removed(i);
+                      onChange(increases.filter((_, j) => j !== i));
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Problems title="Yearly increases to fix" items={problems} />
+      <button
+        type="button"
+        onClick={() => {
+          rows.added();
+          onChange(splitLast(increases, start, end));
+        }}
+      >
+        Add yearly % increase
+      </button>
+    </div>
+  );
+}
+
 export function DuesScreen() {
-  const { form, setForm, result } = useScenario();
+  const { form, setForm, result, problems } = useScenario();
   const [mode, setMode] = useState<Mode>(modeOf(form));
   const years = horizonOf(form);
   const f = form.facts;
@@ -1091,7 +1215,7 @@ export function DuesScreen() {
           : {
               mode: "rate" as const,
               first_value: form.dues.explicit[String(f.start_year)] ?? f.current_dues,
-              annual_increase: "0.03",
+              increases: [{ first_year: null, last_year: null, rate: "0.03" }],
               overrides: {},
             };
       setForm({ ...form, dues: { ...base, overrides: next === "rate" ? {} : base.overrides } });
@@ -1147,22 +1271,18 @@ export function DuesScreen() {
                   />
                 )}
               </Field>
-              <Field label="Yearly increase">
-                {(fid) => (
-                  <DecimalInput
-                    id={fid}
-                    name="Yearly increase"
-                    percent
-                    value={form.dues.mode === "rate" ? form.dues.annual_increase : null}
-                    onChange={(v) =>
-                      v !== null &&
-                      form.dues.mode === "rate" &&
-                      setForm({ ...form, dues: { ...form.dues, annual_increase: v } })
-                    }
-                  />
-                )}
-              </Field>
             </div>
+          )}
+          {form.dues.mode === "rate" && (
+            <Increases
+              increases={form.dues.increases}
+              start={f.start_year}
+              end={f.end_year}
+              problems={problems.filter((p) => p.includes("yearly dues increase"))}
+              onChange={(increases) =>
+                form.dues.mode === "rate" && setForm({ ...form, dues: { ...form.dues, increases } })
+              }
+            />
           )}
 
           <table className="edit-table dues-table">

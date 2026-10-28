@@ -54,6 +54,10 @@ from hoa_workbook.layout import (
     FIRST_PROJECT_ROW,
     FREQUENCY_TEXT,
     HEADER_ROW,
+    INCREASE_FROM_COL,
+    INCREASE_RATE_COL,
+    INCREASE_TO_COL,
+    INCREASES_HEADING,
     METHOD,
     MODE_GROWN,
     MODE_TYPED,
@@ -74,6 +78,9 @@ from hoa_workbook.layout import (
     SOURCE_COL,
     VALUE_COL,
     assess_last_row,
+    increases_first_row,
+    increases_heading_row,
+    increases_last_row,
     plan_chart_row,
     plan_inputs_row,
     quote,
@@ -466,7 +473,8 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
     for key, (row, label) in PLAN_ROWS.items():
         _text(ws.cell(row, 1), label, bold=key in ("end", "pf"))
 
-    ref, row = _plan_facts(ws, facts, plan_inputs_row(len(s.assessments)))
+    n_assess, n_incr = len(s.assessments), len(s.dues.increases)
+    ref, row = _plan_facts(ws, facts, plan_inputs_row(n_assess, n_incr))
     ffb_at, row = _plan_ffb(ws, facts, row)
     ffb = ffb_at.cells
     rates = _Rates(
@@ -491,7 +499,7 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
 
     grown = s.dues.mode is DuesMode.RATE
     first_col = col_letter(PLAN_FIRST_COL)
-    first, rate = f"${first_col}${ROW['first']}", f"${first_col}${ROW['rate']}"
+    first = f"${first_col}${ROW['first']}"
     # The mode decides which cells hold formulas, so it is set in the app, not here.
     _text(ws.cell(ROW["mode"], PLAN_FIRST_COL), MODE_GROWN if grown else MODE_TYPED, italic=True)
     rounding_cell = ws.cell(ROW["rounding"], PLAN_FIRST_COL)
@@ -505,7 +513,33 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
     dues_fmt = CUR_CENTS
     if grown:
         _input(ws.cell(ROW["first"], PLAN_FIRST_COL), s.dues.first_value, CUR_CENTS)
-        _input(ws.cell(ROW["rate"], PLAN_FIRST_COL), s.dues.annual_increase, PCT)
+
+    # the yearly increases (spec 5.1), one row each with spare rows; each year's rate is the
+    # sum of the rows covering it – the app refuses overlaps and gaps
+    top = increases_heading_row(n_assess)
+    _text(ws.cell(top, 1), INCREASES_HEADING, bold=True)
+    for col, heading in (
+        (INCREASE_FROM_COL, "From"),
+        (INCREASE_TO_COL, "To"),
+        (INCREASE_RATE_COL, "Increase"),
+    ):
+        ws.cell(top + 1, col, heading)
+    _header(ws, top + 1, 1, INCREASE_RATE_COL)
+    first_inc, last_inc = increases_first_row(n_assess), increases_last_row(n_assess, n_incr)
+    for k, r in enumerate(range(first_inc, last_inc + 1)):
+        # typed dues use no increase – their list is left blank rather than show an unused 0%
+        inc = s.dues.increases[k] if grown and k < n_incr else None
+        _input(ws.cell(r, INCREASE_FROM_COL), inc.first_year if inc else None, YEAR)
+        _input(ws.cell(r, INCREASE_TO_COL), inc.last_year if inc else None, YEAR)
+        _input(ws.cell(r, INCREASE_RATE_COL), inc.rate if inc else None, PCT)
+
+    def span(col: int) -> str:
+        c = col_letter(col)
+        return f"${c}${first_inc}:${c}${last_inc}"
+
+    froms, tos, increases = (
+        span(c) for c in (INCREASE_FROM_COL, INCREASE_TO_COL, INCREASE_RATE_COL)
+    )
 
     _text(ws.cell(ASSESS_HEADING_ROW, 1), ASSESS_HEADING, bold=True)
     headings = (
@@ -532,8 +566,11 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
         D = {k: f"{c}{row}" for k, row in ROW.items()}
         P = {k: f"{p}{row}" for k, row in ROW.items()} if p else {}
         if grown:
+            year = f"{c}${HEADER_ROW}"
+            covering = f'((({froms}="")+({froms}<={year}))>0)*((({tos}="")+({year}<={tos}))>0)'
+            _formula(ws[D["rate"]], f"=SUMPRODUCT({covering}*{increases})", PCT)
             _input(ws[D["pinned"]], s.dues.overrides.get(y), CUR_CENTS)
-            prior = first if i == 0 else f"{P['grown']}*(1+{rate})"
+            prior = first if i == 0 else f"{P['grown']}*(1+{D['rate']})"
             _formula(ws[D["grown"]], f'=IF({D["pinned"]}<>"",{D["pinned"]},{prior})', CUR_CENTS)
             rounded = (
                 f'=IF({D["pinned"]}<>"",{D["pinned"]},'
@@ -619,7 +656,7 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
     ws.freeze_panes = ws.cell(HEADER_ROW + 1, PLAN_FIRST_COL)
     for key, note in ROW_NOTES.items():
         _comment(ws.cell(ROW[key], 1), note)
-    charts.add_plan_charts(ws, s.name, len(years), plan_chart_row(len(s.assessments)))
+    charts.add_plan_charts(ws, s.name, len(years), plan_chart_row(n_assess, n_incr))
 
 
 # ---------------------------------------------------------------- Compare

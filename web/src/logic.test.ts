@@ -232,7 +232,12 @@ const scenario = (name: string, change: Partial<Scenario> = {}): Scenario => ({
   name,
   description: "",
   facts: facts(),
-  dues: { mode: "rate", first_value: "500", annual_increase: "0.03", overrides: {} },
+  dues: {
+    mode: "rate",
+    first_value: "500",
+    increases: [{ first_year: null, last_year: null, rate: "0.03" }],
+    overrides: {},
+  },
   assessments: [],
   rounding: "dollar",
   ...change,

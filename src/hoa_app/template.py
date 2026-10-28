@@ -35,7 +35,11 @@ def _blank_scenario(name: str, today: date) -> dict[str, Any]:
             "max_dues_increase": "0.2",
             "max_assessment_share": "0.05",
         },
-        "dues": {"mode": "rate", "first_value": "0", "annual_increase": "0.03"},
+        "dues": {
+            "mode": "rate",
+            "first_value": "0",
+            "increases": [{"first_year": None, "last_year": None, "rate": "0.03"}],
+        },
         "assessments": [],
         "rounding": "dollar",
     }

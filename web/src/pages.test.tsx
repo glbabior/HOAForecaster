@@ -83,7 +83,12 @@ const scenario = (name: string, change: Partial<Scenario> = {}): Scenario => ({
   name,
   description: "",
   facts: structuredClone(facts),
-  dues: { mode: "rate", first_value: "600", annual_increase: "0.03", overrides: {} },
+  dues: {
+    mode: "rate",
+    first_value: "600",
+    increases: [{ first_year: null, last_year: null, rate: "0.03" }],
+    overrides: {},
+  },
   assessments: [],
   rounding: "dollar",
   ...change,
@@ -867,5 +872,34 @@ describe("sorted editable tables", () => {
     await waitFor(() => expect(savedScenario("Plan A")?.facts.ffb["2031"]).toBe("7"), SLOW);
     expect(savedScenario("Plan A")?.facts.ffb["2030"]).toBe("8"); // the row shown below 2031
     expect(savedScenario("Plan A")?.facts.ffb["2032"]).toBe("203200");
+  });
+});
+
+describe("yearly increases by period", () => {
+  it("add a stretch after the last, save them, and show what overlaps or is missing", async () => {
+    mocked.run.mockRejectedValue(
+      new ApiError(422, "the inputs have problems", ["no yearly dues increase covers 2028–2031"]),
+    );
+    start(`${A}/dues`);
+    // from the one increase over every year, adding splits it at its middle – 2028–2029, 2030–
+    await userEvent.click(await screen.findByRole("button", { name: "Add yearly % increase" }));
+    const to = screen.getByRole("textbox", { name: "Last year of yearly increase 1" });
+    expect((to as HTMLInputElement).value).toBe("2029");
+    const from2 = screen.getByRole("textbox", { name: "First year of yearly increase 2" });
+    expect((from2 as HTMLInputElement).value).toBe("2030");
+    const rate2 = screen.getByRole("textbox", { name: "Yearly increase 2" });
+    await userEvent.clear(rate2);
+    await userEvent.type(rate2, "8");
+    await waitFor(() => {
+      const dues = savedScenario("Plan A")?.dues;
+      expect(dues?.mode === "rate" && dues.increases).toEqual([
+        { first_year: null, last_year: 2029, rate: "0.03" },
+        { first_year: 2030, last_year: null, rate: "0.08" },
+      ]);
+    }, SLOW);
+    const fix = await screen.findByText("Yearly increases to fix");
+    expect(fix.closest("[role=alert]")?.textContent).toContain(
+      "no yearly dues increase covers 2028–2031",
+    );
   });
 });

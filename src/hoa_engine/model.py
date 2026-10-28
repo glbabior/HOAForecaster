@@ -107,12 +107,34 @@ class Assessment:
 
 
 @dataclass(frozen=True)
+class Increase:
+    """A yearly dues increase for a stretch of years (spec 5.1) – the years whose dues rise by
+    `rate` over the year before; None is the scenario's start or end."""
+
+    rate: Decimal
+    first_year: int | None = None
+    last_year: int | None = None
+
+    def covers(self, year: int) -> bool:
+        return (self.first_year is None or self.first_year <= year) and (
+            self.last_year is None or year <= self.last_year
+        )
+
+
+@dataclass(frozen=True)
 class DuesPath:
     mode: DuesMode
     explicit: dict[int, Decimal] = field(default_factory=dict)
     first_value: Decimal = Decimal(0)
-    annual_increase: Decimal = Decimal(0)
+    # RATE mode – one increase over every year, or several for stretches of years
+    increases: tuple[Increase, ...] = (Increase(Decimal(0)),)
     overrides: dict[int, Decimal] = field(default_factory=dict)  # pinned years, RATE mode only
+
+    def rate_in(self, year: int) -> Decimal | None:
+        """The increase that raises `year`'s dues – None while no period, or several, cover it
+        (a problem the scenario's checks name)."""
+        rates = [i.rate for i in self.increases if i.covers(year)]
+        return rates[0] if len(rates) == 1 else None
 
 
 LIMITS = ("max_dues_increase", "max_assessment_share")  # None is "no limit"
@@ -363,7 +385,7 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
             mode=DuesMode(dues["mode"]),
             explicit=_year_map(dues.get("explicit", {})),
             first_value=_dec(dues.get("first_value", 0)),
-            annual_increase=_dec(dues.get("annual_increase", 0)),
+            increases=_increases(dues),
             overrides=_year_map(dues.get("overrides", {})),
         ),
         assessments=tuple(
@@ -372,6 +394,29 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
         ),
         rounding=Rounding(d.get("rounding", Rounding.DOLLAR)),
         adoption=_adoption(d.get("adoption")),
+    )
+
+
+MAX_INCREASES = 100  # yearly dues increases in a scenario – one a year over the longest horizon
+
+
+def _increases(dues: dict[str, Any]) -> tuple[Increase, ...]:
+    """A grown path's yearly increases – or, in a file written before they had periods, its one
+    `annual_increase` over every year."""
+    if "increases" not in dues:
+        return (Increase(_dec(dues.get("annual_increase", 0))),)
+    raw = dues["increases"]
+    if not isinstance(raw, list) or not all(isinstance(i, dict) for i in raw):
+        raise TypeError("the yearly dues increases should be a list")
+    if len(raw) > MAX_INCREASES:
+        raise ValueError(f"a scenario may have at most {MAX_INCREASES} yearly dues increases")
+    return tuple(
+        Increase(
+            rate=_dec(i["rate"]),
+            first_year=_opt_int(i.get("first_year")),
+            last_year=_opt_int(i.get("last_year")),
+        )
+        for i in raw
     )
 
 
@@ -420,7 +465,10 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
         dues["explicit"] = _year_map_out(s.dues.explicit)
     else:
         dues["first_value"] = str(s.dues.first_value)
-        dues["annual_increase"] = str(s.dues.annual_increase)
+        dues["increases"] = [
+            {"first_year": i.first_year, "last_year": i.last_year, "rate": str(i.rate)}
+            for i in s.dues.increases
+        ]
         dues["overrides"] = _year_map_out(s.dues.overrides)
     return {
         "name": s.name,

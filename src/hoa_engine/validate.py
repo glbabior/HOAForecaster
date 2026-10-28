@@ -110,6 +110,42 @@ def validate_run(s: Scenario) -> list[str]:
     return validate_facts(s.facts) + validate_scenario(s, s.facts)
 
 
+def _spans(years: list[int]) -> str:
+    """'2031, 2033–2035' – years written as runs."""
+    runs: list[list[int]] = []
+    for y in years:
+        if runs and y == runs[-1][-1] + 1:
+            runs[-1].append(y)
+        else:
+            runs.append([y])
+    return ", ".join(str(r[0]) if len(r) == 1 else f"{r[0]}–{r[-1]}" for r in runs)
+
+
+def _increases(s: Scenario, years: range) -> list[str]:
+    """A grown path's yearly increases (spec 5.1) – each sound, and every year after the start
+    in exactly one."""
+    problems = []
+    start, end = years.start, years[-1]
+    for i in s.dues.increases:
+        first = start if i.first_year is None else i.first_year
+        last = end if i.last_year is None else i.last_year
+        name = f"the yearly dues increase for {first}–{last}"
+        problems += _rate(name, i.rate)
+        if any(y is not None and not start <= y <= end for y in (i.first_year, i.last_year)):
+            problems.append(f"{name} names a year outside {start}–{end}")
+        elif i.first_year is not None and i.last_year is not None and i.last_year < i.first_year:
+            problems.append(f"{name} ends before it starts")
+    raised = range(start + 1, end + 1)
+    counts = {y: sum(i.covers(y) for i in s.dues.increases) for y in raised}
+    gaps = [y for y, n in counts.items() if n == 0]
+    overlaps = [y for y, n in counts.items() if n > 1]
+    if gaps:
+        problems.append(f"no yearly dues increase covers {_spans(gaps)}")
+    if overlaps:
+        problems.append(f"yearly dues increases overlap in {_spans(overlaps)}")
+    return problems
+
+
 def validate_scenario(s: Scenario, b: Facts) -> list[str]:
     problems = []
     years = b.years
@@ -123,7 +159,7 @@ def validate_scenario(s: Scenario, b: Facts) -> list[str]:
             problems += _money(f"dues for {year}", value)
     else:
         problems += _money("first-year dues", s.dues.first_value)
-        problems += _rate("the annual dues increase", s.dues.annual_increase)
+        problems += _increases(s, years)
         for year, value in sorted(s.dues.overrides.items()):
             if year not in years:
                 problems.append(f"pinned dues year {year} is outside {years.start}–{years[-1]}")

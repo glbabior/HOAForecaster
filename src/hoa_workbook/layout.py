@@ -121,7 +121,7 @@ PLAN_ROWS: dict[str, tuple[int, str]] = {
     "target": (31, "Percent-funded target (this scenario)"),
     "mode": (33, "How dues are set"),
     "first": (34, "First-year dues (grown dues only)"),
-    "rate": (35, "Annual dues increase (grown dues only)"),
+    "rate": (35, "Yearly dues increase (grown dues only)"),  # per year, from the list below
     "pinned": (36, "Pinned dues (blank = grow from the year before)"),
     "grown": (37, "Dues before rounding"),
     "rounding": (38, "Rounding of grown dues"),
@@ -136,13 +136,36 @@ CHARTS_LABEL = "Charts – "  # starts the label above a Plan sheet's charts
 CHART_HEIGHT_ROWS = 22
 
 
+# a sheet exported before yearly increases had periods – one rate in the first year column
+OLD_RATE_LABEL = "Annual dues increase (grown dues only)"
+# below the assessments, the yearly dues increases (spec 5.1) – one row each, with spare rows
+INCREASES_HEADING = (
+    "Yearly dues increases – one row each: the years whose dues rise by it (blank From – the "
+    "start, blank To – the end; blank rows are spare)"
+)
+INCREASE_FROM_COL, INCREASE_TO_COL, INCREASE_RATE_COL = 3, 4, 5
+INCREASE_SPARE_ROWS = 3
+
+
 def assess_last_row(n_assessments: int) -> int:
     return ASSESS_FIRST_ROW + n_assessments + ASSESS_SPARE_ROWS - 1
 
 
-def plan_chart_row(n_assessments: int) -> int:
-    """Top-left row of a Plan sheet's first chart, below the assessment list."""
-    return assess_last_row(n_assessments) + 3
+def increases_heading_row(n_assessments: int) -> int:
+    return assess_last_row(n_assessments) + 2
+
+
+def increases_first_row(n_assessments: int) -> int:
+    return increases_heading_row(n_assessments) + 2  # the row between holds the column headings
+
+
+def increases_last_row(n_assessments: int, n_increases: int) -> int:
+    return increases_first_row(n_assessments) + n_increases + INCREASE_SPARE_ROWS - 1
+
+
+def plan_chart_row(n_assessments: int, n_increases: int) -> int:
+    """Top-left row of a Plan sheet's first chart, below the assessments and increases."""
+    return increases_last_row(n_assessments, n_increases) + 3
 
 
 # Below the charts, the scenario's own inputs – each block found by its heading on import.
@@ -170,9 +193,9 @@ ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL = (
 )  # below the reserve total, on an adopted plan's sheet only
 
 
-def plan_inputs_row(n_assessments: int) -> int:
+def plan_inputs_row(n_assessments: int, n_increases: int) -> int:
     """The row of the facts heading, below the two charts."""
-    return plan_chart_row(n_assessments) + 2 * CHART_HEIGHT_ROWS + 1
+    return plan_chart_row(n_assessments, n_increases) + 2 * CHART_HEIGHT_ROWS + 1
 
 
 MODE_TYPED, MODE_GROWN = "typed for each year", "grown from the first year"

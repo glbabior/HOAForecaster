@@ -19,6 +19,7 @@ from hoa_engine import (
     ExpenseLine,
     Facts,
     Frequency,
+    Increase,
     InvalidInputs,
     Project,
     ProjectFormatError,
@@ -67,7 +68,7 @@ def baseline(**changes: object) -> Facts:
 
 
 def rate(first: str, increase: str, **kw: object) -> Scenario:
-    path = DuesPath(DuesMode.RATE, first_value=D(first), annual_increase=D(increase))
+    path = DuesPath(DuesMode.RATE, first_value=D(first), increases=(Increase(D(increase)),))
     return Scenario("S", baseline(), replace(path, **kw))
 
 
@@ -254,7 +255,7 @@ def test_validate_scenario_reports_each_rule() -> None:
         DuesPath(
             DuesMode.RATE,
             first_value=D(-1),
-            annual_increase=D("0.9"),
+            increases=(Increase(D("0.9")),),
             overrides={2040: D(-2)},
         ),
         assessments=(Assessment(2029, D(-3)),),
@@ -262,7 +263,7 @@ def test_validate_scenario_reports_each_rule() -> None:
     assert validate_scenario(s, b) == [
         "the scenario needs a name",
         "first-year dues cannot be negative",
-        "the annual dues increase must be between 0% and 50%",
+        "the yearly dues increase for 2030–2034 must be between 0% and 50%",
         "pinned dues year 2040 is outside 2030–2034",
         "pinned dues for 2040 cannot be negative",
         "the 2029 assessment is outside 2030–2034",
@@ -729,10 +730,10 @@ def test_a_version_2_project_without_scenarios_gets_one_at_current_dues() -> Non
     (s,) = project.scenarios
     assert s.name == NO_SCENARIOS_NAME
     assert s.facts == baseline()
-    assert (s.dues.mode, s.dues.first_value, s.dues.annual_increase) == (
+    assert (s.dues.mode, s.dues.first_value, s.dues.increases) == (
         DuesMode.RATE,
         D(100),
-        D(0),
+        (Increase(D(0)),),
     )
     assert run(s).years[0].dues == 100
 
@@ -913,3 +914,79 @@ def test_a_nominal_every_few_years_lines_cost_is_deflated_from_its_next_occurren
     g = D("1.1")
     assert ffb[2030] == D(1000) / g**2 * 8 / 10
     assert ffb[2033] == D(1000) / g**9 * 1 / 10
+
+
+# ---------------------------------------------------------------- yearly increases by period (5.1)
+
+
+def _periods(*increases: Increase, **kw: object) -> Scenario:
+    path = DuesPath(DuesMode.RATE, first_value=D(100), increases=increases)
+    return Scenario("S", baseline(), replace(path, **kw), rounding=Rounding.NONE)
+
+
+def test_each_year_grows_at_its_own_periods_increase() -> None:
+    # 2030 is the first-year value; +10% in 2031–2032, then +50%
+    s = _periods(Increase(D("0.1"), 2031, 2032), Increase(D("0.5"), 2033))
+    assert resolve_dues(s, range(2030, 2035)) == {
+        2030: D(100),
+        2031: D(110),
+        2032: D("121.00"),
+        2033: D("181.500"),
+        2034: D("272.2500"),
+    }
+    # a pinned year restarts the growth at the periods' own rates
+    pinned = _periods(
+        Increase(D("0.1"), None, 2031), Increase(D("0.5"), 2032), overrides={2032: D(200)}
+    )
+    assert resolve_dues(pinned, range(2030, 2034))[2033] == D(300)
+
+
+def test_one_increase_over_every_year_is_what_it_always_was() -> None:
+    one = _periods(Increase(D("0.07")))
+    path = one.dues
+    assert resolve_dues(one, range(2030, 2035))[2034] == D(100) * D("1.07") ** 4
+    assert path.rate_in(2031) == D("0.07")
+
+
+def test_the_periods_must_cover_each_year_after_the_start_exactly_once() -> None:
+    b = baseline()  # 2030–2034
+    gappy = _periods(Increase(D("0.1"), None, 2031), Increase(D("0.1"), 2034))
+    assert validate_scenario(gappy, b) == ["no yearly dues increase covers 2032–2033"]
+    overlapping = _periods(Increase(D("0.1"), None, 2032), Increase(D("0.2"), 2032, 2033))
+    assert validate_scenario(overlapping, b) == [
+        "no yearly dues increase covers 2034",
+        "yearly dues increases overlap in 2032",
+    ]
+    # the start year is never raised, so a period from it is fine
+    assert validate_scenario(_periods(Increase(D("0.1"), 2030)), b) == []
+    backwards = _periods(Increase(D("0.1"), 2033, 2031), Increase(D("0.1")))
+    assert "the yearly dues increase for 2033–2031 ends before it starts" in validate_scenario(
+        backwards, b
+    )
+    outside = _periods(Increase(D("0.9"), 2029))
+    assert validate_scenario(outside, b)[:2] == [
+        "the yearly dues increase for 2029–2034 must be between 0% and 50%",
+        "the yearly dues increase for 2029–2034 names a year outside 2030–2034",
+    ]
+    assert validate_scenario(_periods(Increase(D("0.1"), 2031), Increase(D("0.1"), 2031)), b) == [
+        "yearly dues increases overlap in 2031–2034"
+    ]
+
+
+def test_periods_are_read_and_written_and_an_older_single_rate_still_reads() -> None:
+    s = _periods(Increase(D("0.08"), None, 2032), Increase(D("0.03"), 2033))
+    raw = scenario_to_dict(s)
+    assert raw["dues"]["increases"] == [
+        {"first_year": None, "last_year": 2032, "rate": "0.08"},
+        {"first_year": 2033, "last_year": None, "rate": "0.03"},
+    ]
+    assert "annual_increase" not in raw["dues"]
+    assert scenario_from_dict(raw) == s
+    older = {**raw, "dues": {"mode": "rate", "first_value": "100", "annual_increase": "0.04"}}
+    assert scenario_from_dict(older).dues.increases == (Increase(D("0.04")),)
+    for bad, message in (
+        ("not a list", "should be a list"),
+        ([{"rate": "0.1"}] * 101, "at most 100"),
+    ):
+        with pytest.raises(ProjectFormatError, match=message):
+            scenario_from_dict({**raw, "dues": {**raw["dues"], "increases": bad}})

@@ -166,7 +166,7 @@ def upgrade_v2_project(d: dict[str, Any]) -> dict[str, Any]:
                 "dues": {
                     "mode": "rate",
                     "first_value": str(baseline.current_dues),
-                    "annual_increase": "0",
+                    "increases": [{"first_year": None, "last_year": None, "rate": "0"}],
                 },
                 "assessments": [],
                 "rounding": "dollar",

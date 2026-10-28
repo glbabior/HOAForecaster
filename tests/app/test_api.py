@@ -370,7 +370,7 @@ def test_a_blank_scenario_from_the_specs_defaults(client: TestClient) -> None:
     assert scenario["dues"] == {
         "mode": "rate",
         "first_value": "0",
-        "annual_increase": "0.03",
+        "increases": [{"first_year": None, "last_year": None, "rate": "0.03"}],
         "overrides": {},
     }
     for name in ("", "   ", "x" * 201, "bell\a", "del\x7f"):

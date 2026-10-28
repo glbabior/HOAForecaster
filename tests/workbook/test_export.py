@@ -29,6 +29,7 @@ from hoa_engine import (
     ExpenseLine,
     Facts,
     Frequency,
+    Increase,
     Project,
     Rounding,
     Scenario,
@@ -45,6 +46,7 @@ from hoa_workbook.layout import (
     EXPENSE_YEAR_COL,
     EXPENSES_HEADING,
     FACTS_HEADING,
+    PLAN_FIRST_COL,
     PLAN_OPERATING_LABEL,
     PLAN_RESERVE_LABEL,
     PROJECT_ROW,
@@ -90,7 +92,7 @@ def _short_project() -> Project:
     grown = Scenario(
         "It's grown",
         f,
-        DuesPath(DuesMode.RATE, first_value=D("700.40"), annual_increase=D("0.05")),
+        DuesPath(DuesMode.RATE, first_value=D("700.40"), increases=(Increase(D("0.05")),)),
         rounding=Rounding.NONE,
     )
     return Project("=Short demo", (typed, grown), notes="@note stays text")
@@ -114,7 +116,7 @@ def _varied_project() -> Project:
             2030, D(900), "Security patrol", frequency=Frequency.MONTHLY, end_year=2036, id="patrol"
         ),
     )
-    grown = DuesPath(DuesMode.RATE, first_value=D(690), annual_increase=D("0.04"))
+    grown = DuesPath(DuesMode.RATE, first_value=D(690), increases=(Increase(D("0.04")),))
     own = Scenario(
         "Own assumptions",
         replace(
@@ -818,18 +820,99 @@ def test_a_row_inserted_on_a_scenario_sheet_keeps_the_scenario() -> None:
     assert project == DEMO
 
 
+def _row_of(ws: Any, start: str) -> int:
+    return next(c.row for (c,) in ws.iter_rows(max_col=1) if str(c.value).startswith(start))
+
+
 def test_an_assessment_below_the_list_is_refused() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
         ws = wb["Dues only"]
-        charts = next(
-            c.row for (c,) in ws.iter_rows(max_col=1) if str(c.value).startswith("Charts")
-        )
-        below = charts - 1  # the blank row between the list's spare rows and the charts
+        # the blank row between the list's spare rows and the yearly increases
+        below = _row_of(ws, "Yearly dues increases") - 1
         ws.cell(below, 3, 2030)
         ws.cell(below, 4, 500)
 
     with pytest.raises(WorkbookFormatError, match="below the assessment list"):
         read_workbook(_broken(edit))
+
+
+# ---------------------------------------------------------------- yearly dues increases (5.1)
+
+STEPPED = "Stepped increases"  # the demo's scenario with several periods
+
+
+def test_the_yearly_increases_are_a_list_with_a_rate_formula_for_each_year() -> None:
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
+    ws = next(w for w in wb.worksheets if w["A1"].value == STEPPED)
+    s = next(x for x in DEMO.scenarios if x.name == STEPPED)
+    top = _row_of(ws, "Yearly dues increases")
+    for k, inc in enumerate(s.dues.increases):
+        r = top + 2 + k
+        assert ws.cell(r, 3).value == inc.first_year and ws.cell(r, 4).value == inc.last_year
+        assert Decimal(str(ws.cell(r, 5).value)) == inc.rate
+    rate_row = _rows(ws)["Yearly dues increase (grown dues only)"]
+    assert str(ws.cell(rate_row, PLAN_FIRST_COL + 1).value).startswith("=SUMPRODUCT(")
+
+
+def test_several_yearly_increases_come_back_as_they_were() -> None:
+    again = read_workbook(export_workbook(DEMO))
+    before = next(x for x in DEMO.scenarios if x.name == STEPPED)
+    after = next(x for x in again.scenarios if x.name == STEPPED)
+    assert len(before.dues.increases) > 1
+    assert after.dues == before.dues
+
+
+def _stepped(edit: Any) -> Any:
+    def apply(wb: openpyxl.Workbook) -> None:
+        ws = next(w for w in wb.worksheets if w["A1"].value == STEPPED)
+        edit(ws, _row_of(ws, "Yearly dues increases") + 2)
+
+    return apply
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda ws, r: setattr(ws.cell(r, 5), "value", "lots"), "increase should be a number"),
+        (lambda ws, r: setattr(ws.cell(r, 3), "value", 2030.5), "From should be a year"),
+        (
+            lambda ws, r: setattr(
+                ws.cell(_rows(ws)["Yearly dues increase (grown dues only)"], PLAN_FIRST_COL + 2),
+                "value",
+                0.1,
+            ),
+            "was typed over",
+        ),
+        (
+            lambda ws, r: setattr(
+                ws.cell(_rows(ws)["Yearly dues increase (grown dues only)"], PLAN_FIRST_COL),
+                "value",
+                "=0.1",
+            ),
+            "has been changed",
+        ),
+        (lambda ws, r: ws.cell(_row_of(ws, "Charts") - 1, 5, 0.2), "outside the increases list"),
+        (lambda ws, r: setattr(ws.cell(r + 1, 3), "value", 2029), "overlap"),
+    ],
+    ids=["rate", "year", "typed over", "formula changed", "below the list", "overlap"],
+)
+def test_damaged_yearly_increases_are_refused(edit: Any, message: str) -> None:
+    with pytest.raises(WorkbookFormatError, match=message):
+        read_workbook(_broken(_stepped(edit)))
+
+
+def test_a_sheet_from_before_periods_reads_its_one_rate() -> None:
+    def older(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        r = _rows(ws)["Yearly dues increase (grown dues only)"]
+        ws.cell(r, 1).value = "Annual dues increase (grown dues only)"
+        ws.cell(r, PLAN_FIRST_COL).value = 0.045
+        for c in range(PLAN_FIRST_COL + 1, ws.max_column + 1):
+            ws.cell(r, c).value = None  # the old sheet had one cell, no formulas
+
+    again = read_workbook(_broken(older))
+    dues = next(s for s in again.scenarios if s.name == "Dues only").dues
+    assert dues.increases == (Increase(Decimal("0.045")),)
 
 
 @pytest.mark.parametrize(
@@ -880,7 +963,7 @@ def test_assessments_round_trip_one_row_each() -> None:
     two = Scenario(
         "Two in one year",
         f,
-        DuesPath(DuesMode.RATE, first_value=D(600), annual_increase=D("0.03")),
+        DuesPath(DuesMode.RATE, first_value=D(600), increases=(Increase(D("0.03")),)),
         assessments=(
             Assessment(f.start_year + 1, D(1500), "First half"),
             Assessment(f.start_year + 1, D(1500), "Second half"),

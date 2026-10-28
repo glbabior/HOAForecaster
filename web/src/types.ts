@@ -62,7 +62,22 @@ export interface Assessment {
 
 export type DuesPath =
   | { mode: "explicit"; explicit: Record<string, Dec> }
-  | { mode: "rate"; first_value: Dec; annual_increase: Dec; overrides: Record<string, Dec> };
+  | {
+      mode: "rate";
+      first_value: Dec;
+      /** the yearly increases – one over every year, or several for stretches of years (spec
+       * 5.1); a blank year is the scenario's start or end */
+      increases: Increase[];
+      overrides: Record<string, Dec>;
+    };
+
+/** A yearly dues increase for a stretch of years – the years whose dues rise by `rate` over
+ * the year before. */
+export interface Increase {
+  first_year: number | null;
+  last_year: number | null;
+  rate: Dec;
+}
 
 /** The board's adoption of a scenario (spec 5.2). */
 export interface Adoption {
