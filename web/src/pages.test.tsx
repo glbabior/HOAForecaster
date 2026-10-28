@@ -1140,4 +1140,40 @@ describe("Compare's cushion and target", () => {
     ).getAllByRole("cell");
     expect(cushions.map((c) => c.textContent)).toEqual(["$10,000", "$25,000"]);
   });
+
+  it("flags negative figures in the summary and percent funded as a low balance is", async () => {
+    const short = ok(scenario("Plan B"));
+    short.result.summary.lowest_balance = "-5000";
+    short.result.summary.avg_extra = "-200";
+    short.result.years[1] = {
+      year: 2028,
+      ending_balance: "1",
+      percent_funded: "-0.1",
+      low_flag: false,
+    };
+    mocked.results.mockResolvedValue({
+      scenarios: { "Plan A": ok(scenario("Plan A")), "Plan B": short },
+    });
+    start("/projects/abcdefabcdef/compare");
+    const lowest = within(
+      within(await screen.findByRole("table", { name: "Summary measures by scenario" })).getByRole(
+        "row",
+        { name: /^Lowest year-end balance/ },
+      ),
+    ).getAllByRole("cell");
+    expect(lowest.map((c) => c.classList.contains("flag-warn"))).toEqual([false, true]);
+    // a negative extra cost is a saving, not a warning
+    const extra = within(
+      within(screen.getByRole("table", { name: "Summary measures by scenario" })).getByRole("row", {
+        name: /^Average extra cost/,
+      }),
+    ).getAllByRole("cell");
+    expect(extra.map((c) => c.classList.contains("flag-warn"))).toEqual([false, false]);
+    const pf = within(
+      within(screen.getByRole("table", { name: "Percent funded by year" })).getByRole("row", {
+        name: /^2028/,
+      }),
+    ).getAllByRole("cell");
+    expect(pf.map((c) => c.classList.contains("flag-warn"))).toEqual([false, true]);
+  });
 });

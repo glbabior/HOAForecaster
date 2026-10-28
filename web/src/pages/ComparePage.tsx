@@ -198,6 +198,11 @@ function show(kind: Kind, value: string | number | null, end: number): string {
   return String(value);
 }
 
+/** A figure below zero – flagged like a year below the cushion. */
+function below(value: string | number | null): boolean {
+  return value !== null && num(String(value)) < 0;
+}
+
 // The smallest difference worth showing, per kind – a hundredth of a point for percentages
 // (stored as fractions), a cent for money.
 const SMALLEST: Record<Kind, number> = {
@@ -333,7 +338,11 @@ export function ComparePage() {
                           const v = m.value(r.summary, factsOf(n));
                           const d = diffs && i > 0 ? difference(m.kind, m.better, v, base) : null;
                           return (
-                            <td key={n} className="num" data-csv={v === null ? "" : String(v)}>
+                            <td
+                              key={n}
+                              className={`num${m.better === "higher" && below(v) ? " flag-warn" : ""}`}
+                              data-csv={v === null ? "" : String(v)}
+                            >
                               {show(m.kind, v, r.years.at(-1)?.year ?? 0)}
                               {d && <span className={`diff ${d.className}`}> ({d.text})</span>}
                             </td>
@@ -421,17 +430,13 @@ function ByYearTable({
                     // the same calendar year in each scenario, blank where it has none
                     const at = r.years.find((y) => y.year === year);
                     const v = at?.[field] ?? null;
-                    const low = field === "ending_balance" && at?.low_flag;
+                    const low = (field === "ending_balance" && at?.low_flag) || below(v);
                     const first = shown[0]?.[1].years.find((y) => y.year === year);
                     const base = first?.[field] ?? null;
                     const kind = field === "ending_balance" ? "money" : "percent";
                     const d = diffs && k > 0 ? difference(kind, "higher", v, base) : null;
                     return (
-                      <td
-                        key={n}
-                        className={`num${low ? " flag-warn" : ""}${v?.startsWith("-") ? " negative" : ""}`}
-                        data-csv={v ?? ""}
-                      >
+                      <td key={n} className={`num${low ? " flag-warn" : ""}`} data-csv={v ?? ""}>
                         {field === "ending_balance" ? money(v) : percent(v)}
                         {d && <span className={`diff ${d.className}`}> ({d.text})</span>}
                       </td>
