@@ -973,6 +973,29 @@ export function FfbScreen() {
   });
   return (
     <InputsScreen>
+      <section className="panel explainer" aria-label="What the Fully Funded Balance means">
+        <p>
+          The Fully Funded Balance is what should have been saved by a given year, added up across
+          every component in the building.
+        </p>
+        <p>
+          Each year the building wears a little, and the owners living there that year are the ones
+          using it up. The Fully Funded Balance is what the fund would hold if every owner had paid
+          exactly for the wear during their time.
+        </p>
+        <ul>
+          <li>At 100% funded, the fund has kept pace – owners pay only for future wear.</li>
+          <li>
+            Below 100%, past wear wasn't fully paid for. Owners will make up the difference later,
+            through higher dues or special assessments.
+          </li>
+        </ul>
+        <p>
+          Percent funded predicts special-assessment risk. At 25% funded, three quarters of the wear
+          already done hasn't been paid for, so the money for those replacements has to come from
+          somewhere when they fall due.
+        </p>
+      </section>
       <section className="panel">
         <fieldset className="plain">
           <legend className="visually-hidden">Where the Fully Funded Balance comes from</legend>

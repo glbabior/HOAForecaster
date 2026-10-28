@@ -1045,3 +1045,21 @@ describe("every-few-years costs in year order", () => {
     ]);
   });
 });
+
+describe("the Fully Funded Balance screen", () => {
+  it("explains what the figure means", async () => {
+    start(`${A}/ffb`);
+    const about = await screen.findByRole("region", {
+      name: "What the Fully Funded Balance means",
+    });
+    expect(about.textContent).toContain("what should have been saved by a given year");
+    expect(
+      within(about)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual([
+      "At 100% funded, the fund has kept pace – owners pay only for future wear.",
+      "Below 100%, past wear wasn't fully paid for. Owners will make up the difference later, through higher dues or special assessments.",
+    ]);
+  });
+});

@@ -1082,3 +1082,18 @@ table.expenses td.line-number {
 .increases > button {
   margin-top: 10px;
 }
+
+/* a screen's explanation, above its inputs */
+.panel.explainer p,
+.panel.explainer li {
+  max-width: 70ch;
+  line-height: 1.5;
+}
+
+.panel.explainer p:first-child {
+  margin-top: 0;
+}
+
+.panel.explainer p:last-child {
+  margin-bottom: 0;
+}
