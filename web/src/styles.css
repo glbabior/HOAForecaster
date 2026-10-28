@@ -764,6 +764,9 @@ dialog::backdrop {
     --caution-bg: #fdecd2;
     font-size: 10pt;
   }
+  .print-only {
+    display: block;
+  }
   .no-print,
   .sticky-actions,
   .row-actions,
@@ -1095,4 +1098,11 @@ table.expenses td.line-number {
 
 .panel.explainer p:last-child {
   margin-bottom: 0;
+}
+
+/* shown only on paper and in a saved PDF */
+@media screen {
+  .print-only {
+    display: none;
+  }
 }

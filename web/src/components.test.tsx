@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PlanTable } from "./components/PlanTable";
+import { printAs } from "./print";
 import { ScenarioPicker } from "./components/ScenarioPicker";
 import { Confirm, DecimalInput, ErrorBanner, YearInput, useInvalidFields } from "./components/ui";
 import type { ScenarioResult, YearResult } from "./types";
@@ -299,6 +300,23 @@ describe("dialogs", () => {
     fireEvent(dialog, new Event("cancel", { cancelable: true })); // what Escape sends
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(ask);
+  });
+});
+
+describe("saving as a PDF", () => {
+  it("names the document while printing, and puts its title back after", () => {
+    document.title = "HOAForecaster";
+    const seen: string[] = [];
+    const real = window.print;
+    window.print = () => seen.push(document.title);
+    try {
+      printAs("Maple Row – Compare scenarios");
+      expect(seen).toEqual(["Maple Row – Compare scenarios"]);
+      window.dispatchEvent(new Event("afterprint"));
+      expect(document.title).toBe("HOAForecaster");
+    } finally {
+      window.print = real;
+    }
   });
 });
 

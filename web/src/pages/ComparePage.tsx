@@ -7,7 +7,8 @@ import { ScenarioPicker } from "../components/ScenarioPicker";
 import { numberOf, useSort } from "../components/sort";
 import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
-import { dues, money, percent } from "../format";
+import { dues, longDate, money, percent, today } from "../format";
+import { printAs } from "../print";
 import type { ProjectResults, ScenarioResult, Summary } from "../types";
 
 type Kind = "dues" | "money" | "percent" | "count" | "year";
@@ -231,6 +232,9 @@ export function ComparePage() {
     <>
       <ProjectNav stored={stored} here="Compare" />
       <h1>Compare scenarios</h1>
+      <p className="print-only">
+        {name} – {longDate(today())}
+      </p>
       <ErrorBanner error={loadError} />
       {failing.length > 0 && (
         <p className="warning">
@@ -243,9 +247,12 @@ export function ComparePage() {
           <input type="checkbox" checked={diffs} onChange={(e) => setDiffs(e.target.checked)} />{" "}
           Show differences from {shown[0]?.[0] ?? "the first scenario"}
         </label>
-        <button type="button" onClick={() => window.print()}>
-          Print
+        <button type="button" onClick={() => printAs(`${name} – Compare scenarios`)}>
+          Save as PDF…
         </button>
+        <span className="hint">
+          Choose “Save as PDF” (or “Microsoft Print to PDF”) as the printer, or a printer to print.
+        </span>
       </div>
 
       {shown.length === 0 ? (
