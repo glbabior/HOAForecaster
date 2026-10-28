@@ -15,6 +15,7 @@ import {
   startFrom,
   withHorizon,
 } from "./template";
+import { withAnother } from "./pages/ScenarioScreens";
 import type { ExpenseLine, Facts, Scenario } from "./types";
 
 describe("exact decimals", () => {
@@ -459,5 +460,21 @@ describe("an every-few-years line's repeats", () => {
     // a base year after the line's year deflates it: 1000 × 1.03^(2032 − 2034)
     const later = repeatsOf(every({}), { ...h, baseYear: 2034 })[0]?.amount;
     expect(later).toBeCloseTo(942.5959, 3);
+  });
+});
+
+describe("adding a yearly increase", () => {
+  it("starts after the last one's to year and never changes the rows already there", () => {
+    const set = [{ first_year: 2027, last_year: 2035, rate: "0.05" }];
+    expect(withAnother(set)).toEqual([
+      { first_year: 2027, last_year: 2035, rate: "0.05" },
+      { first_year: 2036, last_year: null, rate: "0.05" },
+    ]);
+    // running to the end, the new one starts blank – the overlap is for the user to settle
+    const open = [{ first_year: null, last_year: null, rate: "0.03" }];
+    expect(withAnother(open)).toEqual([
+      ...open,
+      { first_year: null, last_year: null, rate: "0.03" },
+    ]);
   });
 });

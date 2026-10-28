@@ -1069,22 +1069,13 @@ const modeOf = (s: Scenario): Mode =>
       ? "pinned"
       : "rate";
 
-/** The increases with the last stretch split in two at its middle year – the new second half
- * at the same rate, so adding one never makes an overlap or a gap. A stretch of one year
- * cannot be split; the new one then follows it to the end, and the problem is listed. */
-export function splitLast(increases: Increase[], start: number, end: number): Increase[] {
+/** The increases with one more – starting the year after the last one's to year, at its
+ * rate, running to the end. Rows already there are never changed: when the last one runs to
+ * the end, the new one starts blank and the overlap is listed until its years are set. */
+export function withAnother(increases: Increase[]): Increase[] {
   const last = increases.at(-1);
-  const rate = last?.rate ?? "0.03";
-  if (!last) return [{ first_year: null, last_year: null, rate }];
-  const from = last.first_year ?? start + 1; // the start year is never raised
-  const to = last.last_year ?? end;
-  if (to <= from) return [...increases, { first_year: to + 1, last_year: null, rate }];
-  const middle = Math.floor((from + to) / 2);
-  return [
-    ...increases.slice(0, -1),
-    { ...last, last_year: middle },
-    { first_year: middle + 1, last_year: last.last_year, rate },
-  ];
+  const from = last?.last_year != null ? last.last_year + 1 : null;
+  return [...increases, { first_year: from, last_year: null, rate: last?.rate ?? "0.03" }];
 }
 
 /** A grown path's yearly increases (spec 5.1) – a rate for each stretch of years, every year
@@ -1176,7 +1167,7 @@ function Increases({
         type="button"
         onClick={() => {
           rows.added();
-          onChange(splitLast(increases, start, end));
+          onChange(withAnother(increases));
         }}
       >
         Add yearly % increase
@@ -1233,7 +1224,7 @@ export function DuesScreen() {
   return (
     <InputsScreen>
       <section className="panel">
-        <fieldset>
+        <fieldset className="dues-settings">
           <legend>Dues per unit per month</legend>
           <label>
             <input

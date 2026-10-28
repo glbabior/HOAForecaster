@@ -217,7 +217,7 @@ export function ExpenseTable({
                   checked={showRepeats}
                   onChange={(e) => setShowRepeats(e.target.checked)}
                 />{" "}
-                Show each one's repeats in {horizon.start}–{horizon.end}, beneath it
+                Show each one's repeats in {horizon.start}–{horizon.end}, in year order
               </label>
             )}
             {shown.length > 0 && (
@@ -229,14 +229,14 @@ export function ExpenseTable({
                 shown={shown}
                 rowKey={(i) => rows.ids[i] ?? String(i)}
                 defaultYear={defaultYear}
-                row={(i) => {
+                row={(i, number) => {
                   const line = lines[i] as ExpenseLine;
                   return (
                     <ExpenseRow
                       key={rows.ids[i]}
                       line={line}
                       index={i}
-                      number={kind.frequency === "every" ? shown.indexOf(i) + 1 : undefined}
+                      number={number}
                       defaultYear={defaultYear}
                       onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
                       onMoved={(to) => {
@@ -316,7 +316,8 @@ function KindTable({
 }: {
   frequency: Frequency;
   title: string;
-  /** given, each every-few-years line's later years show beneath it, read-only */
+  /** given, each every-few-years line's later years show read-only, in year order among the
+   * lines (beneath it while a header sorts the table) */
   repeats?: Horizon;
   lines: ExpenseLine[];
   /** the positions in `lines` of this kind's lines */
@@ -325,10 +326,11 @@ function KindTable({
   rowKey: (i: number) => string;
   /** a blank first year is the start year, so it sorts as one */
   defaultYear: number;
-  row: (i: number) => ReactNode;
+  /** a line's editable row – `number` is its place in an every-few-years table */
+  row: (i: number, number?: number) => ReactNode;
 }) {
   const at = (i: number) => lines[i] as ExpenseLine;
-  const { order, header } = useSort(
+  const { order, header, sorted } = useSort(
     shown,
     {
       year: (i) => at(i).year ?? defaultYear,
@@ -343,6 +345,39 @@ function KindTable({
     rowKey,
   );
   const operating = isOperating(frequency);
+  // Unsorted, the every-few-years table runs in year order, each repeat in its own year's place.
+  // A line's place is the year it had when the table last changed shape (opened, a line added
+  // or removed) or the focus last left a box, so a first year being typed never moves its row
+  // from under the keyboard – it moves once the box is left.
+  const keys = shown.map(rowKey).join("|");
+  const yearsNow = () => new Map(shown.map((i) => [rowKey(i), at(i).year ?? defaultYear]));
+  const [placed, setPlaced] = useState(() => ({ keys, years: yearsNow() }));
+  if (placed.keys !== keys) setPlaced({ keys, years: yearsNow() });
+  const byYear = frequency === "every" && !sorted;
+  type Entry = { i: number; year: number; repeat?: { year: number; amount: number } };
+  const entries: Entry[] = byYear
+    ? (
+        [
+          ...shown.map((i) => ({
+            i,
+            year: placed.years.get(rowKey(i)) ?? at(i).year ?? defaultYear,
+          })),
+          ...(repeats
+            ? shown.flatMap((i) =>
+                repeatsOf(at(i), repeats).map((r) => ({ i, year: r.year, repeat: r })),
+              )
+            : []),
+        ] as Entry[]
+      ).sort((a, b) => a.year - b.year || Number(Boolean(a.repeat)) - Number(Boolean(b.repeat)))
+    : order.flatMap((k) => {
+        const i = shown[k] as number;
+        const later = repeats ? repeatsOf(at(i), repeats) : [];
+        return [{ i, year: 0 }, ...later.map((r) => ({ i, year: r.year, repeat: r }))];
+      });
+  // every-few-years lines are numbered in the order shown, so #1 is the first listed
+  const numbers = new Map(
+    frequency === "every" ? entries.filter((e) => !e.repeat).map((e, k) => [e.i, k + 1]) : [],
+  );
   return (
     <div className="table-scroll">
       <table className={`edit-table expenses ${frequency}`}>
@@ -350,7 +385,7 @@ function KindTable({
         <thead>
           <tr>
             {frequency === "every" && (
-              <th scope="col" title="Each line's number – its repeats beneath name it">
+              <th scope="col" title="Each line's number – its repeats name it">
                 #
               </th>
             )}
@@ -382,35 +417,32 @@ function KindTable({
             </th>
           </tr>
         </thead>
-        <tbody>
-          {order.map((k) => {
-            const i = shown[k] as number;
+        <tbody onBlur={byYear ? () => setPlaced({ keys, years: yearsNow() }) : undefined}>
+          {entries.map(({ i, repeat }) => {
+            if (!repeat) return <Fragment key={rowKey(i)}>{row(i, numbers.get(i))}</Fragment>;
             const line = at(i);
-            const n = shown.indexOf(i) + 1;
             return (
-              <Fragment key={rowKey(i)}>
-                {row(i)}
-                {repeats &&
-                  repeatsOf(line, repeats).map((r) => (
-                    <tr key={r.year} className="repeat">
-                      <td className="line-number" aria-hidden="true">
-                        ↳
-                      </td>
-                      <td>{r.year}</td>
-                      <td />
-                      <td />
-                      <td className="num" title="In that year's dollars">
-                        {money(String(r.amount))}
-                      </td>
-                      <td>
-                        Repeat of #{n}
-                        {line.description ? ` – ${line.description}` : ""}
-                      </td>
-                      <td />
-                      <td />
-                    </tr>
-                  ))}
-              </Fragment>
+              <tr key={`${rowKey(i)}:${repeat.year}`} className="repeat">
+                <td className="line-number" aria-hidden="true">
+                  ↳
+                </td>
+                <td>
+                  <span className="as-input">{repeat.year}</span>
+                </td>
+                <td />
+                <td />
+                <td title="In that year's dollars">
+                  <span className="as-input">{money(String(repeat.amount))}</span>
+                </td>
+                <td>
+                  <span className="as-input wraps">
+                    Repeat of #{numbers.get(i)}
+                    {line.description ? ` – ${line.description}` : ""}
+                  </span>
+                </td>
+                <td />
+                <td />
+              </tr>
             );
           })}
         </tbody>

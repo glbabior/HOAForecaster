@@ -1023,12 +1023,48 @@ th .sort-mark {
 /* an every-few-years line's later years – shown beneath it, not edited */
 table.expenses tr.repeat td {
   color: var(--muted);
-  font-size: 0.9em;
-  padding-top: 2px;
-  padding-bottom: 2px;
+}
+
+/* text set where an input's text sits – same size, same left edge, no box */
+.as-input {
+  display: block;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.as-input.wraps {
+  white-space: normal;
 }
 
 table.expenses td.line-number {
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* the dues screen – room between its parts, each table titled from the left */
+.dues-settings {
+  padding: 16px 20px 20px;
+}
+
+.dues-settings > label {
+  margin: 6px 0;
+}
+
+.dues-settings > .grid-2,
+.dues-settings > .increases,
+.dues-settings > table,
+.dues-settings > .field {
+  margin-top: 28px;
+}
+
+.dues-settings caption,
+.increases caption {
+  text-align: left;
+  font-weight: 700;
+  padding: 0 0 8px;
+}
+
+.increases > button {
+  margin-top: 10px;
 }

@@ -82,7 +82,7 @@ export function useSort<T>(
     );
   }
 
-  return { order, header };
+  return { order, header, sorted: sort !== null };
 }
 
 /** A decimal string or number as a number to sort by – null when there is none. */

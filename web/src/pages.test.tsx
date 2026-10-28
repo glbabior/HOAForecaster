@@ -881,9 +881,10 @@ describe("yearly increases by period", () => {
       new ApiError(422, "the inputs have problems", ["no yearly dues increase covers 2028–2031"]),
     );
     start(`${A}/dues`);
-    // from the one increase over every year, adding splits it at its middle – 2028–2029, 2030–
-    await userEvent.click(await screen.findByRole("button", { name: "Add yearly % increase" }));
-    const to = screen.getByRole("textbox", { name: "Last year of yearly increase 1" });
+    // the new one starts the year after the last one's to year – and the first is left alone
+    const to = await screen.findByRole("textbox", { name: "Last year of yearly increase 1" });
+    await userEvent.type(to, "2029");
+    await userEvent.click(screen.getByRole("button", { name: "Add yearly % increase" }));
     expect((to as HTMLInputElement).value).toBe("2029");
     const from2 = screen.getByRole("textbox", { name: "First year of yearly increase 2" });
     expect((from2 as HTMLInputElement).value).toBe("2030");
@@ -929,12 +930,118 @@ describe("repeats of every-few-years costs", () => {
       );
     // 2027–2031, base year 2026 at 3%: the 2029 and 2031 occurrences
     expect(repeats()).toEqual(["2029 Repeat of #1 – Plumbing", "2031 Repeat of #1 – Plumbing"]);
-    expect(every.querySelector("tr.repeat td.num")?.textContent).toBe("$1,093"); // 1000 × 1.03³
+    expect(every.querySelector("tr.repeat td[title]")?.textContent).toBe("$1,093"); // 1000 × 1.03³
     const first = within(every).getByRole("textbox", { name: "Year of expense 1" });
     await userEvent.clear(first);
     await userEvent.type(first, "2028");
     expect(repeats()).toEqual(["2030 Repeat of #1 – Plumbing"]);
     await userEvent.click(screen.getByRole("checkbox", { name: /Show each one's repeats/ }));
     expect(repeats()).toEqual([]);
+  });
+});
+
+describe("every-few-years costs in year order", () => {
+  it("place each repeat in its own year among the lines", async () => {
+    const plan = scenario("Plan A");
+    const every = (id: string, year: number, interval: number, description: string) => ({
+      id,
+      frequency: "every" as const,
+      year,
+      interval,
+      end_year: null,
+      amount: "100",
+      description,
+      source: "",
+      nominal: false,
+    });
+    plan.facts.expense_lines = [every("p", 2027, 3, "Plumbing"), every("r", 2028, 10, "Roof")];
+    serve(projectOf(plan, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const table = await screen.findByRole("table", { name: "Every few years" });
+    const rows = Array.from(table.querySelectorAll("tbody tr")).map((r) =>
+      r.classList.contains("repeat")
+        ? (r.children[5]?.textContent ?? "")
+        : ((r.querySelector("input[aria-label^='Description']") as HTMLInputElement).value ?? ""),
+    );
+    // 2027 plumbing, 2028 roof, then plumbing again in 2030
+    expect(rows).toEqual(["Plumbing", "Roof", "Repeat of #1 – Plumbing"]);
+  });
+
+  it("keep a line in place while its year is typed, and move it once the box is left", async () => {
+    const plan = scenario("Plan A");
+    const every = (id: string, year: number, interval: number, description: string) => ({
+      id,
+      frequency: "every" as const,
+      year,
+      interval,
+      end_year: null,
+      amount: "100",
+      description,
+      source: "",
+      nominal: false,
+    });
+    plan.facts.expense_lines = [every("p", 2027, 10, "Plumbing"), every("r", 2028, 10, "Roof")];
+    serve(projectOf(plan, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const table = await screen.findByRole("table", { name: "Every few years" });
+    const order = () =>
+      within(table)
+        .getAllByRole("textbox", { name: /^Description of expense/ })
+        .map((b) => (b as HTMLInputElement).value);
+    const year = within(table).getByRole("textbox", { name: "Year of expense 1" });
+    await userEvent.clear(year);
+    await userEvent.type(year, "2029");
+    expect(order()).toEqual(["Plumbing", "Roof"]); // not moved while typed
+    expect(table.querySelector("td.line-number")?.textContent).toBe("#1");
+    await userEvent.tab(); // the box is left
+    expect(order()).toEqual(["Roof", "Plumbing"]);
+  });
+
+  it("keep each line's repeats beneath it while a header sorts the table", async () => {
+    const plan = scenario("Plan A");
+    plan.facts.expense_lines = [
+      {
+        id: "p",
+        frequency: "every",
+        year: 2027,
+        interval: 2,
+        end_year: null,
+        amount: "100",
+        description: "Plumbing",
+        source: "",
+        nominal: false,
+      },
+      {
+        id: "r",
+        frequency: "every",
+        year: 2028,
+        interval: 10,
+        end_year: null,
+        amount: "900",
+        description: "Roof",
+        source: "",
+        nominal: false,
+      },
+    ];
+    serve(projectOf(plan, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const table = await screen.findByRole("table", { name: "Every few years" });
+    await userEvent.click(
+      within(within(table).getByRole("columnheader", { name: "Amount" })).getByRole("button"),
+    );
+    await userEvent.click(
+      within(within(table).getByRole("columnheader", { name: "Amount" })).getByRole("button"),
+    ); // descending – the roof first
+    const rows = Array.from(table.querySelectorAll("tbody tr")).map((r) =>
+      r.classList.contains("repeat")
+        ? (r.children[5]?.textContent ?? "")
+        : ((r.querySelector("input[aria-label^='Description']") as HTMLInputElement).value ?? ""),
+    );
+    expect(rows).toEqual([
+      "Roof",
+      "Plumbing",
+      "Repeat of #2 – Plumbing",
+      "Repeat of #2 – Plumbing",
+    ]);
   });
 });
