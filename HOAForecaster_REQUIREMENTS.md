@@ -151,7 +151,7 @@ Every input in these formulas is the scenario's own (sections 4 and 5).
 
 Scenario summary measures (used by the Compare view) –
 
-- Dues per unit per month at year 1, year 4, year 9 (offsets 0, 3 and 8 from the start year).
+- Dues per unit per month at year 1, year 4, year 9 (offsets 0, 3 and 8 from the start year) and the end year.
 - Total special assessments per unit over the horizon.
 - Lowest year-end balance and the year it occurs; count of LOW years.
 - Balance and percent funded at year 4, year 9 and the end year.

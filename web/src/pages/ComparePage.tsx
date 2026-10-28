@@ -9,13 +9,14 @@ import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
 import { dues, longDate, money, percent, today } from "../format";
 import { printAs } from "../print";
-import type { ProjectResults, ScenarioResult, Summary } from "../types";
+import type { Facts, ProjectResults, ScenarioResult, Summary } from "../types";
 
 type Kind = "dues" | "money" | "percent" | "count" | "year";
 
 interface Measure {
   label: string;
-  value: (s: Summary) => string | number | null;
+  /** from the scenario's results – or, for a row of its own figures, its facts */
+  value: (s: Summary, f: Facts) => string | number | null;
   kind: Kind;
   /** which way is better, for the difference colours – none for neutral facts */
   better?: "higher" | "lower";
@@ -23,7 +24,13 @@ interface Measure {
 
 /** The summary measures (spec 6). `span` is the horizon every shown scenario shares – the labels
  * name calendar years only then; otherwise they count years of each projection (spec 7.4). */
-function measures(span: [number, number] | null, years: number): Measure[] {
+function measures(span: [number, number] | null, years: number, facts: Facts[]): Measure[] {
+  const one = <T,>(of: (f: Facts) => T): T | undefined =>
+    facts.length > 0 && facts.every((f) => of(f) === of(facts[0] as Facts))
+      ? of(facts[0] as Facts)
+      : undefined;
+  const cushion = one((f) => f.cushion);
+  const target = one((f) => f.target);
   const year = (offset: number) => (span ? String(span[0] + offset) : `year ${offset + 1}`);
   const first = (n: number) =>
     span ? `${span[0]}–${span[0] + n - 1}` : n === 5 ? "first five years" : "first four years";
@@ -49,6 +56,12 @@ function measures(span: [number, number] | null, years: number): Measure[] {
       better: "lower",
     },
     {
+      label: `Dues per unit per month – ${span ? last : "last year"}`,
+      value: (s) => s.dues_end,
+      kind: "dues",
+      better: "lower",
+    },
+    {
       label: "Special assessments per unit, total",
       value: (s) => s.total_assessments,
       kind: "money",
@@ -61,7 +74,21 @@ function measures(span: [number, number] | null, years: number): Measure[] {
       better: "higher",
     },
     { label: "Year of the lowest balance", value: (s) => s.lowest_balance_year, kind: "year" },
-    { label: "Years below the cushion", value: (s) => s.low_years, kind: "count", better: "lower" },
+    // the scenarios' own cushions, in a row of their own when they differ
+    cushion === undefined && {
+      label: "Minimum cushion",
+      value: (_s, f) => f.cushion,
+      kind: "money",
+    },
+    {
+      label:
+        cushion !== undefined
+          ? `Years below the cushion (${money(cushion)})`
+          : "Years below each scenario's cushion",
+      value: (s) => s.low_years,
+      kind: "count",
+      better: "lower",
+    },
     {
       label: `Balance end of ${year(3)}`,
       value: (s) => s.balance_y4,
@@ -98,7 +125,19 @@ function measures(span: [number, number] | null, years: number): Measure[] {
       kind: "percent",
       better: "higher",
     },
-    { label: "First year the target is met", value: (s) => s.first_target_year, kind: "year" },
+    target === undefined && {
+      label: "Percent-funded target",
+      value: (_s, f) => f.target,
+      kind: "percent",
+    },
+    {
+      label:
+        target !== undefined
+          ? `First year the target (${percent(target)} funded) is met`
+          : "First year each scenario's target is met",
+      value: (s) => s.first_target_year,
+      kind: "year",
+    },
     {
       label: `Owner outlay per unit, ${first(5)}`,
       value: (s) => s.outlay_first5,
@@ -222,7 +261,12 @@ export function ComparePage() {
   const span: [number, number] | null = shared
     ? [shared[0]?.year ?? 0, shared.at(-1)?.year ?? 0]
     : null;
-  const list = measures(span, Math.max(0, ...shown.map(([, r]) => r.years.length)));
+  const factsOf = (n: string) => stored.project.scenarios.find((s) => s.name === n)?.facts as Facts;
+  const list = measures(
+    span,
+    Math.max(0, ...shown.map(([, r]) => r.years.length)),
+    shown.map(([n]) => factsOf(n)),
+  );
   const allYears = [...new Set(shown.flatMap(([, r]) => r.years.map((y) => y.year)))].sort(
     (x, y) => x - y,
   );
@@ -279,12 +323,14 @@ export function ComparePage() {
                 </thead>
                 <tbody>
                   {list.map((m) => {
-                    const base = shown[0] ? m.value(shown[0][1].summary) : null;
+                    const base = shown[0]
+                      ? m.value(shown[0][1].summary, factsOf(shown[0][0]))
+                      : null;
                     return (
                       <tr key={m.label}>
                         <th scope="row">{m.label}</th>
                         {shown.map(([n, r], i) => {
-                          const v = m.value(r.summary);
+                          const v = m.value(r.summary, factsOf(n));
                           const d = diffs && i > 0 ? difference(m.kind, m.better, v, base) : null;
                           return (
                             <td key={n} className="num" data-csv={v === null ? "" : String(v)}>

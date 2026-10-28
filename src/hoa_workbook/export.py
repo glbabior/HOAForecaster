@@ -716,6 +716,13 @@ def _compare(wb: Workbook, plans: list[_Plan]) -> None:
         measures.append(
             (f"Dues per unit per month – {year(8)}", lambda p: at(p, "dues", 8), CUR_CENTS)
         )
+    measures.append(
+        (
+            f"Dues per unit per month – {final}",
+            lambda p: at(p, "dues", len(p.facts.years) - 1),
+            CUR_CENTS,
+        )
+    )
     measures += [
         (
             f"Special assessments per unit, total {whole}",

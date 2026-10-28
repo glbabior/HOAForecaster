@@ -169,6 +169,7 @@ export interface Summary {
   dues_y1: Dec;
   dues_y4: Dec;
   dues_y9: Dec | null;
+  dues_end: Dec;
   total_assessments: Dec;
   lowest_balance: Dec;
   lowest_balance_year: number;

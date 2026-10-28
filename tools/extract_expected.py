@@ -93,7 +93,6 @@ def _measure(value: Any) -> str | None:
 
 def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    dues_points = iter(["dues_y1", "dues_y4", "dues_y9"])
     point: dict[int | str, str] = {start + 3: "y4", start + 8: "y9", end: "end"}
     # when the scenarios cover different years the labels count years of each projection
     point |= {"year 4": "y4", "year 9": "y9", "the projection": "end"}
@@ -113,7 +112,11 @@ def _summary(ws: Any, plan_col: int, start: int, end: int) -> dict[str, Any]:
             else []
         )
         if label.startswith("Dues per unit per month"):
-            out[next(dues_points)] = _measure(v)
+            at = years[0] if years else None
+            key = "y1" if at in (start, "year 1") else None if at is None else point.get(at)
+            if key is None:
+                raise ValueError(f"unrecognised dues measure {label!r}")
+            out[f"dues_{key}"] = _measure(v)
         elif label.startswith("Special assessments per unit"):
             out["total_assessments"] = _measure(v)
         elif label.startswith("Year of lowest"):

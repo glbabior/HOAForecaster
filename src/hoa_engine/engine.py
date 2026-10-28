@@ -54,6 +54,7 @@ class Summary:
     dues_y1: Decimal
     dues_y4: Decimal
     dues_y9: Decimal | None  # None when the horizon is shorter than 9 years
+    dues_end: Decimal  # the end year's
     total_assessments: Decimal
     lowest_balance: Decimal
     lowest_balance_year: int
@@ -232,6 +233,7 @@ def summarise(years: tuple[YearResult, ...]) -> Summary:
         dues_y1=years[0].dues,
         dues_y4=y4.dues,
         dues_y9=None if y9 is None else y9.dues,
+        dues_end=end.dues,
         total_assessments=sum((r.assessment_per_unit for r in years), ZERO),
         lowest_balance=lowest.ending_balance,
         lowest_balance_year=lowest.year,

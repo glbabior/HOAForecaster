@@ -1063,3 +1063,81 @@ describe("the Fully Funded Balance screen", () => {
     ]);
   });
 });
+
+describe("Compare's cushion and target", () => {
+  const ok = (s: Scenario) => ({
+    result: {
+      years: [2027, 2028, 2029, 2030, 2031].map((year) => ({
+        year,
+        ending_balance: "1",
+        percent_funded: "0.5",
+        low_flag: false,
+      })),
+      summary: {
+        dues_y1: "600",
+        dues_y4: "650",
+        dues_y9: null,
+        dues_end: "675",
+        total_assessments: "0",
+        lowest_balance: "1",
+        lowest_balance_year: 2027,
+        low_years: 0,
+        balance_y4: "1",
+        pf_y4: "0.5",
+        balance_y9: null,
+        pf_y9: null,
+        balance_end: "1",
+        pf_end: "0.5",
+        first_target_year: null,
+        outlay_first5: "1",
+        outlay_total: "1",
+        extra_first4: "1",
+        extra_total: "1",
+        avg_owner_cost: "1",
+        avg_extra: "1",
+        vote_years: 0,
+        shortfall_years: 0,
+      },
+      ffb: {},
+    },
+    name: s.name,
+  });
+  const rowsOf = async () => {
+    const table = await screen.findByRole("table", { name: "Summary measures by scenario" });
+    return within(table)
+      .getAllByRole("rowheader")
+      .map((th) => th.textContent);
+  };
+
+  it("are named in the labels when every scenario shares them", async () => {
+    mocked.results.mockResolvedValue({
+      scenarios: { "Plan A": ok(scenario("Plan A")), "Plan B": ok(scenario("Plan B")) },
+    });
+    start("/projects/abcdefabcdef/compare");
+    const rows = await rowsOf();
+    expect(rows).toContain("Years below the cushion ($10,000)");
+    expect(rows).toContain("First year the target (70.0% funded) is met");
+    expect(rows).toContain("Dues per unit per month – 2031");
+    expect(rows).not.toContain("Minimum cushion");
+  });
+
+  it("get rows of their own, right above, when the scenarios differ", async () => {
+    const b = scenario("Plan B");
+    b.facts.cushion = "25000";
+    b.facts.target = "0.6";
+    serve(projectOf(scenario("Plan A"), b));
+    mocked.results.mockResolvedValue({
+      scenarios: { "Plan A": ok(scenario("Plan A")), "Plan B": ok(b) },
+    });
+    start("/projects/abcdefabcdef/compare");
+    const rows = await rowsOf();
+    const at = (label: string) => rows.indexOf(label);
+    expect(at("Minimum cushion")).toBe(at("Years below each scenario's cushion") - 1);
+    expect(at("Percent-funded target")).toBe(at("First year each scenario's target is met") - 1);
+    const table = screen.getByRole("table", { name: "Summary measures by scenario" });
+    const cushions = within(
+      within(table).getByRole("row", { name: /^Minimum cushion/ }),
+    ).getAllByRole("cell");
+    expect(cushions.map((c) => c.textContent)).toEqual(["$10,000", "$25,000"]);
+  });
+});
