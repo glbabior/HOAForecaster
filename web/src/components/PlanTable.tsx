@@ -79,12 +79,16 @@ const ROWS: Row[] = [
     kind: "flag",
     warnWhen: true,
   },
-  { label: "Owner cost – dues per year", value: (y) => y.owner_dues_year, kind: "money" },
+  {
+    label: "Owner cost – dues per year",
+    value: (y) => y.owner_dues_year,
+    kind: "money",
+    headline: true,
+  },
   {
     label: "Owner cost – dues + assessment",
     value: (y) => y.owner_cost_year,
     kind: "money",
-    headline: true,
   },
   { label: "Increase vs current dues", value: (y) => y.dues_increase_vs_current, kind: "money" },
   { label: "Cumulative owner cost", value: (y) => y.cumulative_owner_cost, kind: "money" },
@@ -121,7 +125,7 @@ const HEADLINE_ORDER = [
   "Reserve expenses",
   "Ending reserve balance",
   "Percent funded",
-  "Owner cost – dues + assessment",
+  "Owner cost – dues per year",
   "Below cushion?",
 ];
 

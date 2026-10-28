@@ -82,7 +82,7 @@ describe("the plan table", () => {
       "Reserve expenses",
       "Ending reserve balance",
       "Percent funded",
-      "Owner cost – dues + assessment",
+      "Owner cost – dues per year",
       "Below cushion?",
     ]);
     // the rest of the spec's 23 rows, in its order, in the details beneath

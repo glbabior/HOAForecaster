@@ -183,7 +183,7 @@ All percentages are stored as fractions; money as decimal or integer cents, neve
 
 ### 7.3 Plan view (per scenario) – the equivalent of a Plan tab
 
-A year-by-year table, years as columns, with these rows in this order – on screen the headline rows (dues per unit per month, special assessment per unit, operating expenses, reserve expenses, ending reserve balance, percent funded, owner cost – dues + assessment, below cushion?) come first in a table of their own and the rest follow in a details table, each collapsible; a CSV of the table keeps this order –
+A year-by-year table, years as columns, with these rows in this order – on screen the headline rows (dues per unit per month, special assessment per unit, operating expenses, reserve expenses, ending reserve balance, percent funded, owner cost – dues per year, below cushion?) come first – an owner's dues and any assessment so on separate lines – in a table of their own and the rest follow in a details table, each collapsible; a CSV of the table keeps this order –
 
 dues per unit per month · special assessment per unit · total dues collected · operating expenses · reserve contribution from dues · special assessment to reserves · total collected from owners · interest earned · reserve expenses · starting reserve balance · **ending reserve balance** · fully funded balance (start of next year) · **percent funded** · below cushion? · meets target? · needs owner vote? · operating shortfall? · owner cost – dues per year · owner cost – dues + assessment · increase vs current dues · cumulative owner cost · cumulative extra cost · percent-funded target.
 
