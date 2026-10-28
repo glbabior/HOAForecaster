@@ -21,17 +21,59 @@ export class ApiError extends Error {
   }
 }
 
+let fresher: string | null = null; // the server's key since a restart, once the page has it
+
 function token(): string {
-  return document.querySelector<HTMLMetaElement>('meta[name="hoa-token"]')?.content ?? "";
+  return (
+    fresher ?? document.querySelector<HTMLMetaElement>('meta[name="hoa-token"]')?.content ?? ""
+  );
+}
+
+/** What the server says to a request carrying an old key. */
+const STALE_KEY = "this request did not come from HOAForecaster";
+
+/** After a restart the server has a new key, and a page opened before it still has the old
+ * one. Fetch the key the server now writes into its page – only a page of the app itself can
+ * read it – and true if it is a new one. */
+async function refreshKey(): Promise<boolean> {
+  try {
+    const page = await fetch("/", { cache: "no-store" });
+    const key = page.ok ? tokenIn(await page.text()) : "";
+    if (!key || key === token()) return false;
+    fresher = key;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A request with the server's key – sent once more with the new key if a restart changed
+ * it, so an edit made in a page opened before the restart is still saved. */
+async function send(path: string, init: RequestInit): Promise<Response> {
+  const attempt = (key: string) => {
+    const headers = new Headers(init.headers);
+    headers.set("X-HOA-Token", key);
+    return fetch(path, { ...init, headers });
+  };
+  const sentWith = token();
+  const response = await attempt(sentWith);
+  if (response.status !== 403) return response;
+  const body = (await response
+    .clone()
+    .json()
+    .catch(() => null)) as { message?: string } | null;
+  if (body?.message !== STALE_KEY) return response;
+  // another request may already have the new key; otherwise fetch it
+  if (token() !== sentWith || (await refreshKey())) return attempt(token());
+  return response;
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("X-HOA-Token", token());
   if (typeof init.body === "string") headers.set("Content-Type", "application/json");
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers });
+    response = await send(path, { ...init, headers });
   } catch (e) {
     if (init.signal?.aborted) throw e; // cancelled on purpose – the caller ignores it
     throw new ApiError(0, "HOAForecaster is not running – start it again and reload this page");
@@ -50,7 +92,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function download(path: string): Promise<{ blob: Blob; filename: string }> {
   let response: Response;
   try {
-    response = await fetch(path, { headers: { "X-HOA-Token": token() } });
+    response = await send(path, {});
   } catch {
     throw new ApiError(0, "HOAForecaster is not running – start it again and reload this page");
   }

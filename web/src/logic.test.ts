@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { reloadWhenFresh, tokenIn } from "./api";
+import { api, reloadWhenFresh, tokenIn } from "./api";
 import { linesFromPaste, newLineId, repeatsOf, withFrequency } from "./components/tables";
 import { csvCell, parsePasted, toCsv } from "./csv";
 import { fromPercent, grouped, num, parseDecimal, roundCents, shift, toPercent } from "./decimal";
@@ -476,5 +476,82 @@ describe("adding a yearly increase", () => {
       ...open,
       { first_year: null, last_year: null, rate: "0.03" },
     ]);
+  });
+});
+
+describe("a page opened before a restart", () => {
+  it("fetches the server's new key and sends its request again", async () => {
+    const page = (key: string) => `<meta name="hoa-token" content="${key}">`;
+    const sent: string[] = [];
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/") return new Response(page("new-key"));
+      const key = new Headers(init?.headers).get("X-HOA-Token") ?? "";
+      sent.push(key);
+      return key === "new-key"
+        ? new Response(JSON.stringify({ projects: [], unreadable: [] }))
+        : new Response(
+            JSON.stringify({ message: "this request did not come from HOAForecaster" }),
+            {
+              status: 403,
+            },
+          );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    document.head.innerHTML = page("old-key");
+    try {
+      await expect(api.listProjects()).resolves.toEqual({ projects: [], unreadable: [] });
+      expect(sent).toEqual(["old-key", "new-key"]);
+      await api.listProjects(); // the new key is kept from then on
+      expect(sent.at(-1)).toBe("new-key");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("resends a request refused at the same moment as another, with the key the other fetched", async () => {
+    const page = (key: string) => `<meta name="hoa-token" content="${key}">`;
+    const sent: string[] = [];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((done) => (release = done));
+    const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === "/") return new Response(page("key-3"));
+      const key = new Headers(init?.headers).get("X-HOA-Token") ?? "";
+      sent.push(key);
+      if (key === "key-3") return new Response(JSON.stringify({ projects: [], unreadable: [] }));
+      if (sent.length === 2) await held; // the second refusal arrives after the first is retried
+      return new Response(
+        JSON.stringify({ message: "this request did not come from HOAForecaster" }),
+        {
+          status: 403,
+        },
+      );
+    });
+    vi.stubGlobal("fetch", fetcher);
+    document.head.innerHTML = page("key-2");
+    try {
+      const first = api.listProjects();
+      const second = api.listProjects();
+      await first;
+      release();
+      await expect(second).resolves.toEqual({ projects: [], unreadable: [] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not ask again for another refusal", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "the Host header is not allowed" }), {
+          status: 403,
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      await expect(api.listProjects()).rejects.toThrow("the Host header is not allowed");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
