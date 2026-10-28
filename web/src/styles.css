@@ -1106,3 +1106,9 @@ table.expenses td.line-number {
     display: none;
   }
 }
+
+/* a difference from the first scenario, on its own line under the figure */
+table.compare .diff {
+  display: block;
+  font-size: 0.85em;
+}
