@@ -203,7 +203,7 @@ Input rows visually distinct (the spreadsheet uses blue on yellow). LOW and "no"
 Two charts per scenario, over the whole horizon –
 
 1. **Expenses, dues and reserve balance** – lines for reserve expenses (year), dues + assessments collected (year, all units) and year-end reserve balance on the left dollar axis; percent funded as a line and the target as a dashed horizontal line on the right 0–100% axis.
-2. **Owner cost** – owner cost per unit per year (dues + assessment) on the left axis; percent funded and the target line on the right.
+2. **Owner cost** – dues per unit per year and special assessment per unit, as separate lines, on the left axis; percent funded and the target line on the right.
 
 Charts view (the equivalent of the Charts tab) – chart 1 for each selected scenario, stacked with a shared year axis and the same dollar scale across scenarios so they compare visually (when scenarios cover different years, the shared axis runs over every year any of them covers, each drawn over its own years); the same scenario multi-select as Compare. Hover shows the year's values. Each chart downloadable as PNG.
 

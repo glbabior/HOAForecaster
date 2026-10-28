@@ -22,6 +22,7 @@ import type { ScenarioResult } from "../types";
 const COLOURS = {
   expenses: "#3b6fb6",
   owners: "#b64a47",
+  assessment: "#c98a1e",
   balance: "#5d8c32",
   pf: "#7d5fa6",
   target: "#808080",
@@ -42,7 +43,8 @@ export const BALANCE_LEGEND: LegendEntry[] = [
 ];
 
 export const OWNER_LEGEND: LegendEntry[] = [
-  { name: "Owner cost per unit (dues + assessment)", colour: COLOURS.owners },
+  { name: "Dues per unit per year", colour: COLOURS.owners },
+  { name: "Special assessment per unit", colour: COLOURS.assessment },
   { name: "Percent funded", colour: COLOURS.pf, dash: "2 3" },
   { name: "Percent-funded target", colour: COLOURS.target, dash: "8 5" },
 ];
@@ -160,7 +162,8 @@ export function BalanceChart({
 export function OwnerCostChart({ result }: { result: ScenarioResult }) {
   const data = result.years.map((y) => ({
     year: y.year,
-    cost: num(y.owner_cost_year),
+    dues: num(y.owner_dues_year),
+    assessment: num(y.assessment_per_unit),
     pf: num(y.percent_funded),
     target: num(y.target),
   }));
@@ -179,7 +182,7 @@ export function OwnerCostChart({ result }: { result: ScenarioResult }) {
         />
         <Tooltip formatter={tooltipValue} />
         <Legend />
-        {lines(OWNER_LEGEND, ["cost", "pf", "target"])}
+        {lines(OWNER_LEGEND, ["dues", "assessment", "pf", "target"])}
       </LineChart>
     </ResponsiveContainer>
   );

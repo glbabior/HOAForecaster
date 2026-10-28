@@ -29,6 +29,7 @@ from hoa_workbook.layout import (
 )
 
 BLUE, RED, GREEN, PURPLE, GREY = "4A7EBB", "BE4B48", "98B855", "7D60A0", "7F7F7F"
+ORANGE = "C98A1E"
 WIDTH_CM, HEIGHT_CM = 26, 10.5
 PERCENT_AXIS_ID, HIDDEN_CATEGORY_AXIS_ID = 200, 500
 
@@ -174,7 +175,10 @@ def add_plan_charts(ws: Worksheet, name: str, n_years: int, top_row: int) -> Non
         ws,
         f"{name} – owner cost per unit and percent funded",
         "Owner cost ($ per unit)",
-        [("own_cost", "Owner cost – dues + assessment per unit", RED)],
+        [
+            ("own_dues", "Dues per unit per year", RED),
+            ("sa", "Special assessment per unit", ORANGE),
+        ],
         n_years,
     )
     ws.add_chart(owner, f"A{top_row + CHART_HEIGHT_ROWS}")

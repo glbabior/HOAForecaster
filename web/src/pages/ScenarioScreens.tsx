@@ -546,7 +546,7 @@ export function ResultsScreen() {
           </ChartFrame>
           <ChartFrame
             title={`${form.name} – owner cost per unit and percent funded`}
-            summary={`Owner cost per unit runs from ${duesText(result.years[0]?.owner_cost_year)} to ${duesText(result.years.at(-1)?.owner_cost_year)} a year.`}
+            summary={`Dues per unit run from ${duesText(result.years[0]?.owner_dues_year)} to ${duesText(result.years.at(-1)?.owner_dues_year)} a year${result.summary.total_assessments && Number(result.summary.total_assessments) > 0 ? `, with ${duesText(result.summary.total_assessments)} per unit in special assessments over the projection` : ", with no special assessment"}.`}
             filename={`${form.name} - owner cost.png`}
             legend={OWNER_LEGEND}
           >
