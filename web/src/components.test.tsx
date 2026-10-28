@@ -1,11 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PlanTable } from "./components/PlanTable";
 import { ScenarioPicker } from "./components/ScenarioPicker";
-import { DecimalInput, ErrorBanner, YearInput, useInvalidFields } from "./components/ui";
+import { Confirm, DecimalInput, ErrorBanner, YearInput, useInvalidFields } from "./components/ui";
 import type { ScenarioResult, YearResult } from "./types";
 
 function year(y: number, change: Partial<YearResult> = {}): YearResult {
@@ -236,6 +236,63 @@ describe("decimal inputs", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "4.5");
     expect(screen.getByText("0.045")).toBeTruthy();
+  });
+});
+
+describe("dialogs", () => {
+  function Asking() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Ask
+        </button>
+        <Confirm
+          open={open}
+          title="Sure?"
+          confirmLabel="Yes"
+          onCancel={() => setOpen(false)}
+          onConfirm={() => setOpen(false)}
+        >
+          <p>Really.</p>
+        </Confirm>
+      </>
+    );
+  }
+
+  // the test browser has no showModal – stand in for the browser's, which opens the dialog
+  // and moves the focus to its first control
+  const real = {
+    showModal: HTMLDialogElement.prototype.showModal,
+    close: HTMLDialogElement.prototype.close,
+  };
+  const opened: boolean[] = [];
+  beforeEach(() => {
+    opened.length = 0;
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      opened.push(this.hasAttribute("open")); // a modal opens from closed, or it throws
+      this.setAttribute("open", "");
+      this.querySelector<HTMLElement>("button, input")?.focus();
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    };
+  });
+  afterEach(() => {
+    HTMLDialogElement.prototype.showModal = real.showModal;
+    HTMLDialogElement.prototype.close = real.close;
+  });
+
+  it("open as modals, close on Escape, and give the focus back to what opened them", async () => {
+    render(<Asking />);
+    const ask = screen.getByRole("button", { name: "Ask" });
+    await userEvent.click(ask);
+    expect(opened).toEqual([false]); // opened as a modal, once, from closed
+    const dialog = screen.getByRole("dialog", { name: "Sure?" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent(dialog, new Event("cancel", { cancelable: true })); // what Escape sends
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(ask);
   });
 });
 

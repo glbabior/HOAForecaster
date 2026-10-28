@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import type { Scenario } from "../types";
+import { useModal } from "./ui";
 
 /** Choose the scenarios to copy something into (spec 7.2) – a box for each, and one for all.
  * Adopted plans are listed but cannot be chosen; they are read-only. */
@@ -21,10 +22,7 @@ export function CopyDialog({
   const open = others.filter((s) => !s.adoption);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const all = open.length > 0 && open.every((s) => chosen.has(s.name));
-  useEffect(() => {
-    const dialog = ref.current;
-    if (dialog && !dialog.open) dialog.showModal?.();
-  }, []);
+  useModal(ref);
 
   function toggle(name: string) {
     const next = new Set(chosen);
@@ -34,7 +32,15 @@ export function CopyDialog({
   }
 
   return (
-    <dialog ref={ref} className="confirm" aria-labelledby="copy-title" onCancel={onClose} open>
+    <dialog
+      ref={ref}
+      className="confirm"
+      aria-labelledby="copy-title"
+      onCancel={(e) => {
+        e.preventDefault(); // Escape – closed by the page's own state, like Cancel
+        onClose();
+      }}
+    >
       <h2 id="copy-title">Copy {what} to…</h2>
       {others.length === 0 ? (
         <p>This is the project's only scenario.</p>

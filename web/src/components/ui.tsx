@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 
 import { fromPercent, grouped, parseDecimal, toPercent } from "../decimal";
@@ -274,6 +275,29 @@ export function OptionalYearInput({
   );
 }
 
+/** Open a dialog as a modal while it is on the page – in the browser's top layer, centred
+ * above everything, keeping the keyboard inside it and Escape for its cancel – and on closing
+ * put the focus back where it was before the dialog rendered. Without showModal (the test
+ * browser) it simply opens. showModal focuses the dialog's first control, so a dialog wanting
+ * the focus elsewhere must move it after opening. */
+export function useModal(ref: RefObject<HTMLDialogElement | null>): void {
+  // taken while rendering – before anything in the dialog (an autoFocus box) has the focus
+  const [before] = useState(() => document.activeElement);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") {
+      if (!dialog.open) dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "");
+    }
+    return () => {
+      if (dialog.open && typeof dialog.close === "function") dialog.close();
+      if (before instanceof HTMLElement && before.isConnected) before.focus();
+    };
+  }, [ref, before]);
+}
+
 /** A modal question with a yes and a no. */
 export function Confirm({
   open,
@@ -290,16 +314,44 @@ export function Confirm({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal?.();
-    if (!open && dialog.open) dialog.close?.();
-  }, [open]);
   if (!open) return null;
   return (
-    <dialog ref={ref} className="confirm" aria-labelledby="confirm-title" onCancel={onCancel} open>
+    <ConfirmDialog
+      title={title}
+      confirmLabel={confirmLabel}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {children}
+    </ConfirmDialog>
+  );
+}
+
+function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  children: ReactNode;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useModal(ref);
+  return (
+    <dialog
+      ref={ref}
+      className="confirm"
+      aria-labelledby="confirm-title"
+      onCancel={(e) => {
+        e.preventDefault(); // Escape – closed by the page's own state, like Cancel
+        onCancel();
+      }}
+    >
       <h2 id="confirm-title">{title}</h2>
       <div>{children}</div>
       <div className="actions">
