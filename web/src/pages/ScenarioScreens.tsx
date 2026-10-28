@@ -133,6 +133,7 @@ function ScenarioForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [adopting, setAdopting] = useState<{ date: string; note: string } | null>(null);
   const [confirmUnadopt, setConfirmUnadopt] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null); // the new name being typed
   const { invalid, Provider } = useInvalidFields();
   // the name it is saved under – in state for the screen, in a ref for saves in flight
   const [savedName, setSavedName] = useState(original.name);
@@ -161,6 +162,15 @@ function ScenarioForm({
       : null;
 
   /** Save the project's scenarios as `build` makes them from the latest saved ones. */
+  const renameProblem =
+    renaming === null
+      ? null
+      : !renaming.trim()
+        ? "A scenario needs a name."
+        : others.some((s) => s.name === renaming.trim())
+          ? `Another scenario is already called “${renaming.trim()}”.`
+          : null;
+
   async function saveScenarios(build: (scenarios: Scenario[]) => Scenario[]): Promise<void> {
     await saveProject((project) => ({ ...project, scenarios: build(project.scenarios) }));
   }
@@ -290,6 +300,9 @@ function ScenarioForm({
             >
               Adopt…
             </button>
+            <button type="button" onClick={() => setRenaming(form.name)}>
+              Rename…
+            </button>
             <button type="button" onClick={() => setConfirmDelete(true)}>
               Delete…
             </button>
@@ -341,6 +354,34 @@ function ScenarioForm({
         </fieldset>
       </Provider>
 
+      <Confirm
+        open={renaming !== null}
+        title={`Rename ${savedName}`}
+        confirmLabel="Rename"
+        onCancel={() => setRenaming(null)}
+        onConfirm={() => {
+          // the form takes the new name; it saves itself and the address follows
+          if (renaming !== null && !renameProblem) {
+            setForm({ ...form, name: renaming.trim() });
+            setRenaming(null);
+          }
+        }}
+      >
+        <label className="field">
+          <span>New name</span>
+          <input
+            value={renaming ?? ""}
+            onChange={(e) => setRenaming(e.target.value)}
+            aria-invalid={renameProblem ? true : undefined}
+            autoFocus
+          />
+        </label>
+        {renameProblem && (
+          <p className="warning" role="alert">
+            {renameProblem}
+          </p>
+        )}
+      </Confirm>
       <Confirm
         open={confirmDelete}
         title={`Delete ${original.name}?`}

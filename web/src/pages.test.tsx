@@ -735,6 +735,39 @@ describe("sortable tables", () => {
   });
 });
 
+describe("renaming a scenario", () => {
+  it("is offered on every screen, refuses a taken name, and moves the address", async () => {
+    const router = start(`${A}/dues`);
+    await userEvent.click(await screen.findByRole("button", { name: "Rename…" }));
+    const box = screen.getByRole("textbox", { name: "New name" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "Plan B");
+    expect(screen.getByText("Another scenario is already called “Plan B”.")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    expect(screen.getByRole("textbox", { name: "New name" })).toBeTruthy(); // still open
+    await userEvent.clear(box);
+    await userEvent.type(box, "Steady dues");
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    await waitFor(
+      () => expect(at(router)).toBe("/projects/abcdefabcdef/scenarios/Steady%20dues/dues"),
+      SLOW,
+    );
+    expect(lastSaved().scenarios.map((s) => s.name)).toEqual(["Steady dues", "Plan B"]);
+  });
+
+  it("is not offered on an adopted plan", async () => {
+    serve(
+      projectOf(
+        scenario("Plan A", { adoption: { date: "2026-11-03", note: "", sequence: 1 } }),
+        scenario("Plan B"),
+      ),
+    );
+    start(A);
+    await screen.findByText(/The adopted plan/);
+    expect(screen.queryByRole("button", { name: "Rename…" })).toBeNull();
+  });
+});
+
 describe("sorted editable tables", () => {
   const sortBy = async (table: HTMLElement, name: string) =>
     userEvent.click(within(within(table).getByRole("columnheader", { name })).getByRole("button"));
