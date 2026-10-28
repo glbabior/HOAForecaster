@@ -11,6 +11,7 @@ import {
   copyFfb,
   copyLine,
   horizonOf,
+  moveScenario,
   plausibleHorizon,
   startFrom,
   withHorizon,
@@ -553,5 +554,25 @@ describe("a page opened before a restart", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("moving a scenario in the project's order", () => {
+  const names = (list: Scenario[]) => list.map((s) => s.name);
+  const list = ["A", "B", "C", "D"].map((n) => scenario(n));
+  it("swaps it past a neighbour either way", () => {
+    expect(names(moveScenario(list, "B", "after", "C"))).toEqual(["A", "C", "B", "D"]);
+    expect(names(moveScenario(list, "C", "before", "B"))).toEqual(["A", "C", "B", "D"]);
+  });
+  it("moves it past scenarios a screen does not show", () => {
+    expect(names(moveScenario(list, "A", "after", "C"))).toEqual(["B", "C", "A", "D"]);
+    expect(names(moveScenario(list, "D", "before", "B"))).toEqual(["A", "D", "B", "C"]);
+  });
+  it("changes nothing more when the same move is made again before it is saved", () => {
+    const once = moveScenario(list, "B", "before", "A");
+    expect(names(moveScenario(once, "B", "before", "A"))).toEqual(names(once));
+  });
+  it("leaves the order alone for a name it does not have", () => {
+    expect(moveScenario(list, "A", "after", "Z")).toBe(list);
   });
 });

@@ -410,7 +410,7 @@ describe("a new scenario", () => {
 });
 
 describe("the project's screens", () => {
-  it("open on Scenarios, the adopted plan first, then working scenarios, then earlier plans", async () => {
+  it("open on Scenarios, listed in the project's order", async () => {
     const adopted = (name: string, sequence: number): Scenario =>
       scenario(name, { adoption: { date: "2026-10-01", note: "", sequence } });
     serve(projectOf(adopted("Old plan", 1), scenario("Plan A"), adopted("Plan now", 2)));
@@ -420,13 +420,45 @@ describe("the project's screens", () => {
     const names = within(table)
       .getAllByRole("rowheader")
       .map((th) => within(th).getByRole("link").textContent);
-    expect(names).toEqual(["Plan now", "Plan A", "Old plan"]);
+    expect(names).toEqual(["Old plan", "Plan A", "Plan now"]);
     const index = screen.getByRole("navigation", { name: "Project screens" });
     expect(
       within(index)
         .getAllByRole("link")
         .map((l) => l.textContent),
     ).toEqual(["Scenarios", "Compare", "Charts", "Export"]);
+  });
+
+  it("move a scenario in the project's order, and Compare follows it", async () => {
+    serve(projectOf(scenario("Plan A"), scenario("Plan B"), scenario("Plan C")));
+    mocked.results.mockResolvedValue({
+      scenarios: Object.fromEntries(
+        ["Plan A", "Plan B", "Plan C"].map((n) => [n, ok(scenario(n))]),
+      ),
+    });
+    start("/projects/abcdefabcdef/scenarios");
+    const down = await screen.findByRole("button", { name: "Move Plan A down" });
+    expect(
+      (screen.getByRole("button", { name: "Move Plan A up" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await userEvent.click(down);
+    await waitFor(() =>
+      expect(lastSaved().scenarios.map((s) => s.name)).toEqual(["Plan B", "Plan A", "Plan C"]),
+    );
+    await userEvent.click(screen.getByRole("link", { name: "Compare" }));
+    const table = await screen.findByRole("table", { name: "Summary measures by scenario" });
+    const heads = () =>
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.firstChild?.textContent);
+    await waitFor(() => expect(heads()).toEqual(["Measure", "Plan B", "Plan A", "Plan C"]));
+    // the first column is the one differences are from
+    await userEvent.click(screen.getByRole("button", { name: "Move Plan C left" }));
+    await waitFor(() =>
+      expect(lastSaved().scenarios.map((s) => s.name)).toEqual(["Plan B", "Plan C", "Plan A"]),
+    );
+    await waitFor(() => expect(heads()).toEqual(["Measure", "Plan B", "Plan C", "Plan A"]));
+    expect(screen.getByRole("checkbox", { name: /Show differences from Plan B/ })).toBeTruthy();
   });
 
   it("save the project's name and notes as they are typed", async () => {
@@ -1064,44 +1096,46 @@ describe("the Fully Funded Balance screen", () => {
   });
 });
 
-describe("Compare's cushion and target", () => {
-  const ok = (s: Scenario) => ({
-    result: {
-      years: [2027, 2028, 2029, 2030, 2031].map((year) => ({
-        year,
-        ending_balance: "1",
-        percent_funded: "0.5",
-        low_flag: false,
-      })),
-      summary: {
-        dues_y1: "600",
-        dues_y4: "650",
-        dues_y9: null,
-        dues_end: "675",
-        total_assessments: "0",
-        lowest_balance: "1",
-        lowest_balance_year: 2027,
-        low_years: 0,
-        balance_y4: "1",
-        pf_y4: "0.5",
-        balance_y9: null,
-        pf_y9: null,
-        balance_end: "1",
-        pf_end: "0.5",
-        first_target_year: null,
-        outlay_first5: "1",
-        outlay_total: "1",
-        extra_first4: "1",
-        extra_total: "1",
-        avg_owner_cost: "1",
-        avg_extra: "1",
-        vote_years: 0,
-        shortfall_years: 0,
-      },
-      ffb: {},
+/** A scenario's results as the Compare screen reads them. */
+const ok = (s: Scenario) => ({
+  result: {
+    years: [2027, 2028, 2029, 2030, 2031].map((year) => ({
+      year,
+      ending_balance: "1",
+      percent_funded: "0.5",
+      low_flag: false,
+    })),
+    summary: {
+      dues_y1: "600",
+      dues_y4: "650",
+      dues_y9: null,
+      dues_end: "675",
+      total_assessments: "0",
+      lowest_balance: "1",
+      lowest_balance_year: 2027,
+      low_years: 0,
+      balance_y4: "1",
+      pf_y4: "0.5",
+      balance_y9: null,
+      pf_y9: null,
+      balance_end: "1",
+      pf_end: "0.5",
+      first_target_year: null,
+      outlay_first5: "1",
+      outlay_total: "1",
+      extra_first4: "1",
+      extra_total: "1",
+      avg_owner_cost: "1",
+      avg_extra: "1",
+      vote_years: 0,
+      shortfall_years: 0,
     },
-    name: s.name,
-  });
+    ffb: {},
+  },
+  name: s.name,
+});
+
+describe("Compare's cushion and target", () => {
   const rowsOf = async () => {
     const table = await screen.findByRole("table", { name: "Summary measures by scenario" });
     return within(table)

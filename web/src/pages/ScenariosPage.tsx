@@ -8,7 +8,7 @@ import { numberOf, useSort } from "../components/sort";
 import { Confirm, ErrorBanner, Field } from "../components/ui";
 import { date, longDate, money, percent } from "../format";
 import { useAutosave, useUnsavedGuard } from "../hooks";
-import { currentAdoption } from "../template";
+import { currentAdoption, moveScenario } from "../template";
 import type { ProjectResults, StoredProject } from "../types";
 
 /** The project's name and notes – saved as they are typed. */
@@ -71,31 +71,24 @@ function ProjectDetails({ stored }: { stored: StoredProject }) {
 
 /** The project's scenarios with their key results – each opens on its own screens. */
 export function ScenariosPage() {
-  const { id, stored, error } = useProject();
+  const { id, stored, error, save } = useProject();
   const [results, setResults] = useState<ProjectResults | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
+  const [moveError, setMoveError] = useState<unknown>(null);
   const table = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
     if (stored) api.results(id).then(setResults).catch(setLoadError);
   }, [id, stored]);
 
-  // the adopted plan first, then the working scenarios, then earlier adopted plans, latest first
-  const scenarios = stored?.project.scenarios ?? [];
-  const current = currentAdoption(scenarios);
-  const earlier = scenarios
-    .filter((s) => s.adoption && s !== current)
-    .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0));
-  const listed = [
-    ...(current ? [current] : []),
-    ...scenarios.filter((s) => !s.adoption),
-    ...earlier,
-  ];
+  // in the project's order, which the board sets here or on Compare – every screen follows it
+  const listed = stored?.project.scenarios ?? [];
+  const current = currentAdoption(listed);
   const summary = (name: string) => {
     const outcome = results?.scenarios[name];
     return outcome && "result" in outcome ? outcome.result.summary : null;
   };
-  const { order, header } = useSort(listed, {
+  const { order, header, sorted } = useSort(listed, {
     name: (s) => s.name,
     lowest: (s) => numberOf(summary(s.name)?.lowest_balance),
     low: (s) => summary(s.name)?.low_years,
@@ -108,6 +101,14 @@ export function ScenariosPage() {
   const { project } = stored;
   const pending = "…"; // while results load – each scenario then has figures or problems
 
+  function move(name: string, side: "before" | "after", past: string | undefined) {
+    if (past === undefined) return;
+    setMoveError(null);
+    save((p) => ({ ...p, scenarios: moveScenario(p.scenarios, name, side, past) })).catch(
+      setMoveError,
+    );
+  }
+
   return (
     <>
       <ProjectNav stored={stored} here="Scenarios" />
@@ -118,7 +119,7 @@ export function ScenariosPage() {
         assessments. Open one to see and change it; every edit is saved as you make it. Start a new
         one blank, or as a copy of any scenario here.
       </p>
-      <ErrorBanner error={loadError} />
+      <ErrorBanner error={loadError ?? moveError} />
       <section className="panel">
         <div className="section-head">
           <Link className="button primary" to={`/projects/${id}/scenarios/new`}>
@@ -136,12 +137,15 @@ export function ScenariosPage() {
               {header("funded", "Funded at end")}
               {header("target", "Target first met")}
               {header("changed", "Last changed")}
+              <th scope="col" className="no-print">
+                Order
+              </th>
             </tr>
           </thead>
           <tbody>
             {order
               .map((i) => listed[i] as (typeof listed)[number])
-              .map((s) => {
+              .map((s, k) => {
                 const outcome = results?.scenarios[s.name];
                 const r = outcome && "result" in outcome ? outcome.result.summary : null;
                 const end =
@@ -177,11 +181,38 @@ export function ScenariosPage() {
                       </>
                     )}
                     <td>{date(stored.scenario_times[s.name]?.modified ?? "")}</td>
+                    <td className="no-print move">
+                      <button
+                        type="button"
+                        aria-label={`Move ${s.name} up`}
+                        title={sorted ? "Put the table back in order to move scenarios" : "Move up"}
+                        disabled={sorted || k === 0}
+                        onClick={() => move(s.name, "before", listed[k - 1]?.name)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move ${s.name} down`}
+                        title={
+                          sorted ? "Put the table back in order to move scenarios" : "Move down"
+                        }
+                        disabled={sorted || k === listed.length - 1}
+                        onClick={() => move(s.name, "after", listed[k + 1]?.name)}
+                      >
+                        ↓
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
           </tbody>
         </table>
+        {sorted && (
+          <p className="hint no-print">
+            Click the sorted column's header until the table is back in order to move scenarios.
+          </p>
+        )}
       </section>
       <ProjectDetails key={stored.id} stored={stored} />
     </>

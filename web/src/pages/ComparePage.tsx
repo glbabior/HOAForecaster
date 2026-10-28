@@ -9,6 +9,7 @@ import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
 import { dues, longDate, money, percent, today } from "../format";
 import { printAs } from "../print";
+import { moveScenario } from "../template";
 import type { Facts, ProjectResults, ScenarioResult, Summary } from "../types";
 
 type Kind = "dues" | "money" | "percent" | "count" | "year";
@@ -236,7 +237,8 @@ function difference(
 }
 
 export function ComparePage() {
-  const { id, stored, error } = useProject();
+  const { id, stored, error, save } = useProject();
+  const [moveError, setMoveError] = useState<unknown>(null);
   const [results, setResults] = useState<ProjectResults | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [chosen, setChosen] = useState<string[] | null>(null);
@@ -256,7 +258,8 @@ export function ComparePage() {
     return o && "result" in o ? [[n, o.result] as [string, ScenarioResult]] : [];
   });
   const failing = names.filter((n) => !ok.some(([m]) => m === n));
-  const selected = (chosen ?? names).filter((n) => ok.some(([m]) => m === n));
+  // in the project's order – the first is the one differences are measured from
+  const selected = names.filter((n) => (chosen ?? names).includes(n) && ok.some(([m]) => m === n));
   const shown = selected.map(
     (n) => [n, ok.find(([m]) => m === n)?.[1]] as [string, ScenarioResult],
   );
@@ -277,6 +280,14 @@ export function ComparePage() {
   );
   const name = stored.project.name;
 
+  function move(scenario: string, side: "before" | "after", past: string | undefined) {
+    if (past === undefined) return;
+    setMoveError(null);
+    save((p) => ({ ...p, scenarios: moveScenario(p.scenarios, scenario, side, past) })).catch(
+      setMoveError,
+    );
+  }
+
   return (
     <>
       <ProjectNav stored={stored} here="Compare" />
@@ -284,7 +295,7 @@ export function ComparePage() {
       <p className="print-only">
         {name} – {longDate(today())}
       </p>
-      <ErrorBanner error={loadError} />
+      <ErrorBanner error={loadError ?? moveError} />
       {failing.length > 0 && (
         <p className="warning">
           Left out because of problems in their inputs – {failing.join(", ")}.
@@ -319,9 +330,31 @@ export function ComparePage() {
                 <thead>
                   <tr>
                     <th scope="col">Measure</th>
-                    {shown.map(([n]) => (
-                      <th scope="col" key={n} className="num">
+                    {shown.map(([n], i) => (
+                      <th scope="col" key={n} className="num" aria-label={n}>
                         {n}
+                        {shown.length > 1 && (
+                          <span className="move no-print">
+                            <button
+                              type="button"
+                              aria-label={`Move ${n} left`}
+                              title="Move left – the first scenario is the one differences are from"
+                              disabled={i === 0}
+                              onClick={() => move(n, "before", shown[i - 1]?.[0])}
+                            >
+                              ←
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Move ${n} right`}
+                              title="Move right"
+                              disabled={i === shown.length - 1}
+                              onClick={() => move(n, "after", shown[i + 1]?.[0])}
+                            >
+                              →
+                            </button>
+                          </span>
+                        )}
                       </th>
                     ))}
                   </tr>

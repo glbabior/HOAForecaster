@@ -446,6 +446,19 @@ def test_a_save_cannot_change_an_adopted_plan(store: ProjectStore, edit: object)
         store.save(pid, edit(store.get(pid).project), revision)  # type: ignore[operator]  # a lambda per case
 
 
+def test_reordering_scenarios_changes_none_of_them_and_can_move_an_adopted_plan(
+    store: ProjectStore,
+) -> None:
+    pid, revision = _adopted(store)
+    before = store.get(pid)
+    moved = replace(before.project, scenarios=tuple(reversed(before.project.scenarios)))
+    after = store.save(pid, moved, revision)
+    assert [s.name for s in after.project.scenarios] == [
+        s.name for s in reversed(before.project.scenarios)
+    ]
+    assert after.scenario_times == before.scenario_times  # spec 7.1 – order is not a change
+
+
 def test_a_save_cannot_adopt_a_scenario(store: ProjectStore) -> None:
     pid, revision = _adopted(store)
     project = store.get(pid).project

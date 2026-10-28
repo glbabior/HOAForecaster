@@ -12,7 +12,7 @@ export function ExportPage() {
   const [actionError, setActionError] = useState<unknown>(null);
   if (!stored) return <Loading error={error} />;
   const names = stored.project.scenarios.map((s) => s.name);
-  const selected = chosen ?? names;
+  const selected = names.filter((n) => (chosen ?? names).includes(n)); // the project's order
 
   async function download(get: () => Promise<{ blob: Blob; filename: string }>) {
     setActionError(null);

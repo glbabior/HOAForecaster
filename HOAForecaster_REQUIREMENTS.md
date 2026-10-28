@@ -2,7 +2,7 @@
 
 Version 1.8 – October 28, 2026 (v1.7 and v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
 
-Changes in v1.8 – a grown dues path can have different yearly increases for stretches of years (section 5.1).
+Changes in v1.8 – a grown dues path can have different yearly increases for stretches of years (section 5.1); the board sets the order of a project's scenarios, which every screen and the workbook follow, so any scenario can be the one Compare measures differences from (sections 7.1 and 7.4).
 
 Changes in v1.7 – a one-time expense can carry its useful life, and a scenario's Fully Funded Balance can be worked out from its expenses instead of typed from the reserve study (sections 4, 4.1 and 6).
 
@@ -168,7 +168,7 @@ All percentages are stored as fractions; money as decimal or integer cents, neve
 ### 7.1 Project
 
 - Project list → a project's screens, with an index on the left – **Scenarios**, **Compare**, **Charts** and **Export**.
-- Scenarios – the current adopted plan first, marked as such, then the working scenarios, then earlier adopted plans with their adoption dates; and New scenario.
+- Scenarios – in the project's order, which the board sets here (move up, move down) or on Compare; the current adopted plan is marked as such and earlier adopted plans show their adoption dates; and New scenario. Every screen lists scenarios in this order, and the workbook has one sheet per scenario in it.
 - **Import** – (a) CSV for a scenario's expense table and Fully Funded Balance table, its columns to be fixed when this is built – a row without a frequency is a once line; (b) a workbook in the reference layout – read Inputs, Expenses (baseline row, item rows, FFB row) and each Plan sheet's input rows into one scenario per Plan sheet, each with the Inputs and Expenses facts, dropping a partial first-year column if present and using that year's ending balance as the next January 1 starting balance. Its item rows become once lines and its operating-expense input one yearly line, as in the version 1 upgrade (section 8.2).
 
 ### 7.2 A scenario's screens
@@ -195,7 +195,7 @@ Input rows visually distinct (the spreadsheet uses blue on yellow). LOW and "no"
 - Table 1 – the summary measures in section 6, one column per selected scenario.
 - Table 2 – year-end reserve balance by year, one column per scenario.
 - Table 3 – percent funded by year, one column per scenario.
-- Differences highlighted against the first selected scenario (optional toggle).
+- Differences highlighted against the first selected scenario (optional toggle), each under its figure. A scenario's column can be moved left or right, which changes the project's order (section 7.1) – so the scenario differences are measured from is chosen by moving it first.
 - Scenarios may cover different years (a scenario's own horizon, or an adopted plan from an earlier year). The by-year tables then run over every year any selected scenario covers, blank where a scenario does not; the summary measures are by year of each scenario's own horizon (year 1, 4, 9 and the end), labelled with calendar years only when every selected scenario shares the horizon. By-year differences compare the same calendar year.
 
 ### 7.5 Charts

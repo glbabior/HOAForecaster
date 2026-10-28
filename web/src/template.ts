@@ -18,6 +18,23 @@ export function currentAdoption(scenarios: Scenario[]): Scenario | undefined {
     .sort((a, b) => (b.adoption?.sequence ?? 0) - (a.adoption?.sequence ?? 0))[0];
 }
 
+/** The scenarios with `name` put just `side` the scenario `past` – a move up or left puts it
+ * before its neighbour, down or right after – so it moves past a run of scenarios a screen
+ * does not show too, and a click repeated before the save comes back changes nothing more.
+ * The project's order is the order every screen lists them in. */
+export function moveScenario(
+  scenarios: Scenario[],
+  name: string,
+  side: "before" | "after",
+  past: string,
+): Scenario[] {
+  const moving = scenarios.find((s) => s.name === name);
+  if (!moving || name === past || !scenarios.some((s) => s.name === past)) return scenarios;
+  const rest = scenarios.filter((s) => s !== moving);
+  const at = rest.findIndex((s) => s.name === past) + (side === "after" ? 1 : 0);
+  return [...rest.slice(0, at), moving, ...rest.slice(at)];
+}
+
 /** The years a scenario runs over – none while it is not a usable horizon (a year half
  * typed). */
 export function horizonOf(scenario: Scenario): number[] {

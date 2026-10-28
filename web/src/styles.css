@@ -1112,3 +1112,23 @@ table.compare .diff {
   display: block;
   font-size: 0.85em;
 }
+
+/* moving a scenario in the project's order */
+.move {
+  white-space: nowrap;
+}
+
+th .move {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.move button {
+  padding: 0 0.4rem;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.move button + button {
+  margin-left: 0.25rem;
+}

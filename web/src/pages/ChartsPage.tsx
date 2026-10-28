@@ -22,10 +22,12 @@ export function ChartsPage() {
 
   if (!stored || !results) return <Loading error={error ?? loadError} />;
   const names = stored.project.scenarios.map((s) => s.name);
-  const shown: [string, ScenarioResult][] = (chosen ?? names).flatMap((n) => {
-    const o = results.scenarios[n];
-    return o && "result" in o ? [[n, o.result] as [string, ScenarioResult]] : [];
-  });
+  const shown: [string, ScenarioResult][] = names
+    .filter((n) => (chosen ?? names).includes(n))
+    .flatMap((n) => {
+      const o = results.scenarios[n];
+      return o && "result" in o ? [[n, o.result] as [string, ScenarioResult]] : [];
+    });
   const values = shown.flatMap(([, r]) =>
     r.years.flatMap((y) => [num(y.expenses), num(y.total_from_owners), num(y.ending_balance)]),
   );
