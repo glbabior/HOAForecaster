@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 
 import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
 import { CsvButton } from "../components/CsvButton";
 import { ScenarioPicker } from "../components/ScenarioPicker";
+import { numberOf, useSort } from "../components/sort";
 import { ErrorBanner } from "../components/ui";
 import { num } from "../decimal";
 import { dues, money, percent } from "../format";
@@ -299,57 +300,96 @@ export function ComparePage() {
               ["Percent funded by year", pfTable, "percent_funded", "percent funded"],
             ] as const
           ).map(([title, ref, field, file]) => (
-            <section className="panel" key={field}>
-              <div className="section-head">
-                <h2>{title}</h2>
-                <CsvButton table={ref} filename={`${name} - ${file}.csv`} />
-              </div>
-              <div className="table-scroll">
-                <table className="compare" ref={ref}>
-                  <caption className="visually-hidden">{title}</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Year</th>
-                      {shown.map(([n]) => (
-                        <th scope="col" key={n} className="num">
-                          {n}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allYears.map((year) => (
-                      <tr key={year}>
-                        <th scope="row">{year}</th>
-                        {shown.map(([n, r], i) => {
-                          // the same calendar year in each scenario, blank where it has none
-                          const at = r.years.find((y) => y.year === year);
-                          const v = at?.[field] ?? null;
-                          const low = field === "ending_balance" && at?.low_flag;
-                          const first = shown[0]?.[1].years.find((y) => y.year === year);
-                          const base = first?.[field] ?? null;
-                          const kind = field === "ending_balance" ? "money" : "percent";
-                          const d = diffs && i > 0 ? difference(kind, "higher", v, base) : null;
-                          return (
-                            <td
-                              key={n}
-                              className={`num${low ? " flag-warn" : ""}${v?.startsWith("-") ? " negative" : ""}`}
-                              data-csv={v ?? ""}
-                            >
-                              {field === "ending_balance" ? money(v) : percent(v)}
-                              {d && <span className={`diff ${d.className}`}> ({d.text})</span>}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <ByYearTable
+              key={field}
+              title={title}
+              tableRef={ref}
+              field={field}
+              filename={`${name} - ${file}.csv`}
+              shown={shown}
+              years={allYears}
+              diffs={diffs}
+            />
           ))}
         </>
       )}
     </>
+  );
+}
+
+/** One figure by year for every scenario shown – sortable by the year or by any scenario. */
+function ByYearTable({
+  title,
+  tableRef,
+  field,
+  filename,
+  shown,
+  years,
+  diffs,
+}: {
+  title: string;
+  tableRef: RefObject<HTMLTableElement | null>;
+  field: "ending_balance" | "percent_funded";
+  filename: string;
+  shown: [string, ScenarioResult][];
+  years: number[];
+  diffs: boolean;
+}) {
+  const value = (r: ScenarioResult, year: number) =>
+    r.years.find((y) => y.year === year)?.[field] ?? null;
+  const { order, header } = useSort(years, {
+    year: (y) => y,
+    ...Object.fromEntries(shown.map(([n, r]) => [`s:${n}`, (y: number) => numberOf(value(r, y))])),
+  });
+  return (
+    <section className="panel">
+      <div className="section-head">
+        <h2>{title}</h2>
+        <CsvButton table={tableRef} filename={filename} />
+      </div>
+      <div className="table-scroll">
+        <table className="compare" ref={tableRef}>
+          <caption className="visually-hidden">{title}</caption>
+          <thead>
+            <tr>
+              {header("year", "Year")}
+              {shown.map(([n]) => (
+                <Fragment key={n}>{header(`s:${n}`, n, { className: "num" })}</Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {order.map((i) => {
+              const year = years[i] as number;
+              return (
+                <tr key={year}>
+                  <th scope="row">{year}</th>
+                  {shown.map(([n, r], k) => {
+                    // the same calendar year in each scenario, blank where it has none
+                    const at = r.years.find((y) => y.year === year);
+                    const v = at?.[field] ?? null;
+                    const low = field === "ending_balance" && at?.low_flag;
+                    const first = shown[0]?.[1].years.find((y) => y.year === year);
+                    const base = first?.[field] ?? null;
+                    const kind = field === "ending_balance" ? "money" : "percent";
+                    const d = diffs && k > 0 ? difference(kind, "higher", v, base) : null;
+                    return (
+                      <td
+                        key={n}
+                        className={`num${low ? " flag-warn" : ""}${v?.startsWith("-") ? " negative" : ""}`}
+                        data-csv={v ?? ""}
+                      >
+                        {field === "ending_balance" ? money(v) : percent(v)}
+                        {d && <span className={`diff ${d.className}`}> ({d.text})</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

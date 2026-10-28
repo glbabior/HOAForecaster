@@ -13,6 +13,7 @@ import {
 } from "../components/charts";
 import { CopyDialog } from "../components/CopyDialog";
 import { PlanTable } from "../components/PlanTable";
+import { numberOf, useSort } from "../components/sort";
 import { ExpenseTable, FfbTable, useRowIds } from "../components/tables";
 import {
   Confirm,
@@ -900,6 +901,10 @@ export function FfbScreen() {
   // the reserve lines that count towards a worked-out figure, and those that cannot yet
   const reserve = f.expense_lines.filter((l) => l.frequency === "every" || l.frequency === "once");
   const lifeless = reserve.filter((l) => l.frequency === "once" && !l.useful_life);
+  const worked = useSort(years, {
+    year: (y) => y,
+    ffb: (y) => numberOf(result?.ffb[String(y)]),
+  });
   return (
     <InputsScreen>
       <section className="panel">
@@ -940,19 +945,19 @@ export function FfbScreen() {
                 <caption className="visually-hidden">Fully Funded Balance, worked out</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Start of year</th>
-                    <th scope="col" className="num">
-                      Fully Funded Balance
-                    </th>
+                    {worked.header("year", "Start of year")}
+                    {worked.header("ffb", "Fully Funded Balance", { className: "num" })}
                   </tr>
                 </thead>
                 <tbody>
-                  {years.map((y) => (
-                    <tr key={y}>
-                      <th scope="row">{y}</th>
-                      <td className="num">{money(result.ffb[String(y)])}</td>
-                    </tr>
-                  ))}
+                  {worked.order
+                    .map((k) => years[k] as number)
+                    .map((y) => (
+                      <tr key={y}>
+                        <th scope="row">{y}</th>
+                        <td className="num">{money(result.ffb[String(y)])}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             )}
@@ -1004,6 +1009,21 @@ export function DuesScreen() {
   const years = horizonOf(form);
   const f = form.facts;
   const resolved = new Map(result?.years.map((y) => [y.year, y.dues]) ?? []);
+  const typedFor = (y: number) =>
+    form.dues.mode === "explicit"
+      ? form.dues.explicit[String(y)]
+      : form.dues.mode === "rate"
+        ? form.dues.overrides[String(y)]
+        : undefined;
+  const sorted = useSort(
+    years,
+    {
+      year: (y) => y,
+      typed: (y) => numberOf(typedFor(y)),
+      resolved: (y) => numberOf(resolved.get(y)),
+    },
+    (y) => y, // held when sorted, so typing a figure never moves its row
+  );
 
   function changeMode(next: Mode) {
     setMode(next);
@@ -1102,61 +1122,63 @@ export function DuesScreen() {
             </caption>
             <thead>
               <tr>
-                <th scope="col">Year</th>
-                {mode !== "rate" && <th scope="col">{mode === "explicit" ? "Dues" : "Pinned"}</th>}
-                <th scope="col" className="num">
-                  Resolved
-                </th>
+                {sorted.header("year", "Year")}
+                {mode !== "rate" && sorted.header("typed", mode === "explicit" ? "Dues" : "Pinned")}
+                {sorted.header("resolved", "Resolved", { className: "num" })}
               </tr>
             </thead>
             <tbody>
-              {years.map((y) => {
-                const key = String(y);
-                return (
-                  <tr key={y}>
-                    <th scope="row">{y}</th>
-                    {form.dues.mode === "explicit" && (
-                      <td>
-                        <DecimalInput
-                          label={`Dues in ${y}`}
-                          name={`Dues in ${y}`}
-                          value={form.dues.explicit[key] ?? null}
-                          onChange={(v) =>
-                            v !== null &&
-                            form.dues.mode === "explicit" &&
-                            setForm({
-                              ...form,
-                              dues: {
-                                mode: "explicit",
-                                explicit: { ...form.dues.explicit, [key]: v },
-                              },
-                            })
-                          }
-                        />
-                      </td>
-                    )}
-                    {form.dues.mode === "rate" && mode === "pinned" && (
-                      <td>
-                        <DecimalInput
-                          label={`Pinned dues in ${y}`}
-                          name={`Pinned dues in ${y}`}
-                          allowBlank
-                          value={form.dues.overrides[key] ?? null}
-                          onChange={(v) => {
-                            if (form.dues.mode !== "rate") return;
-                            const overrides = Object.fromEntries(
-                              Object.entries(form.dues.overrides).filter(([year]) => year !== key),
-                            );
-                            if (v !== null) overrides[key] = v;
-                            setForm({ ...form, dues: { ...form.dues, overrides } });
-                          }}
-                        />
-                      </td>
-                    )}
-                    <td className="num">{duesText(resolved.get(y))}</td>
-                  </tr>
-                );
-              })}
+              {sorted.order
+                .map((k) => years[k] as number)
+                .map((y) => {
+                  const key = String(y);
+                  return (
+                    <tr key={y}>
+                      <th scope="row">{y}</th>
+                      {form.dues.mode === "explicit" && (
+                        <td>
+                          <DecimalInput
+                            label={`Dues in ${y}`}
+                            name={`Dues in ${y}`}
+                            value={form.dues.explicit[key] ?? null}
+                            onChange={(v) =>
+                              v !== null &&
+                              form.dues.mode === "explicit" &&
+                              setForm({
+                                ...form,
+                                dues: {
+                                  mode: "explicit",
+                                  explicit: { ...form.dues.explicit, [key]: v },
+                                },
+                              })
+                            }
+                          />
+                        </td>
+                      )}
+                      {form.dues.mode === "rate" && mode === "pinned" && (
+                        <td>
+                          <DecimalInput
+                            label={`Pinned dues in ${y}`}
+                            name={`Pinned dues in ${y}`}
+                            allowBlank
+                            value={form.dues.overrides[key] ?? null}
+                            onChange={(v) => {
+                              if (form.dues.mode !== "rate") return;
+                              const overrides = Object.fromEntries(
+                                Object.entries(form.dues.overrides).filter(
+                                  ([year]) => year !== key,
+                                ),
+                              );
+                              if (v !== null) overrides[key] = v;
+                              setForm({ ...form, dues: { ...form.dues, overrides } });
+                            }}
+                          />
+                        </td>
+                      )}
+                      <td className="num">{duesText(resolved.get(y))}</td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
           {form.dues.mode === "rate" && (
@@ -1187,6 +1209,11 @@ export function AssessmentsScreen() {
   const { form, setForm } = useScenario();
   const rows = useRowIds(form.assessments.length);
   const setAssessments = (assessments: Assessment[]) => setForm({ ...form, assessments });
+  const { order, header } = useSort(
+    form.assessments,
+    { year: (a) => a.year, amount: (a) => numberOf(a.amount), note: (a) => a.note },
+    (_, i) => rows.ids[i] ?? String(i), // held when sorted, so typing never moves a row
+  );
   return (
     <InputsScreen>
       <section className="panel">
@@ -1195,68 +1222,72 @@ export function AssessmentsScreen() {
           <caption className="visually-hidden">Special assessments</caption>
           <thead>
             <tr>
-              <th scope="col">Year</th>
-              <th scope="col">Per unit</th>
-              <th scope="col">Note</th>
+              {header("year", "Year")}
+              {header("amount", "Per unit")}
+              {header("note", "Note")}
               <th scope="col">
                 <span className="visually-hidden">Remove</span>
               </th>
             </tr>
           </thead>
           <tbody>
-            {form.assessments.map((a, i) => (
-              <tr key={rows.ids[i]}>
-                <td>
-                  <YearInput
-                    label={`Year of assessment ${i + 1}`}
-                    name={`Year of assessment ${i + 1}`}
-                    value={a.year}
-                    onChange={(year) =>
-                      setAssessments(form.assessments.map((x, j) => (j === i ? { ...x, year } : x)))
-                    }
-                  />
-                </td>
-                <td>
-                  <DecimalInput
-                    label={`Amount of assessment ${i + 1}`}
-                    name={`Amount of assessment ${i + 1}`}
-                    value={a.amount}
-                    onChange={(v) =>
-                      v !== null &&
-                      setAssessments(
-                        form.assessments.map((x, j) => (j === i ? { ...x, amount: v } : x)),
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  <input
-                    aria-label={`Note for assessment ${i + 1}`}
-                    value={a.note}
-                    onChange={(e) =>
-                      setAssessments(
-                        form.assessments.map((x, j) =>
-                          j === i ? { ...x, note: e.target.value } : x,
-                        ),
-                      )
-                    }
-                  />
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="small"
-                    aria-label={`Remove assessment ${i + 1}`}
-                    onClick={() => {
-                      rows.removed(i);
-                      setAssessments(form.assessments.filter((_, j) => j !== i));
-                    }}
-                  >
-                    Remove
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {order
+              .map((i) => [form.assessments[i] as Assessment, i] as const)
+              .map(([a, i]) => (
+                <tr key={rows.ids[i]}>
+                  <td>
+                    <YearInput
+                      label={`Year of assessment ${i + 1}`}
+                      name={`Year of assessment ${i + 1}`}
+                      value={a.year}
+                      onChange={(year) =>
+                        setAssessments(
+                          form.assessments.map((x, j) => (j === i ? { ...x, year } : x)),
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <DecimalInput
+                      label={`Amount of assessment ${i + 1}`}
+                      name={`Amount of assessment ${i + 1}`}
+                      value={a.amount}
+                      onChange={(v) =>
+                        v !== null &&
+                        setAssessments(
+                          form.assessments.map((x, j) => (j === i ? { ...x, amount: v } : x)),
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`Note for assessment ${i + 1}`}
+                      value={a.note}
+                      onChange={(e) =>
+                        setAssessments(
+                          form.assessments.map((x, j) =>
+                            j === i ? { ...x, note: e.target.value } : x,
+                          ),
+                        )
+                      }
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="small"
+                      aria-label={`Remove assessment ${i + 1}`}
+                      onClick={() => {
+                        rows.removed(i);
+                        setAssessments(form.assessments.filter((_, j) => j !== i));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
         <button

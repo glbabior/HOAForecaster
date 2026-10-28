@@ -687,3 +687,141 @@ describe("a worked-out Fully Funded Balance", () => {
     );
   });
 });
+
+describe("sortable tables", () => {
+  it("sort by a header, then the other way, then back to the original order", async () => {
+    serve(projectOf(scenario("Plan B"), scenario("Plan C"), scenario("Plan A")));
+    start("/projects/abcdefabcdef/scenarios");
+    const table = await screen.findByRole("table", { name: "Scenarios and their key results" });
+    const names = () =>
+      within(table)
+        .getAllByRole("rowheader")
+        .map((th) => within(th).getByRole("link").textContent);
+    const heading = within(table).getByRole("columnheader", { name: "Scenario" });
+    expect(heading.getAttribute("aria-sort")).toBeNull();
+    await userEvent.click(within(heading).getByRole("button"));
+    expect(names()).toEqual(["Plan A", "Plan B", "Plan C"]);
+    expect(heading.getAttribute("aria-sort")).toBe("ascending");
+    await userEvent.click(within(heading).getByRole("button"));
+    expect(names()).toEqual(["Plan C", "Plan B", "Plan A"]);
+    await userEvent.click(within(heading).getByRole("button"));
+    expect(names()).toEqual(["Plan B", "Plan C", "Plan A"]);
+    expect(heading.getAttribute("aria-sort")).toBeNull();
+  });
+
+  it("only reorder what is shown – an edit in a sorted table changes its own line", async () => {
+    const two = scenario("Plan A");
+    two.facts.expense_lines = [
+      { id: "b", frequency: "yearly", year: null, amount: "900", description: "Big", source: "" },
+      { id: "s", frequency: "yearly", year: null, amount: "100", description: "Small", source: "" },
+    ];
+    serve(projectOf(two, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const yearly = await screen.findByRole("table", { name: "Yearly costs" });
+    await userEvent.click(
+      within(within(yearly).getByRole("columnheader", { name: "Amount a year" })).getByRole(
+        "button",
+      ),
+    );
+    const first = within(yearly).getAllByRole("textbox", { name: /^Description of expense/ })[0];
+    expect((first as HTMLInputElement).value).toBe("Small");
+    await userEvent.type(first as HTMLElement, "er");
+    await waitFor(() => expect(mocked.saveProject).toHaveBeenCalled(), SLOW);
+    // the saved order is untouched, and the edit went to the line it was typed in
+    expect(savedScenario("Plan A")?.facts.expense_lines.map((l) => l.description)).toEqual([
+      "Big",
+      "Smaller",
+    ]);
+  });
+});
+
+describe("sorted editable tables", () => {
+  const sortBy = async (table: HTMLElement, name: string) =>
+    userEvent.click(within(within(table).getByRole("columnheader", { name })).getByRole("button"));
+
+  it("keep a row in place while a figure in it is typed, until the next click", async () => {
+    const two = scenario("Plan A");
+    two.facts.expense_lines = [
+      { id: "b", frequency: "yearly", year: null, amount: "900", description: "Big", source: "" },
+      { id: "s", frequency: "yearly", year: null, amount: "100", description: "Small", source: "" },
+    ];
+    serve(projectOf(two, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const yearly = await screen.findByRole("table", { name: "Yearly costs" });
+    await sortBy(yearly, "Amount a year");
+    const amounts = () =>
+      within(yearly)
+        .getAllByRole("textbox", { name: /^Amount of expense/ })
+        .map((b) => (b as HTMLInputElement).value);
+    expect(amounts()).toEqual(["100", "900"]);
+    const small = within(yearly).getByRole("textbox", { name: "Amount of expense 2" });
+    await userEvent.clear(small);
+    await userEvent.type(small, "1500"); // now the larger – but the row stays where it was
+    expect(amounts()).toEqual(["1500", "900"]);
+    await waitFor(
+      () => expect(savedScenario("Plan A")?.facts.expense_lines[1]?.amount).toBe("1500"),
+      SLOW,
+    );
+    await sortBy(yearly, "Amount a year"); // the next click sorts again – descending
+    expect(amounts()).toEqual(["1,500", "900"]);
+  });
+
+  it("put yearless costs first when sorted by year, as the start year", async () => {
+    const three = scenario("Plan A");
+    three.facts.expense_lines = [
+      { id: "a", frequency: "yearly", year: 2030, amount: "1", description: "Later", source: "" },
+      {
+        id: "b",
+        frequency: "yearly",
+        year: null,
+        amount: "1",
+        description: "From start",
+        source: "",
+      },
+      { id: "c", frequency: "yearly", year: 2029, amount: "1", description: "Sooner", source: "" },
+    ];
+    serve(projectOf(three, scenario("Plan B")));
+    start(`${A}/expenses`);
+    const yearly = await screen.findByRole("table", { name: "Yearly costs" });
+    await sortBy(yearly, "First year");
+    const order = within(yearly)
+      .getAllByRole("textbox", { name: /^Description of expense/ })
+      .map((b) => (b as HTMLInputElement).value);
+    expect(order).toEqual(["From start", "Sooner", "Later"]);
+  });
+
+  it("remove the assessment it shows, not the one in its saved place", async () => {
+    const plan = scenario("Plan A", {
+      assessments: [
+        { year: 2030, amount: "500", note: "late" },
+        { year: 2028, amount: "200", note: "early" },
+      ],
+    });
+    serve(projectOf(plan, scenario("Plan B")));
+    start(`${A}/assessments`);
+    const table = await screen.findByRole("table", { name: "Special assessments" });
+    await sortBy(table, "Year");
+    const notes = within(table).getAllByRole("textbox", { name: /^Note for assessment/ });
+    expect((notes[0] as HTMLInputElement).value).toBe("early");
+    await userEvent.click(
+      within(table).getAllByRole("button", { name: /^Remove assessment/ })[0] as HTMLElement,
+    );
+    await waitFor(() => expect(savedScenario("Plan A")?.assessments).toHaveLength(1), SLOW);
+    expect(savedScenario("Plan A")?.assessments[0]?.note).toBe("late");
+  });
+
+  it("fill a pasted column down the years in the order shown", async () => {
+    start(`${A}/ffb`);
+    const table = await screen.findByRole("table", { name: "Fully Funded Balance by year" });
+    await sortBy(table, "Start of year");
+    await sortBy(table, "Start of year"); // descending – 2032 at the top
+    const top = within(table).getByRole("textbox", {
+      name: "Fully Funded Balance at the start of 2031",
+    });
+    fireEvent.focus(top);
+    fireEvent.paste(top, { clipboardData: { getData: () => ["7", "8"].join("\n") } });
+    await waitFor(() => expect(savedScenario("Plan A")?.facts.ffb["2031"]).toBe("7"), SLOW);
+    expect(savedScenario("Plan A")?.facts.ffb["2030"]).toBe("8"); // the row shown below 2031
+    expect(savedScenario("Plan A")?.facts.ffb["2032"]).toBe("203200");
+  });
+});

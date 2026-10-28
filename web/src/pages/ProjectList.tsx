@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "../api";
+import { useSort } from "../components/sort";
 import { ErrorBanner } from "../components/ui";
 import { date } from "../format";
 import type { ProjectSummary } from "../types";
@@ -14,6 +15,12 @@ export function ProjectList() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const list = projects ?? [];
+  const { order, header } = useSort(list, {
+    name: (p) => p.name,
+    scenarios: (p) => p.scenarios,
+    modified: (p) => p.modified,
+  });
 
   useEffect(() => {
     api
@@ -64,21 +71,24 @@ export function ProjectList() {
           <caption className="visually-hidden">Saved projects</caption>
           <thead>
             <tr>
-              <th scope="col">Project</th>
-              <th scope="col">Scenarios</th>
-              <th scope="col">Last saved</th>
+              {header("name", "Project")}
+              {header("scenarios", "Scenarios")}
+              {header("modified", "Last saved")}
             </tr>
           </thead>
           <tbody>
-            {projects.map((p) => (
-              <tr key={p.id}>
-                <th scope="row">
-                  <Link to={`/projects/${p.id}`}>{p.name}</Link>
-                </th>
-                <td className="num">{p.scenarios}</td>
-                <td>{date(p.modified)}</td>
-              </tr>
-            ))}
+            {order
+              .map((i) => list[i])
+              .flatMap((p) => (p ? [p] : []))
+              .map((p) => (
+                <tr key={p.id}>
+                  <th scope="row">
+                    <Link to={`/projects/${p.id}`}>{p.name}</Link>
+                  </th>
+                  <td className="num">{p.scenarios}</td>
+                  <td>{date(p.modified)}</td>
+                </tr>
+              ))}
           </tbody>
         </table>
       )}

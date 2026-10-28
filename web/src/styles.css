@@ -984,3 +984,27 @@ ol.steps p {
   cursor: pointer;
   margin-left: 1.1em;
 }
+
+/* sortable headers – the whole header is the button, quietly marked */
+th > button.sort {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+}
+
+th > button.sort:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+th .sort-mark {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+@media print {
+  th .sort-mark {
+    display: none;
+  }
+}

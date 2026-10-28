@@ -1,8 +1,9 @@
-import { useState, type ClipboardEvent } from "react";
+import { useState, type ClipboardEvent, type ReactNode } from "react";
 
 import { parsePasted } from "../csv";
 import { parseDecimal } from "../decimal";
 import { isOperating, type ExpenseLine, type Frequency } from "../types";
+import { numberOf, useSort } from "./sort";
 import { DecimalInput, OptionalYearInput, YearInput } from "./ui";
 
 export const FREQUENCIES: { value: Frequency; label: string }[] = [
@@ -205,42 +206,35 @@ export function ExpenseTable({
             </summary>
             <p className="hint">{kind.hint}</p>
             {shown.length > 0 && (
-              <div className="table-scroll">
-                <table className={`edit-table expenses ${kind.frequency}`}>
-                  <caption className="visually-hidden">{kind.title}</caption>
-                  <thead>
-                    <tr>
-                      <ExpenseHeadings frequency={kind.frequency} />
-                      <th scope="col">
-                        <span className="visually-hidden">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.map((i) => {
-                      const line = lines[i] as ExpenseLine;
-                      return (
-                        <ExpenseRow
-                          key={rows.ids[i]}
-                          line={line}
-                          index={i}
-                          defaultYear={defaultYear}
-                          onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
-                          onMoved={(to) => {
-                            const title = KINDS.find((k) => k.frequency === to)?.title ?? to;
-                            setNotice(`Expense ${i + 1} moved to ${title}.`);
-                          }}
-                          onRemove={() => {
-                            rows.removed(i);
-                            onChange(lines.filter((_, j) => j !== i));
-                          }}
-                          onCopy={onCopy && (() => onCopy(line))}
-                        />
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <KindTable
+                frequency={kind.frequency}
+                title={kind.title}
+                lines={lines}
+                shown={shown}
+                rowKey={(i) => rows.ids[i] ?? String(i)}
+                defaultYear={defaultYear}
+                row={(i) => {
+                  const line = lines[i] as ExpenseLine;
+                  return (
+                    <ExpenseRow
+                      key={rows.ids[i]}
+                      line={line}
+                      index={i}
+                      defaultYear={defaultYear}
+                      onChange={(next) => onChange(lines.map((l, j) => (j === i ? next : l)))}
+                      onMoved={(to) => {
+                        const title = KINDS.find((k) => k.frequency === to)?.title ?? to;
+                        setNotice(`Expense ${i + 1} moved to ${title}.`);
+                      }}
+                      onRemove={() => {
+                        rows.removed(i);
+                        onChange(lines.filter((_, j) => j !== i));
+                      }}
+                      onCopy={onCopy && (() => onCopy(line))}
+                    />
+                  );
+                }}
+              />
             )}
             <div className="row-actions">
               <button
@@ -268,41 +262,80 @@ export function ExpenseTable({
 
 const ALREADY_INFLATED = "Already in that year's dollars – not grown by reserve inflation";
 
-function ExpenseHeadings({ frequency }: { frequency: Frequency }) {
+/** One kind's table, its headers sorting what is shown (never the saved order). */
+function KindTable({
+  frequency,
+  title,
+  lines,
+  shown,
+  rowKey,
+  defaultYear,
+  row,
+}: {
+  frequency: Frequency;
+  title: string;
+  lines: ExpenseLine[];
+  /** the positions in `lines` of this kind's lines */
+  shown: number[];
+  /** a line's row key – the sorted order is held by it, so typing never moves a row */
+  rowKey: (i: number) => string;
+  /** a blank first year is the start year, so it sorts as one */
+  defaultYear: number;
+  row: (i: number) => ReactNode;
+}) {
+  const at = (i: number) => lines[i] as ExpenseLine;
+  const { order, header } = useSort(
+    shown,
+    {
+      year: (i) => at(i).year ?? defaultYear,
+      interval: (i) => at(i).interval,
+      end: (i) => at(i).end_year,
+      amount: (i) => numberOf(at(i).amount),
+      description: (i) => at(i).description,
+      life: (i) => at(i).useful_life,
+      inflation: (i) => numberOf(at(i).inflation),
+      nominal: (i) => (at(i).nominal ? 1 : 0),
+    },
+    rowKey,
+  );
   const operating = isOperating(frequency);
   return (
-    <>
-      <th scope="col">{frequency === "once" ? "Year" : "First year"}</th>
-      {frequency === "every" && (
-        <th scope="col" title="How many years the component lasts between replacements">
-          Every … years (its useful life)
-        </th>
-      )}
-      {frequency !== "once" && <th scope="col">Last year</th>}
-      <th scope="col">
-        {frequency === "monthly"
-          ? "Amount a month"
-          : frequency === "yearly"
-            ? "Amount a year"
-            : "Amount"}
-      </th>
-      <th scope="col">Description and source</th>
-      {frequency === "once" && (
-        <th
-          scope="col"
-          title="How many years the component lasts between replacements – for a Fully Funded Balance worked out from the expenses; blank leaves it out of that"
-        >
-          Useful life
-        </th>
-      )}
-      {operating ? (
-        <th scope="col">Own inflation</th>
-      ) : (
-        <th scope="col" title={ALREADY_INFLATED}>
-          Already inflated?
-        </th>
-      )}
-    </>
+    <div className="table-scroll">
+      <table className={`edit-table expenses ${frequency}`}>
+        <caption className="visually-hidden">{title}</caption>
+        <thead>
+          <tr>
+            {header("year", frequency === "once" ? "Year" : "First year")}
+            {frequency === "every" &&
+              header("interval", "Every … years (its useful life)", {
+                title: "How many years the component lasts between replacements",
+              })}
+            {frequency !== "once" && header("end", "Last year")}
+            {header(
+              "amount",
+              frequency === "monthly"
+                ? "Amount a month"
+                : frequency === "yearly"
+                  ? "Amount a year"
+                  : "Amount",
+            )}
+            {header("description", "Description and source")}
+            {frequency === "once" &&
+              header("life", "Useful life", {
+                title:
+                  "How many years the component lasts between replacements – for a Fully Funded Balance worked out from the expenses; blank leaves it out of that",
+              })}
+            {operating
+              ? header("inflation", "Own inflation")
+              : header("nominal", "Already inflated?", { title: ALREADY_INFLATED })}
+            <th scope="col">
+              <span className="visually-hidden">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>{order.map((k) => row(shown[k] as number))}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -484,6 +517,12 @@ export function FfbTable({
 }) {
   const [notice, setNotice] = useState("");
   const [focused, setFocused] = useState(years[0] ?? 0);
+  const { order, header } = useSort(
+    years,
+    { year: (y) => y, ffb: (y) => numberOf(values[String(y)]) },
+    (y) => y,
+  );
+  const shownYears = order.map((k) => years[k] as number);
 
   function paste(e: ClipboardEvent<HTMLTableElement>) {
     const rows = parsePasted(e.clipboardData.getData("text/plain"));
@@ -492,10 +531,11 @@ export function FfbTable({
     const next = { ...values };
     let used = 0;
     const pairs = rows.every((r) => r.length >= 2);
-    const from = Math.max(0, years.indexOf(focused));
+    // filled down from the box you are in, in the order the rows are shown
+    const from = Math.max(0, shownYears.indexOf(focused));
     rows.forEach((cells, i) => {
       // "year<TAB>amount" rows, or a column of amounts filled down from the focused year
-      const year = pairs ? Number(cells[0]) : years[from + i];
+      const year = pairs ? Number(cells[0]) : shownYears[from + i];
       const amount = parseDecimal((pairs ? cells[1] : cells[0]) ?? "");
       if (year !== undefined && years.includes(year) && amount !== null) {
         next[String(year)] = amount;
@@ -518,12 +558,12 @@ export function FfbTable({
           <caption className="visually-hidden">Fully Funded Balance by year</caption>
           <thead>
             <tr>
-              <th scope="col">Start of year</th>
-              <th scope="col">Fully Funded Balance</th>
+              {header("year", "Start of year")}
+              {header("ffb", "Fully Funded Balance")}
             </tr>
           </thead>
           <tbody>
-            {years.map((year) => (
+            {shownYears.map((year) => (
               <tr key={year} onFocus={() => setFocused(year)}>
                 <th scope="row">{year}</th>
                 <td>
