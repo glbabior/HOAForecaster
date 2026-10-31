@@ -102,6 +102,7 @@ cd web && npm run build                     # after changing web/src – a runni
 - **code-reviewer** – before every commit to `main`. Blocking findings must be fixed first.
 - **security-reviewer** – before each release, and on any change touching file I/O, import/export, dependencies, the local server, or anything that could carry real data into this repo.
 - **documentation-writer** – when a feature is complete and before each release. A release is not done until it passes.
+- **math-auditor** – on any change to `src/hoa_engine/` or the workbook's formulas, and before each release. It works examples by hand from the spec before reading the code, because the engine and the workbook share one author and a shared misreading passes every test. Its disagreements become section 9 acceptance tests; its questions go to Gabriel.
 
 ## Working method
 
