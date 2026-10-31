@@ -128,7 +128,7 @@ const KINDS: {
   {
     frequency: "every",
     title: "Every few years",
-    hint: "Reserve expenses that come round again – an amount each time, in the expense base year's dollars and grown with reserve inflation – or, when already inflated, in its first year's dollars with each repeat grown from there.",
+    hint: "Reserve expenses that come round again – an amount each time, in the expense base year's dollars and grown with reserve inflation – or, when already inflated, in its first year's dollars with each repeat grown from there. For an already-inflated amount, enter as the first year the year that amount is priced in: a past year is grown from then.",
     add: "Add a cost every few years",
   },
   {
