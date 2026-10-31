@@ -1,12 +1,18 @@
+/* Light unless dark is chosen with the header's switch (theme.ts) – white pages, navy for
+   actions, a thin red mark by the name, striped tables with thin rules. */
 :root {
-  color-scheme: light dark;
-  --bg: #f7f7f5;
+  color-scheme: light;
+  --bg: #ffffff;
   --surface: #ffffff;
-  --text: #1d1f21;
-  --muted: #5b6168;
-  --border: #d5d8dc;
-  --accent: #1f5fa8;
+  --surface-alt: #f4f5f7; /* striped rows, quiet bands */
+  --text: #1b1d21;
+  --muted: #5d636b;
+  --border: #d3d7dc;
+  --rule: #e4e7ea; /* the thin line between rows */
+  --accent: #0c3c8c; /* buttons, the chosen tab */
   --accent-text: #ffffff;
+  --link: #0b5cc2;
+  --brand: #c8102e;
   --input-bg: #fff9c4; /* the workbook's yellow input cells */
   --input-text: #0b3fa0; /* and their blue text */
   --warn-bg: #fbe2e1;
@@ -14,35 +20,42 @@
   --good-bg: #e2f2dd;
   --good-text: #23561a;
   --caution-bg: #fdecd2;
-  --focus: #f0a400;
+  --focus: #b45f00; /* dark enough to see on white */
   --radius: 6px;
+  --radius-card: 12px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 16px rgb(16 24 40 / 7%);
   font-family:
+    "Segoe UI",
     system-ui,
     -apple-system,
-    "Segoe UI",
     Roboto,
     sans-serif;
   font-size: 15px;
   line-height: 1.45;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15171a;
-    --surface: #1e2125;
-    --text: #e8eaed;
-    --muted: #a3a9b0;
-    --border: #3a3f45;
-    --accent: #6ea8ff;
-    --accent-text: #0d1117;
-    --input-bg: #3b3510;
-    --input-text: #9cc2ff;
-    --warn-bg: #4a1f1d;
-    --warn-text: #ffb4ad;
-    --good-bg: #1f3a1a;
-    --good-text: #a8dc98;
-    --caution-bg: #4a3612;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121417;
+  --surface: #1b1e22;
+  --surface-alt: #22262b;
+  --text: #e8eaed;
+  --muted: #a3a9b0;
+  --border: #3a3f46;
+  --rule: #2c3036;
+  --accent: #8ab4ff;
+  --accent-text: #0d1117;
+  --link: #8ab4ff;
+  --brand: #ff6b7d;
+  --input-bg: #3b3510;
+  --input-text: #9cc2ff;
+  --warn-bg: #4a1f1d;
+  --warn-text: #ffb4ad;
+  --good-bg: #1f3a1a;
+  --good-text: #a8dc98;
+  --caution-bg: #4a3612;
+  --focus: #f0a400;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 30%);
 }
 
 * {
@@ -58,12 +71,14 @@ body {
 main {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 0 24px 24px;
 }
 
 h1 {
-  font-size: 1.6rem;
-  margin: 0.4em 0 0.6em;
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0.5em 0 0.6em;
 }
 
 h2 {
@@ -72,7 +87,7 @@ h2 {
 }
 
 a {
-  color: var(--accent);
+  color: var(--link);
 }
 
 :focus-visible {
@@ -105,11 +120,61 @@ a {
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 10px 16px;
+  padding: 10px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* an on/off switch – the track and knob are drawn, the words are the button's name */
+button.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.switch-track {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--border);
+  box-shadow: inset 0 0 0 1px var(--muted); /* the track's edge shows when off, too */
+  transition: background 0.15s;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px var(--muted),
+    0 1px 2px rgb(0 0 0 / 30%);
+  transition: left 0.15s;
+}
+
+button.switch[aria-checked="true"] .switch-track {
+  background: var(--accent);
+}
+
+button.switch[aria-checked="true"] .switch-knob {
+  left: 18px;
 }
 
 /* shown over everything while the server restarts */
@@ -127,23 +192,51 @@ a {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   text-decoration: none;
+  color: var(--accent);
+}
+
+:root[data-theme="dark"] .brand {
   color: var(--text);
+}
+
+/* three slanted bars – a small mark by the name */
+.brand-mark {
+  width: 22px;
+  height: 16px;
+  background:
+    linear-gradient(var(--brand), var(--brand)) 0 0 / 100% 4px no-repeat,
+    linear-gradient(var(--brand), var(--brand)) 0 6px / 100% 4px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) 0 12px / 100% 4px no-repeat;
+  transform: skewX(-20deg);
 }
 
 .crumbs {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  margin-top: 16px;
+}
+
+.crumbs a {
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  text-decoration: underline;
 }
 
 .panel {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin: 0 0 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 20px 24px;
+  margin: 0 0 20px;
 }
 
 .panel.danger h2 {
@@ -172,32 +265,45 @@ a {
 
 /* ---------------------------------------------------------------- controls */
 
+/* pill-shaped outline buttons; the main action on a screen filled */
 button,
 .button {
   font: inherit;
-  padding: 6px 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
   background: var(--surface);
-  color: var(--text);
+  color: var(--accent);
   cursor: pointer;
   text-decoration: none;
   display: inline-block;
 }
 
-button.primary {
+button:hover:not(:disabled),
+.button:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+button.primary,
+.button.primary {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
 }
 
+button.primary:hover:not(:disabled),
+.button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000000);
+}
+
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 button.small {
-  padding: 2px 8px;
+  padding: 2px 10px;
   font-size: 0.85rem;
 }
 
@@ -205,9 +311,33 @@ button.link {
   border: none;
   background: none;
   padding: 0;
-  color: var(--accent);
+  color: var(--link);
+  font-weight: inherit;
   text-decoration: underline dotted;
   font: inherit;
+}
+
+/* a toolbar action – words and an icon in link blue, no box ("Download CSV ⤓") */
+button.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  padding: 4px 6px;
+  color: var(--link);
+  font-weight: 400;
+  font-size: 0.92rem;
+}
+
+button.action:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
+
+.icon {
+  flex: none;
 }
 
 input,
@@ -217,9 +347,15 @@ textarea {
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 5px 8px;
+  border-radius: var(--radius);
+  padding: 6px 9px;
   max-width: 100%;
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--muted);
 }
 
 input[aria-invalid="true"] {
@@ -344,17 +480,50 @@ table {
 
 th,
 td {
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rule);
   text-align: left;
   vertical-align: top;
 }
 
 thead th {
-  background: var(--bg);
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  font-weight: 700;
+  vertical-align: bottom;
   position: sticky;
   top: 0;
   z-index: 2; /* above the held first column as they cross */
+}
+
+/* every other row lightly shaded – on the row, so a cell's own colour (an input, a flag) shows
+   over it, and the held first column takes its row's, so nothing shows through it */
+tbody tr {
+  background: var(--surface);
+}
+
+tbody tr:nth-child(even) {
+  background: var(--surface-alt);
+}
+
+tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+/* a row's name in bold, the words under it plain */
+th[scope="row"] .hint {
+  font-weight: 400;
+}
+
+/* lists of things – more room in each row; a long by-year table keeps the usual room */
+table.list:not(.ffb-worked) th,
+table.list:not(.ffb-worked) td {
+  padding: 12px 14px;
+}
+
+/* an expense table is not striped – a line and its repeats beneath it read as one */
+table.expenses tbody tr {
+  background: var(--surface);
 }
 
 .num {
@@ -399,7 +568,7 @@ table.plan th[scope="row"],
 table.compare th[scope="row"] {
   position: sticky;
   left: 0;
-  background: var(--surface);
+  background: inherit;
   white-space: nowrap;
   z-index: 1;
 }
@@ -520,7 +689,8 @@ table.expenses td.row-buttons > * + * {
 }
 
 .expense-detail {
-  background: var(--bg);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
   margin-top: 8px;
@@ -548,9 +718,10 @@ table.expenses td.row-buttons > * + * {
   position: sticky;
   top: 12px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 12px 16px;
 }
 
 .key-results dl {
@@ -580,16 +751,67 @@ table.expenses td.row-buttons > * + * {
   color: var(--warn-text);
 }
 
-/* a scenario's name, the screen and whether everything is saved */
+/* a scenario's name, whether everything is saved, and its actions to the right */
 .scenario-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 4px 16px;
 }
 
 .scenario-head h1 {
   margin-bottom: 4px;
+}
+
+.scenario-head .row-actions {
+  margin: 0 0 0 auto;
+}
+
+/* the tabs name the screen, so on screen the title is the scenario's name alone */
+@media screen {
+  .scenario-head .screen-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* a row of underlined tabs – a scenario's screens */
+.tabs {
+  border-bottom: 1px solid var(--border);
+  margin: 8px 0 20px;
+}
+
+.tabs ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tabs a {
+  display: block;
+  padding: 10px 14px 9px;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  color: var(--muted);
+  font-size: 1.02rem;
+  text-decoration: none;
+}
+
+.tabs a:hover {
+  color: var(--text);
+}
+
+.tabs a.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
 }
 
 .screen-title {
@@ -650,10 +872,6 @@ button.small {
   font-weight: 600;
 }
 
-.panel.narrow {
-  max-width: 560px;
-}
-
 .split > * {
   min-width: 0;
 }
@@ -668,10 +886,11 @@ button.small {
 
 figure.chart {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin: 0 0 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 16px 20px;
+  margin: 0 0 20px;
 }
 
 figure.chart figcaption {
@@ -741,12 +960,9 @@ dialog::backdrop {
 }
 
 @media print {
-  .project-layout {
-    display: block;
-  }
-
   /* every colour, so a page printed from a dark-mode screen comes out as on paper */
-  :root {
+  :root,
+  :root[data-theme="dark"] {
     color-scheme: light;
     --bg: #ffffff;
     --surface: #ffffff;
@@ -762,6 +978,10 @@ dialog::backdrop {
     --good-bg: #e2f2dd;
     --good-text: #23561a;
     --caution-bg: #fdecd2;
+    --surface-alt: #ffffff;
+    --rule: #cccccc;
+    --link: #1f5fa8;
+    --shadow: none;
     font-size: 10pt;
   }
   .print-only {
@@ -918,81 +1138,195 @@ table.facts .unit-prefix {
   width: 1ch;
 }
 
-/* A project's screens – the index on the left, the screen beside it */
-.project-layout {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-
-.screen-index {
-  position: sticky;
-  top: 12px;
-}
-
-.screen-index ul {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-}
-
-.screen-index a {
-  display: block;
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  color: var(--text);
-  text-decoration: none;
-}
-
-.screen-index a:hover {
+/* A project's sections in a bar across the top – its name, then Scenarios, Compare, Charts,
+   Export, the one open underlined */
+.project-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0 28px;
+  margin: 0 -24px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
-.screen-index a.active {
-  background: var(--surface);
-  border-left: 3px solid var(--accent);
-  font-weight: 600;
-}
-
-/* an open scenario's own screens, under Scenarios */
-.scenario-index {
-  margin: 4px 0 8px 12px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border);
-}
-
-.scenario-index .scenario-name {
-  display: block;
-  padding: 4px 10px 0;
-  font-size: 0.85em;
-  color: var(--muted);
+.project-bar .project-name {
+  align-self: center;
+  max-width: 28rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+  padding-right: 28px;
+  border-right: 1px solid var(--border);
 }
 
-.screen-index .scenario-index ul {
-  margin-top: 2px;
+.project-bar ul {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 0 6px;
 }
 
-.scenario-index a {
-  padding: 4px 10px;
-  font-size: 0.95em;
+.project-bar nav a {
+  display: block;
+  padding: 11px 12px 9px;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
 }
 
-@media (max-width: 900px) {
-  .project-layout {
-    grid-template-columns: 1fr;
+.project-bar nav a:hover {
+  color: var(--text);
+}
+
+.project-bar nav a.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--brand);
+}
+
+/* above a list – its controls at the right ("Sort: Last saved") */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* cards – white, rounded, softly lifted; an icon, a link-blue title and a grey line under it */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 20px;
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow);
+  padding: 24px 18px 22px;
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+
+.card:hover,
+.card:focus-within {
+  border-color: var(--border);
+  box-shadow:
+    var(--shadow),
+    0 8px 24px rgb(16 24 40 / 10%);
+}
+
+.card-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.card-title {
+  color: var(--link);
+  font-size: 1.12rem;
+  font-weight: 400;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+/* the whole card opens the project – the link's area stretched over it */
+a.card-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+/* the focus ring round the whole card, where the browser can tell; otherwise on the link */
+@supports selector(:has(*)) {
+  a.card-title:focus-visible {
+    outline: none;
   }
-  .screen-index {
-    position: static;
+
+  .card:has(a.card-title:focus-visible) {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
   }
-  .screen-index ul {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
+}
+
+/* the charts' axis figures and hover box in the screens' own colours */
+.recharts-cartesian-axis-tick-value {
+  fill: var(--muted);
+}
+
+.recharts-default-tooltip {
+  background: var(--surface) !important; /* the chart sets these on the element itself */
+  border-color: var(--border) !important;
+  color: var(--text);
+}
+
+.card-caption {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* choosing what a new scenario starts from – one card per choice, the chosen one marked */
+.start-from legend {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.cards.choices {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  margin: 12px 0 20px;
+}
+
+.cards.choices .card {
+  cursor: pointer;
+  align-items: flex-start;
+  text-align: left;
+  padding: 14px 16px 14px 44px;
+}
+
+.cards.choices .card input {
+  position: absolute;
+  left: 16px;
+  top: 17px;
+  margin: 0;
+}
+
+.cards.choices .card.chosen {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--shadow);
+}
+
+.cards.choices .card-caption {
+  font-size: 0.85rem;
+}
+
+.new-scenario .field {
+  max-width: 420px;
 }
 
 /* the overview's steps, in the order they are done */

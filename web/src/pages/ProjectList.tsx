@@ -2,10 +2,43 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "../api";
-import { useSort } from "../components/sort";
 import { ErrorBanner } from "../components/ui";
 import { date } from "../format";
 import type { ProjectSummary } from "../types";
+
+// the ways to order the project cards – the last saved first unless another is chosen
+const SORTS = {
+  modified: {
+    label: "Last saved (newest first)",
+    compare: (a: ProjectSummary, b: ProjectSummary) => b.modified.localeCompare(a.modified),
+  },
+  name: {
+    label: "Name (A–Z)",
+    compare: (a: ProjectSummary, b: ProjectSummary) =>
+      a.name.localeCompare(b.name, "en-US", { numeric: true, sensitivity: "base" }),
+  },
+  scenarios: {
+    label: "Scenarios (most first)",
+    compare: (a: ProjectSummary, b: ProjectSummary) => b.scenarios - a.scenarios,
+  },
+};
+type SortBy = keyof typeof SORTS;
+
+/** A building, for a project's card – decoration only. */
+function BuildingIcon() {
+  return (
+    <svg className="card-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path
+        d="M6 28V6.5L17 3v25M17 28V11l9 3v14M3.5 28h25M10 10h3M10 15h3M10 20h3M21 18h2M21 22h2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export function ProjectList() {
   const navigate = useNavigate();
@@ -15,12 +48,7 @@ export function ProjectList() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const list = projects ?? [];
-  const { order, header } = useSort(list, {
-    name: (p) => p.name,
-    scenarios: (p) => p.scenarios,
-    modified: (p) => p.modified,
-  });
+  const [sortBy, setSortBy] = useState<SortBy>("modified");
 
   useEffect(() => {
     api
@@ -67,30 +95,34 @@ export function ProjectList() {
       {projects === null && !error && <p aria-busy="true">Loading…</p>}
       {projects?.length === 0 && <p>No projects yet – create one or import a file below.</p>}
       {projects && projects.length > 0 && (
-        <table className="list">
-          <caption className="visually-hidden">Saved projects</caption>
-          <thead>
-            <tr>
-              {header("name", "Project")}
-              {header("scenarios", "Scenarios")}
-              {header("modified", "Last saved")}
-            </tr>
-          </thead>
-          <tbody>
-            {order
-              .map((i) => list[i])
-              .flatMap((p) => (p ? [p] : []))
-              .map((p) => (
-                <tr key={p.id}>
-                  <th scope="row">
-                    <Link to={`/projects/${p.id}`}>{p.name}</Link>
-                  </th>
-                  <td className="num">{p.scenarios}</td>
-                  <td>{date(p.modified)}</td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+        <>
+          <div className="toolbar">
+            <label>
+              Sort{" "}
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)}>
+                {Object.entries(SORTS).map(([key, s]) => (
+                  <option key={key} value={key}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ul className="cards" aria-label="Saved projects">
+            {[...projects].sort(SORTS[sortBy].compare).map((p) => (
+              <li key={p.id} className="card">
+                <BuildingIcon />
+                <Link to={`/projects/${p.id}`} className="card-title">
+                  {p.name}
+                </Link>
+                <span className="card-caption">
+                  {p.scenarios === 1 ? "1 scenario" : `${p.scenarios} scenarios`} · saved{" "}
+                  {date(p.modified)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       {unreadable.length > 0 && (
         <p className="warning">

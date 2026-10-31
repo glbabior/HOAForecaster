@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routes } from "./App";
 import { ApiError, api } from "./api";
+import { savedTheme } from "./theme";
 import type { ExpenseLine, Facts, Project, Scenario, StoredProject } from "./types";
 
 vi.mock("./api", async (importOriginal) => {
@@ -14,6 +15,7 @@ vi.mock("./api", async (importOriginal) => {
     ...real,
     api: {
       about: vi.fn(),
+      listProjects: vi.fn(),
       getProject: vi.fn(),
       saveProject: vi.fn(),
       blankScenario: vi.fn(),
@@ -28,6 +30,7 @@ vi.mock("./api", async (importOriginal) => {
 type Mock = ReturnType<typeof vi.fn>;
 const mocked = api as unknown as {
   about: Mock;
+  listProjects: Mock;
   getProject: Mock;
   saveProject: Mock;
   blankScenario: Mock;
@@ -152,10 +155,102 @@ beforeEach(() => {
 
 afterEach(() => vi.clearAllMocks());
 
+describe("the screens' theme", () => {
+  afterEach(() => {
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
+  });
+
+  it("is light until the switch turns dark screens on, and stays as chosen", async () => {
+    const { unmount } = render(
+      <RouterProvider router={createMemoryRouter(routes, { initialEntries: [A] })} />,
+    );
+    const dark = await screen.findByRole("switch", { name: "Dark screens" });
+    expect(dark.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(dark);
+    expect(dark.getAttribute("aria-checked")).toBe("true");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(savedTheme()).toBe("dark"); // what the next visit opens with
+    unmount();
+    start(A);
+    const again = await screen.findByRole("switch", { name: "Dark screens" });
+    expect(again.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(again);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(savedTheme()).toBe("light");
+  });
+
+  it("still opens light and switches when the browser keeps nothing", async () => {
+    const refuse = () => {
+      throw new DOMException("refused", "SecurityError");
+    };
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(refuse);
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(refuse);
+    try {
+      expect(savedTheme()).toBe("light");
+      start(A);
+      const dark = await screen.findByRole("switch", { name: "Dark screens" });
+      await userEvent.click(dark);
+      expect(dark.getAttribute("aria-checked")).toBe("true");
+      expect(document.documentElement.dataset.theme).toBe("dark");
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+});
+
+describe("the project list", () => {
+  afterEach(() => mocked.listProjects.mockReset());
+
+  it("shows a card per project, the last saved first unless another order is chosen", async () => {
+    const summary = (id: string, name: string, scenarios: number, modified: string) => ({
+      id,
+      name,
+      scenarios,
+      modified,
+    });
+    mocked.listProjects.mockResolvedValue({
+      projects: [
+        summary("aaaaaaaaaaaa", "Alder House", 3, "2026-10-01T10:00:00+00:00"),
+        summary("bbbbbbbbbbbb", "Beech Court", 1, "2026-10-30T10:00:00+00:00"),
+        summary("cccccccccccc", "Cedar Hall", 2, "2026-10-15T10:00:00+00:00"),
+      ],
+      unreadable: [],
+    });
+    start("/");
+    const cards = await screen.findByRole("list", { name: "Saved projects" });
+    const titles = () =>
+      within(cards)
+        .getAllByRole("link")
+        .map((a) => a.textContent);
+    expect(titles()).toEqual(["Beech Court", "Cedar Hall", "Alder House"]);
+    expect(within(cards).getByText(/^1 scenario · saved/)).toBeTruthy();
+    expect(within(cards).getByRole("link", { name: "Alder House" }).getAttribute("href")).toBe(
+      "/projects/aaaaaaaaaaaa",
+    );
+    const sort = screen.getByRole("combobox", { name: "Sort" });
+    await userEvent.selectOptions(sort, "Name (A–Z)");
+    expect(titles()).toEqual(["Alder House", "Beech Court", "Cedar Hall"]);
+    await userEvent.selectOptions(sort, "Scenarios (most first)");
+    expect(titles()).toEqual(["Alder House", "Cedar Hall", "Beech Court"]);
+  });
+});
+
 describe("a scenario's screens", () => {
-  it("are listed under Scenarios in the index once a scenario is open", async () => {
+  it("are tabs under the scenario's name", async () => {
     start(`${A}/facts`);
     const index = await screen.findByRole("list", { name: "Plan A – screens" });
+    // the tab names the screen; the heading still does, for printing and screen readers
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Plan A – Facts and assumptions",
+    );
+    const bar = screen.getByRole("navigation", { name: "Project screens" }).parentElement;
+    expect(
+      within(bar as HTMLElement)
+        .getByRole("link", { name: "Demo" })
+        .getAttribute("href"),
+    ).toBe("/projects/abcdefabcdef");
     const links = within(index).getAllByRole("link");
     expect(links.map((l) => l.textContent)).toEqual([
       "Results",
@@ -396,6 +491,33 @@ describe("a new scenario", () => {
     expect(copy?.assessments).toEqual(own.assessments);
     expect(copy?.adoption).toBeNull();
     expect(mocked.blankScenario).not.toHaveBeenCalled();
+  });
+
+  it("starts from the card chosen, the suggested name following the choice", async () => {
+    const adopted = scenario("Plan A", { adoption: { date: "2026-11-03", note: "", sequence: 1 } });
+    serve(projectOf(adopted, scenario("Plan B", { description: "Steady rises" })));
+    const router = start("/projects/abcdefabcdef/scenarios/new");
+    const choices = await screen.findByRole("group", { name: "Start from" });
+    const cards = within(choices).getAllByRole("radio");
+    // blank first, then the adopted plan, then the rest in the project's order – each named by
+    // its title, the line under it its description
+    expect(cards.map((c) => c.getAttribute("aria-labelledby"))).toHaveLength(3);
+    const blank = within(choices).getByRole("radio", { name: "A blank scenario" });
+    const plan = within(choices).getByRole("radio", { name: "Plan A" });
+    const planB = within(choices).getByRole("radio", { name: "Plan B" });
+    expect(cards).toEqual([blank, plan, planB]);
+    expect(document.getElementById(plan.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "The adopted plan",
+    );
+    expect(document.getElementById(planB.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Steady rises",
+    );
+    expect((blank as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(planB);
+    expect(router.state.location.search).toBe("?from=Plan+B");
+    expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe(
+      "Plan B – copy",
+    );
   });
 
   it("refuses a name another scenario has", async () => {

@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 
 import { saveFile } from "../api";
 import { tableRows, toCsv } from "../csv";
+import { DownloadIcon } from "./ui";
 
 /** Download a table on screen as CSV (spec 7.6) – exact values, formula-safe text. Given
  * several tables that share their header row, one file holds them all, the header once. */
@@ -26,13 +27,13 @@ export function CsvButton({
   return (
     <button
       type="button"
-      className="small no-print"
+      className="action no-print"
       onClick={() => {
         const all = rows();
         if (all.length) saveFile(new Blob([toCsv(all)], { type: "text/csv" }), filename);
       }}
     >
-      Download CSV
+      Download CSV <DownloadIcon />
     </button>
   );
 }

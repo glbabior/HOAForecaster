@@ -13,6 +13,29 @@ import {
 
 import { fromPercent, grouped, parseDecimal, toPercent } from "../decimal";
 
+/** A download arrow for a toolbar action – decoration, so the action's words name it. */
+export function DownloadIcon() {
+  return (
+    <svg
+      className="icon"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M2.5 13.5h11"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function Problems({ title, items }: { title?: string; items: string[] }) {
   if (items.length === 0) return null;
   return (

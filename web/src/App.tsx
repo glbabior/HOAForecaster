@@ -14,8 +14,6 @@ import {
   type RouteObject,
   Outlet,
   createBrowserRouter,
-  matchPath,
-  useLocation,
   useParams,
 } from "react-router-dom";
 
@@ -38,6 +36,7 @@ import {
   scenarioPath,
 } from "./pages/ScenarioScreens";
 import { ScenariosPage } from "./pages/ScenariosPage";
+import { type Theme, applyTheme } from "./theme";
 import type { Project, StoredProject } from "./types";
 
 /** Restart the server and reload the page – shown only when the launcher can start a fresh
@@ -99,6 +98,32 @@ function RestartButton() {
   );
 }
 
+/** Dark screens on or off – an on/off switch, remembered in this browser. */
+function ThemeSwitch() {
+  // what the screens show – the one source, even when the browser keeps nothing
+  const [theme, setTheme] = useState<Theme>(() =>
+    document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  );
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={theme === "dark"}
+      className="switch"
+      onClick={() => {
+        const next = theme === "dark" ? "light" : "dark";
+        applyTheme(next);
+        setTheme(next);
+      }}
+    >
+      <span className="switch-track" aria-hidden="true">
+        <span className="switch-knob" />
+      </span>
+      Dark screens
+    </button>
+  );
+}
+
 function Layout() {
   useEffect(() => {
     const openAll = () => {
@@ -114,9 +139,13 @@ function Layout() {
       </a>
       <header className="app-header no-print">
         <Link to="/" className="brand">
+          <span className="brand-mark" aria-hidden="true" />
           HOAForecaster
         </Link>
-        <RestartButton />
+        <div className="header-tools">
+          <ThemeSwitch />
+          <RestartButton />
+        </div>
       </header>
       <main id="main">
         <Outlet />
@@ -245,45 +274,33 @@ export function ProjectLayout() {
   return <ProjectScreens key={id} id={id} />;
 }
 
-/** The index on the left, the screen beside it. With a scenario open, its screens are listed
- * under Scenarios. */
+/** The project's sections in a bar across the top, the screen beneath. A scenario's own
+ * screens are tabs on the scenario (`ScenarioTabs`). */
 function ProjectScreens({ id }: { id: string }) {
   const project = useOpenProject(id);
-  const { pathname } = useLocation();
-  const open = matchPath("/projects/:id/scenarios/:name/*", pathname)?.params.name;
-  const scenario = open && open !== "new" ? decodeURIComponent(open) : null;
   return (
     <div className="project-layout">
-      <nav className="screen-index no-print" aria-label="Project screens">
-        <ul>
-          {SCREENS.map((s) => (
-            <li key={s.path}>
-              <NavLink
-                to={`/projects/${encodeURIComponent(id)}/${s.path}`}
-                end={s.path !== "scenarios"}
-              >
-                {s.label}
-              </NavLink>
-              {s.path === "scenarios" && scenario && (
-                <div className="scenario-index">
-                  <span className="scenario-name" title={scenario}>
-                    {scenario}
-                  </span>
-                  <ul aria-label={`${scenario} – screens`}>
-                    {SCENARIO_SCREENS.map((sc) => (
-                      <li key={sc.path}>
-                        <NavLink to={scenarioPath(id, scenario, sc.path)} end>
-                          {sc.label}
-                        </NavLink>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <div className="project-bar no-print">
+        {project.stored && (
+          <Link to={`/projects/${encodeURIComponent(id)}`} className="project-name">
+            {project.stored.project.name}
+          </Link>
+        )}
+        <nav aria-label="Project screens">
+          <ul>
+            {SCREENS.map((s) => (
+              <li key={s.path}>
+                <NavLink
+                  to={`/projects/${encodeURIComponent(id)}/${s.path}`}
+                  end={s.path !== "scenarios"}
+                >
+                  {s.label}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
       <div className="screen">
         <ProjectContext.Provider value={project}>
           <Outlet />
@@ -295,6 +312,23 @@ function ProjectScreens({ id }: { id: string }) {
 
 export function Loading({ error }: { error: unknown }) {
   return error ? <ErrorBanner error={error} /> : <p aria-busy="true">Loading…</p>;
+}
+
+/** A scenario's screens as a row of tabs under its name (spec 7.2). */
+export function ScenarioTabs({ id, scenario }: { id: string; scenario: string }) {
+  return (
+    <nav className="tabs no-print" aria-label="Scenario screens">
+      <ul aria-label={`${scenario} – screens`}>
+        {SCENARIO_SCREENS.map((sc) => (
+          <li key={sc.path}>
+            <NavLink to={scenarioPath(id, scenario, sc.path)} end>
+              {sc.label}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
 }
 
 /** The app's screens – exported so the tests drive the same routes. */

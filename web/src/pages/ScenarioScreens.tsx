@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { Link, Outlet, matchPath, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { Loading, ProjectNav, useProject } from "../App";
+import { Loading, ProjectNav, ScenarioTabs, useProject } from "../App";
 import { ApiError, api } from "../api";
 import {
   BALANCE_LEGEND,
@@ -298,46 +298,47 @@ function ScenarioForm({
           {here && here !== "Results" && <span className="screen-title"> – {here}</span>}
         </h1>
         {!readOnly && <SaveNote status={blocked ? { state: "waiting" } : status} />}
-      </div>
-      <div className="row-actions no-print">
-        <Link
-          className="button"
-          to={`/projects/${id}/scenarios/new?from=${encodeURIComponent(savedName)}`}
-        >
-          Copy as a new scenario
-        </Link>
-        {!readOnly && (
-          <>
-            <button
-              type="button"
-              disabled={blocked}
-              title={blocked ? "Fix the entries below first" : undefined}
-              onClick={() => setAdopting({ date: today(), note: "" })}
-            >
-              Adopt…
+        <div className="row-actions no-print">
+          <Link
+            className="button"
+            to={`/projects/${id}/scenarios/new?from=${encodeURIComponent(savedName)}`}
+          >
+            Copy as a new scenario
+          </Link>
+          {!readOnly && (
+            <>
+              <button
+                type="button"
+                disabled={blocked}
+                title={blocked ? "Fix the entries below first" : undefined}
+                onClick={() => setAdopting({ date: today(), note: "" })}
+              >
+                Adopt…
+              </button>
+              <button
+                type="button"
+                disabled={blocked}
+                title={blocked ? "Fix the entries below first" : undefined}
+                onClick={() => setRenaming(form.name)}
+              >
+                Rename…
+              </button>
+              <button type="button" onClick={() => setConfirmDelete(true)}>
+                Delete…
+              </button>
+            </>
+          )}
+          {readOnly && isCurrent && (
+            <button type="button" onClick={() => setConfirmUnadopt(true)}>
+              Un-adopt…
             </button>
-            <button
-              type="button"
-              disabled={blocked}
-              title={blocked ? "Fix the entries below first" : undefined}
-              onClick={() => setRenaming(form.name)}
-            >
-              Rename…
-            </button>
-            <button type="button" onClick={() => setConfirmDelete(true)}>
-              Delete…
-            </button>
-          </>
-        )}
-        {readOnly && isCurrent && (
-          <button type="button" onClick={() => setConfirmUnadopt(true)}>
-            Un-adopt…
+          )}
+          <button type="button" onClick={() => window.print()}>
+            Print
           </button>
-        )}
-        <button type="button" onClick={() => window.print()}>
-          Print
-        </button>
+        </div>
       </div>
+      <ScenarioTabs id={id} scenario={savedName} />
       {adoption && (
         <section className="panel adopted" aria-label="Adopted plan">
           <p>

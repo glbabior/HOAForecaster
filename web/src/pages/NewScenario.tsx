@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
@@ -15,6 +15,7 @@ export function NewScenario() {
   const [name, setName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
+  const uid = useId();
   if (!stored) return <Loading error={error} />;
 
   const scenarios = stored.project.scenarios;
@@ -60,35 +61,46 @@ export function NewScenario() {
       />
       <h1>New scenario</h1>
       <ErrorBanner error={saveError} />
-      <form className="panel narrow" onSubmit={(e) => void create(e)}>
-        <Field
-          label="Start from"
-          hint="A copy takes all of that scenario's inputs – its facts and assumptions, expenses, Fully Funded Balance, dues and special assessments – but not its adoption. A blank scenario starts from the usual assumptions, ready for the building's own facts."
-        >
-          {(fid, d) => (
-            <select
-              id={fid}
-              aria-describedby={d}
-              value={from?.name ?? ""}
-              onChange={(e) => {
-                setName(null); // the suggested name follows the choice
-                setQuery(e.target.value ? { from: e.target.value } : {}, { replace: true });
-              }}
-            >
-              <option value="">A blank scenario</option>
-              {startingPoints.map((s) => (
-                <option key={s.name} value={s.name}>
-                  {s.name}
-                  {s.adoption
-                    ? s === current
-                      ? " (the adopted plan)"
-                      : " (an earlier adopted plan)"
-                    : ""}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
+      <form className="panel new-scenario" onSubmit={(e) => void create(e)}>
+        <fieldset className="plain start-from" aria-describedby={`${uid}-hint`}>
+          <legend>Start from</legend>
+          <p id={`${uid}-hint`} className="hint">
+            A copy takes all of that scenario's inputs – its facts and assumptions, expenses, Fully
+            Funded Balance, dues and special assessments – but not its adoption. A blank scenario
+            starts from the usual assumptions, ready for the building's own facts.
+          </p>
+          <div className="cards choices">
+            {[null, ...startingPoints].map((s, i) => (
+              <label key={s?.name ?? ""} className={`card${s === from ? " chosen" : ""}`}>
+                {/* named by its title alone, the line under it its description */}
+                <input
+                  type="radio"
+                  name="start-from"
+                  value={s?.name ?? ""}
+                  checked={s === from}
+                  aria-labelledby={`${uid}-${i}-title`}
+                  aria-describedby={`${uid}-${i}-caption`}
+                  onChange={() => {
+                    setName(null); // the suggested name follows the choice
+                    setQuery(s ? { from: s.name } : {}, { replace: true });
+                  }}
+                />
+                <span id={`${uid}-${i}-title`} className="card-title">
+                  {s ? s.name : "A blank scenario"}
+                </span>
+                <span id={`${uid}-${i}-caption`} className="card-caption">
+                  {!s
+                    ? "The usual assumptions"
+                    : s.adoption
+                      ? s === current
+                        ? "The adopted plan"
+                        : "An earlier adopted plan"
+                      : s.description || "A copy of every input"}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <Field label="Name" error={duplicate ? "Another scenario already has this name" : null}>
           {(fid, d) => (
             <input

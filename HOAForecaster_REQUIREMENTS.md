@@ -169,7 +169,7 @@ All percentages are stored as fractions; money as decimal or integer cents, neve
 
 ### 7.1 Project
 
-- Project list → a project's screens, with an index on the left – **Scenarios**, **Compare**, **Charts** and **Export**.
+- Project list → a project's screens, with a bar of sections across the top – **Scenarios**, **Compare**, **Charts** and **Export**.
 - Scenarios – in the project's order, which the board sets here (move up, move down) or on Compare; the current adopted plan is marked as such and earlier adopted plans show their adoption dates; and New scenario. Every screen lists scenarios in this order, and the workbook has one sheet per scenario in it.
 - **Import** – (a) CSV for a scenario's expense table and Fully Funded Balance table, its columns to be fixed when this is built – a row without a frequency is a once line; (b) a workbook in the reference layout – read Inputs, Expenses (baseline row, item rows, FFB row) and each Plan sheet's input rows into one scenario per Plan sheet, each with the Inputs and Expenses facts, dropping a partial first-year column if present and using that year's ending balance as the next January 1 starting balance. Its item rows become once lines and its operating-expense input one yearly line, as in the version 1 upgrade (section 8.2).
 

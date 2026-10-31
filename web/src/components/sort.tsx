@@ -85,7 +85,8 @@ export function useSort<T>(
         >
           {label}
           <span className="sort-mark" aria-hidden="true">
-            {direction === "ascending" ? " ▲" : direction === "descending" ? " ▼" : " ↕"}
+            {/* a no-break space, so the mark never wraps onto a line of its own */}
+            {direction === "ascending" ? " ▲" : direction === "descending" ? " ▼" : " ↕"}
           </span>
         </button>
         {/* on paper, plain text – a header row repeated on each page leaves a button's out */}

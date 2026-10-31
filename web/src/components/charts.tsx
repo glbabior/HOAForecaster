@@ -16,6 +16,7 @@ import { num } from "../decimal";
 import { money, percent } from "../format";
 import type { Grid } from "../scale";
 import type { ScenarioResult } from "../types";
+import { DownloadIcon } from "./ui";
 
 // Colours chosen for contrast in both light and dark themes; percent lines are dotted or
 // dashed as well as coloured, so they are told apart without colour too.
@@ -88,13 +89,13 @@ export function ChartFrame({
         <span>{title}</span>
         <button
           type="button"
-          className="small no-print"
+          className="action no-print"
           onClick={() => {
             setFailed(false);
             downloadPng(ref.current, title, legend, filename).catch(() => setFailed(true));
           }}
         >
-          Download PNG
+          Download PNG <DownloadIcon />
         </button>
       </figcaption>
       {failed && <p className="warning">The picture could not be made – try again.</p>}
