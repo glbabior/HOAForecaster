@@ -265,9 +265,11 @@ export function PlanTable({
                 {FREQUENCY_WORDS[line.frequency]}
                 {isOperating(line.frequency)
                   ? ""
-                  : line.nominal
-                    ? ", already in that year's dollars"
-                    : ", grown with inflation"}
+                  : !line.nominal
+                    ? ", grown with inflation"
+                    : line.frequency === "every"
+                      ? ", grown from its first year's dollars"
+                      : ", already in that year's dollars"}
                 ){line.source && <span className="source"> · Source – {line.source}</span>}
               </li>
             ))}

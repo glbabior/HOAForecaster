@@ -421,13 +421,14 @@ def test_every_few_years_lines_are_reserve_expenses_on_their_interval() -> None:
 
 
 def test_every_few_years_lines_stop_after_their_last_year_and_may_be_nominal() -> None:
+    # nominal – $500 in 2031's dollars; the next occurrence is grown from there at 10%
     paint = ExpenseLine(
         2031, D(500), "Paint", nominal=True, frequency=Frequency.EVERY, interval=1, end_year=2032
     )
     assert [y.expenses for y in on(lines_only(paint), rate("200", "0")).years] == [
         0,
         500,
-        500,
+        550,
         0,
         0,
     ]
@@ -906,14 +907,15 @@ def test_a_useful_life_must_be_at_least_a_year_and_belongs_to_once_lines() -> No
     assert again.expense_lines[0].life == 10 and again.expense_lines[5].life is None
 
 
-def test_a_nominal_every_few_years_lines_cost_is_deflated_from_its_next_occurrence() -> None:
-    # the same $1,000 falls in 2032, 2042, … – so in 2033 it is a year past and 9 years ahead
+def test_a_nominal_every_few_years_lines_cost_is_in_its_first_years_dollars() -> None:
+    # $1,000 in 2032's dollars, every 10 years – each later occurrence grown from 2032, so its
+    # cost in any year's dollars is the amount moved from 2032 to that year
     line = ExpenseLine(2032, D(1000), "Pump", frequency=Frequency.EVERY, interval=10, nominal=True)
     f = baseline(ffb={}, ffb_from_lines=True, expense_lines=(line,))
     ffb = run(Scenario("S", f, rate("100", "0").dues)).ffb
     g = D("1.1")
     assert ffb[2030] == D(1000) / g**2 * 8 / 10
-    assert ffb[2033] == D(1000) / g**9 * 1 / 10
+    assert ffb[2033] == D(1000) * g * 1 / 10
 
 
 # ---------------------------------------------------------------- yearly increases by period (5.1)
@@ -990,3 +992,116 @@ def test_periods_are_read_and_written_and_an_older_single_rate_still_reads() -> 
     ):
         with pytest.raises(ProjectFormatError, match=message):
             scenario_from_dict({**raw, "dues": {**raw["dues"], "increases": bad}})
+
+
+# ---------------------------------------------------------------- hand-worked by the math audit
+# Figures worked by hand from the spec, not from the engine or the workbook – conventions the
+# engine and the workbook could share a misreading of. 2030–2034 unless stated.
+
+
+def _audit_facts(**changes: object) -> Facts:
+    return replace(
+        baseline(
+            expense_lines=(),
+            expense_inflation=D("0.03"),
+            expense_base_year=2028,
+            operating_inflation=D("0.04"),
+            interest_rate=D("0.02"),
+            current_dues=D(500),
+        ),
+        **changes,
+    )
+
+
+def test_audit_an_operating_line_begun_before_the_start_grows_from_its_first_year() -> None:
+    old = ExpenseLine(2028, D(5000), "Contract", frequency=Frequency.YEARLY, inflation=D("0.05"))
+    years = on(_audit_facts(expense_lines=(old,)), rate("2000", "0")).years
+    assert years[0].operating == D("5512.50")  # 5,000 × 1.05²
+    assert years[4].operating == D("6700.478203125")  # 5,000 × 1.05⁶
+
+
+def test_audit_an_operating_line_with_a_later_first_year_is_in_that_years_dollars() -> None:
+    insurance = ExpenseLine(
+        2031,
+        D(20000),
+        "Insurance",
+        frequency=Frequency.YEARLY,
+        end_year=2033,
+        inflation=D("0.10"),
+    )
+    years = on(_audit_facts(expense_lines=(insurance,)), rate("2000", "0")).years
+    assert [y.operating for y in years] == [0, 20000, 22000, 24200, 0]
+
+
+def test_audit_a_reserve_line_before_the_base_year_is_deflated_to_it() -> None:
+    line = ExpenseLine(2030, D(10000), "Pump")
+    years = on(_audit_facts(expense_lines=(line,), expense_base_year=2032), rate("0", "0")).years
+    assert years[0].expenses == D(10000) / D("1.0609")  # 1.03²
+
+
+def test_audit_a_nominal_every_few_years_line_grows_each_repeat_from_its_first() -> None:
+    paint = ExpenseLine(
+        2031, D(10000), "Paint", frequency=Frequency.EVERY, interval=2, nominal=True
+    )
+    years = on(_audit_facts(expense_lines=(paint,)), rate("2000", "0")).years
+    assert [y.expenses for y in years] == [0, 10000, 0, D("10609.00"), 0]  # 10,000 × 1.03²
+
+
+def test_audit_a_nominal_line_first_dated_before_the_start_grows_from_that_year() -> None:
+    gutters = ExpenseLine(
+        2027, D(5000), "Gutters", frequency=Frequency.EVERY, interval=3, nominal=True
+    )
+    years = on(_audit_facts(expense_lines=(gutters,)), rate("2000", "0")).years
+    # 5,000 × 1.03³ and × 1.03⁶ – grown from 2027, not the 2028 base year
+    assert [y.expenses for y in years] == [D("5463.635"), 0, 0, D("5970.261482645"), 0]
+
+
+def test_audit_no_interest_while_the_balance_is_negative() -> None:
+    boiler = ExpenseLine(2030, D(50000), "Boiler", nominal=True)
+    f = _audit_facts(starting_balance=D(10000), expense_lines=(boiler,))
+    years = on(f, rate("0", "0")).years
+    assert years[0].interest == D(200)  # 2% of the positive $10,000 it started with
+    assert years[0].ending_balance == D(-39800)
+    assert years[1].interest == 0  # neither earned nor charged on −$39,800
+    assert years[1].ending_balance == D(-39800)
+
+
+def test_audit_increases_by_period_round_half_up_and_continue_from_a_pinned_year() -> None:
+    increases = (Increase(D("0.10"), 2031, 2032), Increase(D("0.05"), 2033, None))
+    path = DuesPath(DuesMode.RATE, first_value=D(1000), increases=increases)
+    s = Scenario("S", _audit_facts(), path)
+    assert [y.dues for y in run(s).years] == [1000, 1100, 1210, 1271, 1334]  # 1,270.50 → 1,271
+    pinned = replace(s, dues=replace(path, overrides={2033: D(1250)}))
+    assert [y.dues for y in run(pinned).years][3:] == [1250, 1313]  # 1,312.50 → 1,313
+
+
+def test_audit_the_worked_out_ffb_of_four_components() -> None:
+    every = Frequency.EVERY
+    f = _audit_facts(
+        expense_inflation=D("0.10"),
+        expense_base_year=2030,
+        ffb={},
+        ffb_from_lines=True,
+        expense_lines=(
+            ExpenseLine(2032, D(1000), "Roof", frequency=every, interval=5, id="roof"),
+            ExpenseLine(2036, D(2000), "Lift", nominal=True, useful_life=4, id="lift"),
+            ExpenseLine(
+                2029, D(300), "Fence", frequency=every, interval=3, end_year=2032, nominal=True
+            ),
+            ExpenseLine(2031, D(1000), "Gate", useful_life=4, id="gate"),
+            ExpenseLine(2031, D(9999), "No life given", id="nolife"),
+            ExpenseLine(None, D(9999), "Water", frequency=Frequency.MONTHLY, id="water"),
+        ),
+    )
+    ffb = run(Scenario("S", f, rate("0", "0").dues)).ffb
+    g = D("1.1")
+    # roof (base-year dollars, 5-year cycle from 2032) aged 3, 4, 5, 1, 2, 3
+    roof = [1000 * g**n * age / 5 for n, age in enumerate([3, 4, 5, 1, 2, 3])]
+    # lift (2036's dollars, 4-year life) – in service from 2033
+    lift = [0, 0, 0, 2000 / g**3 * 1 / 4, 2000 / g**2 * 2 / 4, 2000 / g * 3 / 4]
+    # fence (2029's dollars, every 3 years to 2032) – grown from 2029, gone after 2032
+    fence = [300 * g * 1 / 3, 300 * g**2 * 2 / 3, 300 * g**3, 0, 0, 0]
+    # gate (base-year dollars, replaced 2031, 4-year life) aged 3, 4, 1, 2, 3, 4
+    gate = [1000 * g**n * age / 4 for n, age in enumerate([3, 4, 1, 2, 3, 4])]
+    for i, y in enumerate(range(2030, 2036)):
+        assert ffb[y] == pytest.approx(roof[i] + lift[i] + fence[i] + gate[i], abs=D("1e-9"))

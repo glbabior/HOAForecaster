@@ -262,9 +262,11 @@ def _expense_formula(r: int, year: str, rates: _Rates) -> str:
     f, amount, first, last = c["frequency"], c["amount"], c["year"], c["end_year"]
     t = FREQUENCY_TEXT
     in_range = f'AND({year}>={first},OR({last}="",{year}<={last}))'
+    # a nominal amount is in its first year's dollars – an every-few-years line's later
+    # occurrences grow from it
     reserve = (
-        f'{amount}*IF({c["nominal"]}="yes",1,'
-        f"(1+{rates.expense_inflation})^({year}-{rates.base_year}))"
+        f"{amount}*(1+{rates.expense_inflation})"
+        f'^({year}-IF({c["nominal"]}="yes",{first},{rates.base_year}))'
     )
     operating = (
         f'{amount}*IF({f}="{t["monthly"]}",12,1)'
@@ -372,10 +374,8 @@ def _worked_out_ffb(
         )
         # an every-few-years line counts up to its last year; once lines have none
         active = f'({life}>0)*((({f}="{t["once"]}")+({end}="")+({year}<={end}))>0)'
-        # a nominal amount is in the dollars of the year it falls – a once line's year, an
-        # every-few-years line's next occurrence (the same amount falls each time)
-        nominal_year = f'(({f}="{t["once"]}")*{start}+({f}="{t["every"]}")*({year}+{remaining}))'
-        grown_from = f'(({nominal}="yes")*{nominal_year}+({nominal}<>"yes")*{rates.base_year})'
+        # a nominal amount is in its first year's dollars, later occurrences grown from it
+        grown_from = f'(({nominal}="yes")*{start}+({nominal}<>"yes")*{rates.base_year})'
         cost = f"{amount}*(1+{rates.expense_inflation})^({year}-{grown_from})"
         formula = f"=SUMPRODUCT({active}*{cost}*({guarded}-{remaining})/{guarded})"
         _formula(ws[f"{ffb.columns[y]}{ffb.row}"], formula, CUR)
@@ -590,7 +590,8 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
             "contribution": (f"=MAX(0,{D['total_dues']}-{D['operating']})", CUR, BLACK),
             "sa_total": (f"={D['sa']}*{ref['units']}", CUR, BLACK),
             "owners": (f"={D['total_dues']}+{D['sa_total']}", CUR, BLACK),
-            "interest": (f"={D['start']}*{ref['interest_rate']}", CUR, BLACK),
+            # none earned or charged while the balance is negative
+            "interest": (f"=MAX(0,{D['start']})*{ref['interest_rate']}", CUR, BLACK),
             "expenses": (f"={reserve[y]}", CUR, BLACK),
             "start": (f"={ref['starting_balance']}" if i == 0 else f"={P['end']}", CUR, BLACK),
             "end": (
@@ -895,7 +896,9 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
             "yearly lines are operating costs paid from dues, each grown at its own inflation "
             "rate or the operating rate. Once and every-few-years lines are reserve expenses, "
             "grown from the expense base year at the reserve expense inflation rate unless marked "
-            "as already in that year's dollars.",
+            "as already in the dollars of their first year, when an every-few-years line's later "
+            "occurrences are grown from that year. No interest is earned or charged while the "
+            "reserve balance is negative.",
             False,
             10,
         ),

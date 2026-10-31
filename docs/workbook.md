@@ -73,7 +73,7 @@ Each row from row 5 down is one expense. Columns A–I hold its inputs, and the 
 | E – Last year | The last year of a repeating line (blank – to the end). |
 | F – Every … years | The years between occurrences of an every-few-years line. |
 | G – Own inflation | A monthly or yearly line's own inflation rate (blank – the operating rate on Inputs). |
-| H – Already in that year's dollars? | For once and every-few-years lines, "yes" or "no". "yes" means the amount is used as it stands. |
+| H – Already in that year's dollars? | For once and every-few-years lines, "yes" or "no". "yes" means the amount is in the dollars of the line's first year: a once line uses it as it stands, and an every-few-years line's later occurrences grow from it at the reserve inflation rate. |
 | I – Line id | The line's identifier, in grey. Scenarios use it to change or leave out the line. |
 | J onward | One column per year of the horizon, each holding the line's amount that year. |
 
@@ -113,7 +113,7 @@ A1 holds the scenario's name, A2 its description and A3 a short guide. Years run
 | 10 | Reserve contribution from dues | Total dues less operating expenses, never below zero |
 | 11 | Special assessment to reserves | Assessment per unit × units |
 | 12 | Total collected from owners (dues + assessment) | Row 8 + row 11 |
-| 13 | Interest earned | Starting balance × the interest rate |
+| 13 | Interest earned | Starting balance × the interest rate, or 0 when the starting balance is negative (`MAX(0, start) × rate`) |
 | 14 | Reserve expenses (once and every few years) | This scenario's reserve total, from the block below the charts |
 | 16 | Starting reserve balance | The scenario's starting balance in the first year, then the year before's ending balance |
 | 17 | **Ending reserve balance** | Start + contribution + assessment + interest − reserve expenses |

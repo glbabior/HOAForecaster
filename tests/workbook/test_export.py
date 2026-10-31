@@ -109,8 +109,15 @@ def _varied_project() -> Project:
         if line.id != "study-2029"
     )
     lines += (
+        # already in 2030's dollars, so 2036's resurfacing is grown from 2030, not the base year
         ExpenseLine(
-            2030, D(9000), "Pool resurfacing", frequency=Frequency.EVERY, interval=6, id="pool"
+            2030,
+            D(9000),
+            "Pool resurfacing",
+            nominal=True,
+            frequency=Frequency.EVERY,
+            interval=6,
+            id="pool",
         ),
         ExpenseLine(
             2030, D(900), "Security patrol", frequency=Frequency.MONTHLY, end_year=2036, id="patrol"
@@ -165,7 +172,8 @@ def _varied_project() -> Project:
     )
     first = replace(later, name="Earlier plan", adoption=Adoption(date(2025, 6, 1), "", 1))
     # worked out from useful lives, with no typed figures at all – a line coming into service
-    # within the horizon, a nominal one already ageing, and one retired after its last year
+    # within the horizon, nominal ones already ageing (one repeating from a year before the
+    # start, in that year's dollars), and one retired after its last year
     worked = Scenario(
         "Worked out from lives",
         replace(
@@ -183,6 +191,15 @@ def _varied_project() -> Project:
                     interval=4,
                     end_year=2036,
                     id="sealing",
+                ),
+                ExpenseLine(
+                    2024,
+                    D(12000),
+                    "Paving",
+                    nominal=True,
+                    frequency=Frequency.EVERY,
+                    interval=5,
+                    id="paving",
                 ),
                 ExpenseLine(None, D(50000), "Running costs", frequency=Frequency.YEARLY, id="run"),
             ),

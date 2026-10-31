@@ -128,7 +128,7 @@ const KINDS: {
   {
     frequency: "every",
     title: "Every few years",
-    hint: "Reserve expenses that come round again – an amount each time, in the expense base year's dollars and grown with reserve inflation unless already inflated.",
+    hint: "Reserve expenses that come round again – an amount each time, in the expense base year's dollars and grown with reserve inflation – or, when already inflated, in its first year's dollars with each repeat grown from there.",
     add: "Add a cost every few years",
   },
   {
@@ -277,7 +277,8 @@ export function ExpenseTable({
   );
 }
 
-const ALREADY_INFLATED = "Already in that year's dollars – not grown by reserve inflation";
+const ALREADY_INFLATED =
+  "Already in that year's dollars – not grown from the base year. An every-few-years line's later repeats grow from it at reserve inflation.";
 
 /** A scenario's years and reserve inflation, as the expense tables need them. */
 export interface Horizon {
@@ -297,7 +298,8 @@ export function repeatsOf(line: ExpenseLine, h: Horizon): { year: number; amount
   // from its first occurrence after the line's own row that falls in the scenario
   const skip = Math.max(1, Math.ceil((h.start - line.year) / line.interval));
   for (let y = line.year + skip * line.interval; y <= last; y += line.interval) {
-    const grown = line.nominal ? 1 : (1 + num(h.inflation)) ** (y - h.baseYear);
+    // already inflated – in its first year's dollars, each repeat grown from there
+    const grown = (1 + num(h.inflation)) ** (y - (line.nominal ? line.year : h.baseYear));
     out.push({ year: y, amount: num(line.amount) * grown });
   }
   return out;

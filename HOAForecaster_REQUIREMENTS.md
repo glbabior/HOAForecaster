@@ -1,6 +1,8 @@
 # HOAForecaster – Application Requirements
 
-Version 1.8 – October 28, 2026 (v1.7 and v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+Version 1.9 – October 31, 2026 (v1.8 October 28, v1.7 and v1.6 October 27, v1.5 October 24, v1.4 October 20, v1.0–v1.3 October 19, 2026) – the brief for a Claude Code build.
+
+Changes in v1.9 – an every-few-years expense marked as already in that year's dollars is in its first year's dollars, each later occurrence grown from it at input 4 (sections 4.1, and 4.2 for its Fully Funded Balance cost); no interest is earned or charged while the reserve balance is negative (section 6).
 
 Changes in v1.8 – a grown dues path can have different yearly increases for stretches of years (section 5.1); the board sets the order of a project's scenarios, which every screen and the workbook follow, so any scenario can be the one Compare measures differences from (sections 7.1 and 7.4).
 
@@ -69,11 +71,11 @@ Validation – FFB present for every year from the start year to end year + 1 (u
 |---|---|---|---|---|
 | Monthly | utilities | dues (operating) | per month, in the dollars of its first year | every year from an optional first year to an optional last year (blank = the whole horizon) |
 | Yearly | insurance | dues (operating) | per year, in the dollars of its first year | as monthly |
-| Every few years | repaint every 7 years | reserves | per occurrence, in base-year dollars (input 4) unless marked as already in that year's dollars | a first year, an interval in whole years and an optional last year |
+| Every few years | repaint every 7 years | reserves | per occurrence, in base-year dollars (input 4) unless marked as already in its first year's dollars, when each later occurrence grows from it at input 4 | a first year, an interval in whole years and an optional last year |
 | Once | roof replacement | reserves | in base-year dollars unless marked as already in that year's dollars | one year |
 
 - Monthly and yearly lines are the operating expenses. Each grows from its first year (or the start year, when it has none) at its own inflation rate, or at input 7 when it has none.
-- Once and every-few-years lines are the reserve expenses, inflated from the base year at input 4.
+- Once and every-few-years lines are the reserve expenses, inflated from the base year at input 4 – or, marked as already in that year's dollars, from the line's own (first) year: a once line is used as entered, and an every-few-years line's later occurrences grow from its first.
 - Every line has a stable identifier, kept when a scenario is copied, so a line copied into other scenarios (section 7.2) replaces the same line there.
 - Lines and occurrences outside the horizon are kept and ignored. An every-few-years line needs an interval of at least 1; a last year may not come before the first year.
 - A reserve expense's useful life is how many years the component lasts between replacements – for an every-few-years line its interval; a once line can carry one (optional). It is used only to work out the Fully Funded Balance (section 4.2).
@@ -84,7 +86,7 @@ A scenario's Fully Funded Balance is either typed from the reserve study (input 
 
 ```
 cost_Y × age_Y / L
-  cost_Y = the line's amount in year-Y dollars – inflated from the base year at input 4, or for a line marked as already in its year's dollars deflated at input 4 from the year it falls (a once line's year; an every-few-years line's next occurrence, Y + rem, since the same amount falls each time)
+  cost_Y = the line's amount in year-Y dollars – inflated from the base year at input 4, or for a line marked as already in its first year's dollars moved at input 4 from the line's own (first) year – every occurrence grows from it, so this is its next occurrence's cost in year-Y dollars
   next   = the line's year, or for an every-few-years line its first occurrence
   rem    = L when next − Y ≥ L (not yet in service), else (next − Y) mod L   (mod taking the sign of L, so a line already replaced keeps ageing on the same cycle)
   age_Y  = L − rem
@@ -130,8 +132,8 @@ operating           = Σ monthly and yearly lines active in the year, each amoun
 contribution        = max(0, total_dues − operating)
 assessment          = assessment_per_unit × units
 total_from_owners   = total_dues + assessment
-interest            = starting_balance × interest_rate
-expenses            = Σ once lines in the year and every-few-years lines falling in the year, each × (1 + exp_inflation)^(year − base_year) unless flagged nominal
+interest            = max(0, starting_balance) × interest_rate     (none earned or charged while the balance is negative)
+expenses            = Σ once lines in the year and every-few-years lines falling in the year, each × (1 + exp_inflation)^(year − base_year), or if flagged nominal × (1 + exp_inflation)^(year − the line's first year)
 ending_balance      = starting_balance + contribution + assessment + interest − expenses
 ffb_next            = FFB for year + 1 (typed, or worked out – section 4.2)
 percent_funded      = ending_balance / ffb_next

@@ -454,10 +454,11 @@ describe("an every-few-years line's repeats", () => {
     expect(repeatsOf({ ...every({}), frequency: "once" }, h)).toEqual([]);
   });
 
-  it("cost that year's dollars – grown from the base year, or flat when already inflated", () => {
+  it("cost that year's dollars – grown from the base year, or from the line's first year when already inflated", () => {
     // 1000 × 1.03^(2032 − 2026) = 1194.05…
     expect(repeatsOf(every({}), h)[0]?.amount).toBeCloseTo(1194.0523, 3);
-    expect(repeatsOf(every({ nominal: true }), h)[0]?.amount).toBe(1000);
+    // in 2027's dollars, grown to 2032: 1000 × 1.03^5 = 1159.27…
+    expect(repeatsOf(every({ nominal: true }), h)[0]?.amount).toBeCloseTo(1159.2741, 3);
     // a base year after the line's year deflates it: 1000 × 1.03^(2032 − 2034)
     const later = repeatsOf(every({}), { ...h, baseYear: 2034 })[0]?.amount;
     expect(later).toBeCloseTo(942.5959, 3);

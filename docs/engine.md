@@ -110,11 +110,12 @@ Every expense line has a frequency (spec 4.1). Monthly and yearly lines are the 
 operating line   = amount × (12 if monthly, else 1) × (1 + rate) ^ (year − first)
                      rate  = the line's own inflation rate, else the operating inflation rate
                      first = the line's first year, else the start year
-reserve line     = amount                                                    if marked as already in that year's dollars (nominal)
-                 = amount × (1 + expense_inflation) ^ (year − expense_base_year)   otherwise
+reserve line     = amount × (1 + expense_inflation) ^ (year − from)
+                     from  = the line's first year if marked as already inflated (nominal),
+                             else the expense base year
 ```
 
-A monthly amount is per month and a yearly amount per year, both in the dollars of the line's first year. A once or every-few-years amount is per occurrence, in the expense base year's dollars unless the line is marked nominal.
+A monthly amount is per month and a yearly amount per year, both in the dollars of the line's first year. A once or every-few-years amount is per occurrence, in the expense base year's dollars unless the line is marked nominal. A nominal amount is in the dollars of the line's first year: a once line is charged exactly as entered, and an every-few-years line's later occurrences are grown from that first year at reserve inflation.
 
 **Choice** – a monthly or yearly line whose first year is before the start year grows from that first year, so its start-year amount already includes the growth since then. A line whose first year is after the start year has no amount before it.
 
@@ -137,7 +138,7 @@ total_dues          = dues × units × 12
 operating           = Σ operating lines falling in the year, each at its amount for the year (step 2)
 contribution        = max(0, total_dues − operating)
 assessment          = assessment_per_unit × units
-interest            = starting_balance × interest_rate
+interest            = max(0, starting_balance) × interest_rate
 expenses            = Σ reserve lines falling in the year, each at its amount for the year (step 2)
 ending_balance      = starting_balance + contribution + assessment + interest − expenses
 ffb_next            = Fully Funded Balance for year + 1
@@ -161,7 +162,7 @@ Each year's result also carries its operating lines and its reserve lines (`oper
 A few consequences of these formulas are worth knowing.
 
 - An operating shortfall is a warning only. When dues do not cover operating expenses the contribution is 0, and the gap is not taken from reserves (as in the reference workbook).
-- The balance may go negative. Nothing stops the projection, and a negative starting balance earns negative interest, since interest is simply the starting balance times the rate.
+- The balance may go negative. Nothing stops the projection. No interest is earned or charged while the starting balance is negative: the fund cannot borrow at its savings rate, and a negative balance is already flagged.
 - Interest is earned on the starting balance only, not on the year's contributions or assessments.
 - `dues_increase_vs_current` is the dues part of the extra cost alone, kept as its own row ("increase vs current dues" in the Plan view).
 

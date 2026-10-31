@@ -103,9 +103,11 @@ def line_amount(line: ExpenseLine, year: int, b: Facts) -> Decimal:
         first = b.start_year if line.year is None else line.year
         per_year = line.amount * 12 if line.frequency is Frequency.MONTHLY else line.amount
         return per_year * (1 + rate) ** (year - first)
-    if line.nominal:
-        return line.amount
-    return line.amount * (1 + b.expense_inflation) ** (year - b.expense_base_year)
+    # a nominal amount is in the dollars of the line's first year – a once line's only year;
+    # an every-few-years line's later occurrences grow from it (validation gives every reserve
+    # line a year; the None check is for the type checker)
+    grown_from = line.year if line.nominal and line.year is not None else b.expense_base_year
+    return line.amount * (1 + b.expense_inflation) ** (year - grown_from)
 
 
 def _needs_vote(
@@ -129,14 +131,13 @@ def line_ffb(line: ExpenseLine, year: int, b: Facts) -> Decimal:
     if life is None or life < 1 or line.year is None:
         return ZERO
     if line.frequency is Frequency.EVERY and line.end_year is not None and year > line.end_year:
-        return ZERO  # retired after its last occurrence
+        return ZERO  # retired after its last year
     ahead = line.year - year
     remaining = life if ahead >= life else ahead % life  # Python's % takes the sign of `life`
     age = life - remaining
-    # a nominal amount is in the dollars of the year it falls – a once line's year, an
-    # every-few-years line's next occurrence (the same amount falls each time)
-    nominal_year = line.year if line.frequency is Frequency.ONCE else year + remaining
-    grown_from = nominal_year if line.nominal else b.expense_base_year
+    # a nominal amount is in the dollars of the line's first year, its later occurrences grown
+    # from it – so every occurrence's cost, moved to year Y, is the amount moved from that year
+    grown_from = line.year if line.nominal else b.expense_base_year
     cost = line.amount * (1 + b.expense_inflation) ** (year - grown_from)
     return cost * age / life
 
@@ -178,7 +179,7 @@ def project_years(b: Facts, s: Scenario, ffb: dict[int, Decimal]) -> tuple[YearR
         operating = sum((amount for _, amount in operating_lines), ZERO)
         contribution = max(ZERO, total_dues - operating)
         assessment = per_unit * b.units
-        interest = balance * b.interest_rate
+        interest = max(ZERO, balance) * b.interest_rate  # none earned or charged while negative
         expenses = sum((amount for _, amount in lines), ZERO)
         ending = balance + contribution + assessment + interest - expenses
         ffb_next = ffb[y + 1]
