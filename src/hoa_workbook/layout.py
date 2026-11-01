@@ -171,7 +171,9 @@ def plan_chart_row(n_assessments: int, n_increases: int) -> int:
 # Below the charts, the scenario's own inputs – each block found by its heading on import.
 FACTS_HEADING = "This scenario's facts and assumptions"
 VALUE_COL, SOURCE_COL = PLAN_FIRST_COL, PLAN_FIRST_COL + 1
-PLAN_FFB_HEADING = "This scenario's Fully Funded Balance (from the reserve study)"
+PLAN_FFB_HEADING = "This scenario's Fully Funded Balance"
+# the heading before v1.9 – said the figures were the study's even when worked out; still read
+PLAN_FFB_HEADING_BEFORE = "This scenario's Fully Funded Balance (from the reserve study)"
 PLAN_FFB_YEARS_LABEL = "Start of year"  # the year row above FFB_LABEL; years from VALUE_COL
 # the row below FFB_LABEL – where the figures come from, set in the app (spec 4.2), since it
 # decides which cells hold formulas

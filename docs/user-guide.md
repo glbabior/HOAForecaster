@@ -63,6 +63,8 @@ The list is in the board's order, which every other screen and the workbook foll
 
 Below the list, **Project** holds the project's name and notes. They save as you type.
 
+At the bottom, **Delete this project…** asks first, then moves the project to the trash folder inside the app's data folder and returns to your projects. The app cannot yet bring a deleted project back, so export it first if you may want it again.
+
 ### New scenario
 
 **Start from** shows a card for each choice – "A blank scenario" and every scenario in the project, the adopted plan first. A copy takes all of that scenario's inputs – its facts and assumptions, expenses, Fully Funded Balance, dues and special assessments – but not its adoption. A blank scenario starts from the usual assumptions.

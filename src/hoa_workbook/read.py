@@ -53,6 +53,7 @@ from hoa_workbook.layout import (
     OLD_RATE_LABEL,
     OLD_SHEETS,
     PLAN_FFB_HEADING,
+    PLAN_FFB_HEADING_BEFORE,
     PLAN_FIRST_COL,
     PLAN_OPERATING_LABEL,
     PLAN_RESERVE_LABEL,
@@ -299,7 +300,11 @@ def _sections(ws: Worksheet) -> dict[str, int]:
     found: dict[str, int] = {}
     after = next((r for r, label in _labels(ws) if label.startswith(CHARTS_LABEL)), 0)
     for heading in (FACTS_HEADING, PLAN_FFB_HEADING, FFB_LABEL, EXPENSES_HEADING):
-        r = _first_rows(ws, after).get(heading)
+        rows = _first_rows(ws, after)
+        # the Fully Funded Balance block under either heading – the first one on the sheet, so in
+        # an older sheet an expense worded like the newer heading never stands in for it
+        names = (heading, PLAN_FFB_HEADING_BEFORE) if heading == PLAN_FFB_HEADING else (heading,)
+        r = min((rows[h] for h in names if h in rows), default=None)
         if r is None:
             raise WorkbookFormatError(f"{ws.title} is missing the row '{heading}'")
         found[heading] = after = r

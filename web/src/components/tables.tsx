@@ -623,7 +623,7 @@ function ExpenseRow({
   );
 }
 
-/** The reserve study's Fully Funded Balance for every year of the horizon and one more. */
+/** The typed Fully Funded Balance – the reserve study's – for every year of the horizon and one more. */
 export function FfbTable({
   years,
   values,

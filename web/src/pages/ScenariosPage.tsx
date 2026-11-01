@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
@@ -12,60 +12,104 @@ import { currentAdoption, moveScenario } from "../template";
 import type { ProjectResults, StoredProject } from "../types";
 
 /** The project's name and notes – saved as they are typed. */
+/** The project's name and notes, saving themselves, and deleting the project. */
 function ProjectDetails({ stored }: { stored: StoredProject }) {
-  const { save } = useProject();
+  const { id, save, act } = useProject();
+  const navigate = useNavigate();
   const initial = { name: stored.project.name, notes: stored.project.notes };
   const [form, setForm] = useState(initial);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
   const { status } = useAutosave(form, initial, form.name.trim() !== "", async (f) => {
     await save((project) => ({ ...project, name: f.name.trim(), notes: f.notes }));
   });
-  const { blocker } = useUnsavedGuard(!form.name.trim() || status.state === "failed");
+  const { blocker, allowNextNavigation } = useUnsavedGuard(
+    !form.name.trim() || status.state === "failed",
+  );
+
+  function remove() {
+    setConfirmDelete(false);
+    setDeleteError(null);
+    // in the project's queue, so a save already on its way lands first – then nothing is left
+    // to keep, and the way back to the projects is never stopped to ask about it
+    act(async (current) => {
+      await api.deleteProject(id);
+      return current;
+    }).then(() => {
+      allowNextNavigation();
+      navigate("/");
+    }, setDeleteError);
+  }
+
   return (
-    <section className="panel">
-      <h2>Project</h2>
-      <div className="grid-2">
-        <Field
-          label="Name"
-          error={
-            form.name.trim() ? null : "The project needs a name – nothing is saved until it has one"
-          }
+    <>
+      <section className="panel">
+        <h2>Project</h2>
+        <div className="grid-2">
+          <Field
+            label="Name"
+            error={
+              form.name.trim()
+                ? null
+                : "The project needs a name – nothing is saved until it has one"
+            }
+          >
+            {(fid, d) => (
+              <input
+                id={fid}
+                aria-describedby={d}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+            )}
+          </Field>
+          <Field label="Notes">
+            {(fid) => (
+              <textarea
+                id={fid}
+                rows={2}
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              />
+            )}
+          </Field>
+        </div>
+        {status.state === "failed" && <ErrorBanner error={status.error} />}
+        <Confirm
+          open={blocker.state === "blocked"}
+          title="Leave this screen?"
+          confirmLabel="Leave"
+          onCancel={() => blocker.reset?.()}
+          onConfirm={() => blocker.proceed?.()}
         >
-          {(fid, d) => (
-            <input
-              id={fid}
-              aria-describedby={d}
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-          )}
-        </Field>
-        <Field label="Notes">
-          {(fid) => (
-            <textarea
-              id={fid}
-              rows={2}
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
-          )}
-        </Field>
-      </div>
-      {status.state === "failed" && <ErrorBanner error={status.error} />}
-      <Confirm
-        open={blocker.state === "blocked"}
-        title="Leave this screen?"
-        confirmLabel="Leave"
-        onCancel={() => blocker.reset?.()}
-        onConfirm={() => blocker.proceed?.()}
-      >
-        <p>
-          {form.name.trim()
-            ? "The last change to the project's name or notes could not be saved – it will be lost."
-            : "The project needs a name, so the changes to its name and notes are not saved and will be lost."}
-        </p>
-      </Confirm>
-    </section>
+          <p>
+            {form.name.trim()
+              ? "The last change to the project's name or notes could not be saved – it will be lost."
+              : "The project needs a name, so the changes to its name and notes are not saved and will be lost."}
+          </p>
+        </Confirm>
+      </section>
+      <section className="panel danger no-print">
+        <h2>Delete project</h2>
+        <ErrorBanner error={deleteError} />
+        <button type="button" onClick={() => setConfirmDelete(true)}>
+          Delete this project…
+        </button>
+        <Confirm
+          open={confirmDelete}
+          title={`Delete ${stored.project.name}?`}
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={remove}
+        >
+          <p>
+            The project moves to the trash folder inside HOAForecaster's data folder. Export it
+            first if you may want it back in the app.
+          </p>
+        </Confirm>
+      </section>
+    </>
   );
 }
 
@@ -115,9 +159,9 @@ export function ScenariosPage() {
       <h1>Scenarios</h1>
       <p className="hint">
         A scenario is one way to pay for the plan, complete in itself – its facts and assumptions,
-        its expenses, the reserve study's Fully Funded Balance, its dues each year and any special
-        assessments. Open one to see and change it; every edit is saved as you make it. Start a new
-        one blank, or as a copy of any scenario here.
+        its expenses, its Fully Funded Balance, its dues each year and any special assessments. Open
+        one to see and change it; every edit is saved as you make it. Start a new one blank, or as a
+        copy of any scenario here.
       </p>
       <ErrorBanner error={loadError ?? moveError} />
       <section className="panel">

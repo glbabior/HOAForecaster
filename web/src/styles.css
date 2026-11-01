@@ -243,6 +243,15 @@ button.switch[aria-checked="true"] .switch-knob {
   color: var(--warn-text);
 }
 
+.panel.danger button {
+  border-color: var(--warn-text);
+  color: var(--warn-text);
+}
+
+.panel.danger button:hover {
+  background: var(--warn-bg);
+}
+
 .section-head {
   display: flex;
   justify-content: space-between;

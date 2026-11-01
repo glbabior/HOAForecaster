@@ -683,7 +683,7 @@ const FACTS: { title: string; facts: Fact[] }[] = [
       {
         key: "target",
         label: "Percent-funded target",
-        hint: "The share of the reserve study's Fully Funded Balance the board aims to hold – drawn as the target line on charts",
+        hint: "The share of the Fully Funded Balance the board aims to hold – drawn as the target line on charts",
         example: "e.g. Reserve study recommendation",
         unit: "%",
       },

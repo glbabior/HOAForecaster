@@ -6,9 +6,11 @@ Newest first. Each entry describes what users can now do differently.
 
 Nothing has been released yet. The entries below follow the app as it was built, newest first, each dated and named for the version of the requirements it brought in.
 
-### November 1, 2026 – Compare's extra cost
+### November 1, 2026 – Compare's extra cost, and fixes
 
 - **Extra cost says what it is measured against.** Compare shows each scenario's current dues in a row just above the extra-cost rows, and when every shown scenario has the same current dues the labels name them – "Extra cost per unit over today's $560 a month, 2027–2030" in the demo. A note under the summary explains that extra cost is what an owner pays above today's dues held flat, and that a negative figure is a saving.
+- **Delete a project again.** "Delete this project…" at the bottom of Scenarios moves the project to the trash folder, as before v1.6 dropped it.
+- **The workbook no longer calls a worked-out Fully Funded Balance the reserve study's.** Its heading on each scenario's sheet is "This scenario's Fully Funded Balance", and the percent-funded note and the Method sheet name both kinds. A workbook with the older heading still imports.
 
 ### October 31, 2026 – a new look
 
@@ -53,7 +55,7 @@ Nothing has been released yet. The entries below follow the app as it was built,
 - **Adopted plans are simply read-only.** An adopted plan keeps its own inputs, so nothing is frozen separately.
 - **The workbook carries each scenario's inputs.** A Project sheet holds the name and notes, and each scenario's sheet holds its facts and assumptions, Fully Funded Balance and expenses below its charts. A workbook in the earlier layout is refused with a plain message – its project file still imports.
 - **Older project files still open.** Files from earlier versions open with the same figures, each scenario given the facts it ran on, and are saved in the new form.
-- **No more drafts.** With every edit saved as it is made, the draft and restore screens are gone. Deleting a project from the app is not offered in this version.
+- **No more drafts.** With every edit saved as it is made, the draft and restore screens are gone. Deleting a project from the app was left out by mistake in this version and came back on November 1.
 
 ### October 19–25, 2026 – requirements v1.0 to v1.5
 

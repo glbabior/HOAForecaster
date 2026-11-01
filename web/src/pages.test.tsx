@@ -23,6 +23,7 @@ vi.mock("./api", async (importOriginal) => {
       adopt: vi.fn(),
       unadopt: vi.fn(),
       results: vi.fn(),
+      deleteProject: vi.fn(),
     },
   };
 });
@@ -38,6 +39,7 @@ const mocked = api as unknown as {
   adopt: Mock;
   unadopt: Mock;
   results: Mock;
+  deleteProject: Mock;
 };
 
 const years = (from: number, to: number) =>
@@ -533,6 +535,8 @@ describe("a new scenario", () => {
 });
 
 describe("the project's screens", () => {
+  afterEach(() => mocked.listProjects.mockReset());
+
   it("open on Scenarios, listed in the project's order", async () => {
     const adopted = (name: string, sequence: number): Scenario =>
       scenario(name, { adoption: { date: "2026-10-01", note: "", sequence } });
@@ -550,6 +554,53 @@ describe("the project's screens", () => {
         .getAllByRole("link")
         .map((l) => l.textContent),
     ).toEqual(["Scenarios", "Compare", "Charts", "Export"]);
+  });
+
+  it("delete the project, once asked, and go back to the projects", async () => {
+    mocked.deleteProject.mockResolvedValue(undefined);
+    mocked.listProjects.mockResolvedValue({ projects: [], unreadable: [] });
+    const router = start("/projects/abcdefabcdef/scenarios");
+    await userEvent.click(await screen.findByRole("button", { name: "Delete this project…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete Demo?" });
+    expect(within(dialog).getByText(/moves to the trash folder/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(mocked.deleteProject).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Delete this project…" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete Demo?" })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    await waitFor(() => expect(at(router)).toBe("/"));
+    expect(mocked.deleteProject).toHaveBeenCalledWith("abcdefabcdef");
+  });
+
+  it("delete the project without asking to keep a name that could not be saved", async () => {
+    mocked.deleteProject.mockResolvedValue(undefined);
+    mocked.listProjects.mockResolvedValue({ projects: [], unreadable: [] });
+    const router = start("/projects/abcdefabcdef/scenarios");
+    await userEvent.clear(await screen.findByRole("textbox", { name: "Name" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete this project…" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete Demo?" })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    await waitFor(() => expect(at(router)).toBe("/"));
+    expect(screen.queryByRole("dialog", { name: "Leave this screen?" })).toBeNull();
+  });
+
+  it("stay on the project, saying why, when it cannot be deleted", async () => {
+    mocked.deleteProject.mockRejectedValue(new ApiError(500, "the project could not be moved"));
+    const router = start("/projects/abcdefabcdef/scenarios");
+    await userEvent.click(await screen.findByRole("button", { name: "Delete this project…" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete Demo?" })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    expect(await screen.findByText(/the project could not be moved/i)).toBeTruthy();
+    expect(at(router)).toBe("/projects/abcdefabcdef/scenarios");
   });
 
   it("move a scenario in the project's order, and Compare follows it", async () => {

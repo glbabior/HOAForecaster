@@ -176,8 +176,9 @@ ROW_NOTES = {
     "reserves.",
     "contribution": "Total dues less operating expenses, never below zero. A shortfall is flagged "
     "below, not taken from reserves.",
-    "pf": "Year-end balance divided by the reserve study's Fully Funded Balance at the start of "
-    "the following year. Under 30% is weak, 30–70% fair, over 70% strong.",
+    "pf": "Year-end balance divided by the Fully Funded Balance at the start of the following "
+    "year – the reserve study's figures, or worked out from the expenses' useful lives, as the "
+    "sheet's Fully Funded Balance block says. Under 30% is weak, 30–70% fair, over 70% strong.",
 }
 
 
@@ -891,8 +892,9 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
         (
             "2. Below each scenario's charts are its facts and assumptions – starting balance, "
             "units, current dues, operating cost inflation, reserve expense inflation, interest, "
-            "the minimum cushion, the percent-funded target and the owner-vote limits – then the "
-            "reserve study's Fully Funded Balance for each year, then its expenses. Monthly and "
+            "the minimum cushion, the percent-funded target and the owner-vote limits – then its "
+            "Fully Funded Balance for each year (the reserve study's figures, or worked out from "
+            "the expenses' useful lives), then its expenses. Monthly and "
             "yearly lines are operating costs paid from dues, each grown at its own inflation "
             "rate or the operating rate. Once and every-few-years lines are reserve expenses, "
             "grown from the expense base year at the reserve expense inflation rate unless marked "
@@ -933,7 +935,8 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
         lines += [("", False, 10), ("Notes", True, 11), (project.notes, False, 10)]
     limits = (
         "The expense schedule is a forecast – real costs and timing will differ. Percent funded "
-        "uses the reserve study's Fully Funded Balance, which a new study will change. "
+        "uses the Fully Funded Balance – the reserve study's, which a new study will change, or "
+        "one worked out from the expenses' useful lives, only as good as those lives. "
         "Operating inflation is an assumption. A dues increase or special assessment above the "
         "limits on a scenario's sheet needs an owner vote – the sheet flags those years."
     )

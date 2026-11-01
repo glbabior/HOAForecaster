@@ -172,6 +172,7 @@ All percentages are stored as fractions; money as decimal or integer cents, neve
 - Project list → a project's screens, with a bar of sections across the top – **Scenarios**, **Compare**, **Charts** and **Export**.
 - Scenarios – in the project's order, which the board sets here (move up, move down) or on Compare; the current adopted plan is marked as such and earlier adopted plans show their adoption dates; and New scenario. Every screen lists scenarios in this order, and the workbook has one sheet per scenario in it.
 - **Import** – (a) CSV for a scenario's expense table and Fully Funded Balance table, its columns to be fixed when this is built – a row without a frequency is a once line; (b) a workbook in the reference layout – read Inputs, Expenses (baseline row, item rows, FFB row) and each Plan sheet's input rows into one scenario per Plan sheet, each with the Inputs and Expenses facts, dropping a partial first-year column if present and using that year's ending balance as the next January 1 starting balance. Its item rows become once lines and its operating-expense input one yearly line, as in the version 1 upgrade (section 8.2).
+- **Delete project** – asks first, then moves the project file to the trash folder in the data folder (section 8); listing and restoring the trash is not built yet.
 
 ### 7.2 A scenario's screens
 
@@ -211,7 +212,7 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 
 ### 7.6 Export
 
-- **Excel workbook** following the v1.3 layout – Method, Project (the association's name and notes), Compare, Charts, then one sheet per selected scenario (named by scenario), each carrying the scenario's Plan table, its facts and assumptions, its Fully Funded Balance and its expense table, with live formulas (not pasted values), the same colour conventions, number formats and cell comments carrying the source notes, and the same charts. Generated server-side or in-browser; must open in Excel without repair prompts and recalculate to the same numbers the app shows.
+- **Excel workbook** following the v1.3 layout – Method, Project (the association's name and notes), Compare, Charts, then one sheet per selected scenario (named by scenario), each carrying the scenario's Plan table, its facts and assumptions, its Fully Funded Balance and its expense table, with live formulas (not pasted values), the same colour conventions, number formats and source notes (a fact's in a "Source / note" column beside its figure, where it reads and prints; an expense line's and the Fully Funded Balance's as cell comments), and the same charts. Generated server-side or in-browser; must open in Excel without repair prompts and recalculate to the same numbers the app shows.
 - Each scenario's expense table lists every line with its frequency and identifier, operating and reserve lines in one table with a total of each.
 - An adopted plan's sheet shows its adoption date and note and is protected as a reminder that it is read-only.
 - When the chosen scenarios cover different years, the Compare sheet runs its by-year tables over every year any of them covers and labels its summary measures by year of each horizon; each chart covers its own scenario's years.

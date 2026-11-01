@@ -1170,6 +1170,38 @@ def test_a_workbook_from_before_the_mode_row_reads_as_the_studys_figures() -> No
     assert facts.ffb == next(s for s in DEMO.scenarios if s.name == "Dues only").facts.ffb
 
 
+def test_the_fully_funded_balance_is_not_called_the_studys_when_worked_out() -> None:
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
+    rows = _rows(wb[WORKED])
+    assert "This scenario's Fully Funded Balance" in rows
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                said = " ".join(
+                    str(t) for t in (cell.value, cell.comment and cell.comment.text) if t
+                )
+                assert "reserve study's Fully Funded Balance" not in said, (ws.title, cell)
+
+
+def test_a_workbook_with_the_older_fully_funded_balance_heading_still_reads() -> None:
+    heading = "This scenario's Fully Funded Balance"
+    # an expense in the older sheet worded like the newer heading – it must not stand in for it
+    dues_only = next(s for s in DEMO.scenarios if s.name == "Dues only")
+    first, *rest = dues_only.facts.expense_lines
+    lines = (replace(first, description=heading), *rest)
+    worded = replace(dues_only, facts=replace(dues_only.facts, expense_lines=lines))
+    project = replace(
+        DEMO, scenarios=tuple(worded if s is dues_only else s for s in DEMO.scenarios)
+    )
+
+    def older(wb: openpyxl.Workbook) -> None:
+        ws = wb["Dues only"]
+        r = min(c.row for c in ws["A"] if c.value == heading)  # the block's own heading
+        ws.cell(r, 1).value = "This scenario's Fully Funded Balance (from the reserve study)"
+
+    assert read_workbook(_broken(older, project)) == read_workbook(export_workbook(project))
+
+
 def test_switching_the_mode_in_excel_is_read() -> None:
     def to_typed(ws: Any, r: int) -> None:
         ws.cell(r + 1, VALUE_COL).value = "the reserve study's figures"
