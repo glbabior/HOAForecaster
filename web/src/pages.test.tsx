@@ -1266,7 +1266,7 @@ const ok = (s: Scenario) => ({
   name: s.name,
 });
 
-describe("Compare's cushion and target", () => {
+describe("Compare's shared figures – the cushion, the target and the current dues", () => {
   const rowsOf = async () => {
     const table = await screen.findByRole("table", { name: "Summary measures by scenario" });
     return within(table)
@@ -1304,6 +1304,59 @@ describe("Compare's cushion and target", () => {
       within(table).getByRole("row", { name: /^Minimum cushion/ }),
     ).getAllByRole("cell");
     expect(cushions.map((c) => c.textContent)).toEqual(["$10,000", "$25,000"]);
+  });
+
+  it("names the current dues extra cost is measured against", async () => {
+    const b = scenario("Plan B");
+    b.facts.current_dues = "500.00"; // the same figure written another way
+    serve(projectOf(scenario("Plan A"), b));
+    mocked.results.mockResolvedValue({
+      scenarios: { "Plan A": ok(scenario("Plan A")), "Plan B": ok(b) },
+    });
+    start("/projects/abcdefabcdef/compare");
+    const rows = await rowsOf();
+    // both scenarios' current dues are $500 – the labels say so, the baseline row shows it
+    expect(rows).toContain("Extra cost per unit over today's $500 a month, 2027–2030");
+    expect(rows).toContain("Extra cost per unit over today's $500 a month, 2027–2031");
+    expect(rows).toContain("Average extra cost per unit per year over today's $500 a month");
+    const baseline = "Current dues per unit per month – what extra cost is measured against";
+    expect(rows.indexOf(baseline)).toBe(
+      rows.indexOf("Extra cost per unit over today's $500 a month, 2027–2030") - 1,
+    );
+    const table = screen.getByRole("table", { name: "Summary measures by scenario" });
+    const cells = within(within(table).getByRole("row", { name: /^Current dues/ })).getAllByRole(
+      "cell",
+    );
+    expect(cells.map((c) => c.textContent)).toEqual(["$500", "$500"]);
+    expect(
+      screen.getByText(/Extra cost is what an owner pays above today's dues held flat/),
+    ).toBeTruthy();
+  });
+
+  it("says each scenario's current dues when they differ", async () => {
+    const b = scenario("Plan B");
+    b.facts.current_dues = "540";
+    serve(projectOf(scenario("Plan A"), b));
+    mocked.results.mockResolvedValue({
+      scenarios: { "Plan A": ok(scenario("Plan A")), "Plan B": ok(b) },
+    });
+    start("/projects/abcdefabcdef/compare");
+    const rows = await rowsOf();
+    expect(rows).toContain("Extra cost per unit over each scenario's current dues, 2027–2030");
+    expect(rows).toContain("Extra cost per unit over each scenario's current dues, 2027–2031");
+    expect(rows).toContain(
+      "Average extra cost per unit per year over each scenario's current dues",
+    );
+    expect(rows.filter((r) => r?.includes("today's"))).toEqual([]);
+    const table = screen.getByRole("table", { name: "Summary measures by scenario" });
+    const row = () =>
+      within(within(table).getByRole("row", { name: /^Current dues/ })).getAllByRole("cell");
+    expect(row().map((c) => c.textContent)).toEqual(["$500", "$540"]);
+    // a difference in a fact is shown plainly – neither better nor worse
+    await userEvent.click(screen.getByRole("checkbox", { name: /Show differences/ }));
+    const diff = row()[1]?.querySelector(".diff");
+    expect(diff?.textContent).toBe(" (+$40)");
+    expect(diff?.classList.contains("better") || diff?.classList.contains("worse")).toBe(false);
   });
 
   it("flags negative figures in the summary and percent funded as a low balance is", async () => {

@@ -26,12 +26,22 @@ interface Measure {
 /** The summary measures (spec 6). `span` is the horizon every shown scenario shares – the labels
  * name calendar years only then; otherwise they count years of each projection (spec 7.4). */
 function measures(span: [number, number] | null, years: number, facts: Facts[]): Measure[] {
+  // one figure every shown scenario shares – decimals compared by value, so "560" and "560.00"
+  // (an imported file, a re-imported workbook) count as the same
+  const same = (a: unknown, b: unknown) =>
+    typeof a === "string" && typeof b === "string" ? num(a) === num(b) : a === b;
   const one = <T,>(of: (f: Facts) => T): T | undefined =>
-    facts.length > 0 && facts.every((f) => of(f) === of(facts[0] as Facts))
+    facts.length > 0 && facts.every((f) => same(of(f), of(facts[0] as Facts)))
       ? of(facts[0] as Facts)
       : undefined;
   const cushion = one((f) => f.cushion);
   const target = one((f) => f.target);
+  // extra cost is over today's dues held flat – named, so a reader knows what it is over
+  const current = one((f) => f.current_dues);
+  const over =
+    current !== undefined
+      ? `over today's ${dues(current)} a month`
+      : "over each scenario's current dues";
   const year = (offset: number) => (span ? String(span[0] + offset) : `year ${offset + 1}`);
   const first = (n: number) =>
     span ? `${span[0]}–${span[0] + n - 1}` : n === 5 ? "first five years" : "first four years";
@@ -152,13 +162,18 @@ function measures(span: [number, number] | null, years: number, facts: Facts[]):
       better: "lower",
     },
     {
-      label: `Extra cost vs current dues, ${first(4)}`,
+      label: "Current dues per unit per month – what extra cost is measured against",
+      value: (_s, f) => f.current_dues,
+      kind: "dues",
+    },
+    {
+      label: `Extra cost per unit ${over}, ${first(4)}`,
       value: (s) => s.extra_first4,
       kind: "money",
       better: "lower",
     },
     {
-      label: `Extra cost vs current dues, ${whole}`,
+      label: `Extra cost per unit ${over}, ${whole}`,
       value: (s) => s.extra_total,
       kind: "money",
       better: "lower",
@@ -170,7 +185,7 @@ function measures(span: [number, number] | null, years: number, facts: Facts[]):
       better: "lower",
     },
     {
-      label: "Average extra cost per year",
+      label: `Average extra cost per unit per year ${over}`,
       value: (s) => s.avg_extra,
       kind: "money",
       better: "lower",
@@ -390,6 +405,11 @@ export function ComparePage() {
                 </tbody>
               </table>
             </div>
+            <p className="hint">
+              Extra cost is what an owner pays above today's dues held flat – each year's dues
+              increase over the current dues, plus any special assessment. A negative figure is a
+              saving.
+            </p>
           </section>
 
           {(

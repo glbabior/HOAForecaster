@@ -194,7 +194,7 @@ Input rows visually distinct (the spreadsheet uses blue on yellow). LOW and "no"
 ### 7.4 Compare view
 
 - A multi-select of the project's scenarios (dropdown with checkboxes; default = all, adopted plans included).
-- Table 1 – the summary measures in section 6, one column per selected scenario.
+- Table 1 – the summary measures in section 6, one column per selected scenario. Extra cost is measured against each scenario's current dues held flat (input 10), so the table shows the current dues in a row just above the extra-cost rows, names them in those rows' labels when every selected scenario shares them ("over today's $560 a month" in the demo; otherwise "over each scenario's current dues"), and says under the table that extra cost is what an owner pays above today's dues held flat – dues increases plus special assessments – a negative figure being a saving.
 - Table 2 – year-end reserve balance by year, one column per scenario.
 - Table 3 – percent funded by year, one column per scenario.
 - Differences highlighted against the first selected scenario (optional toggle), each under its figure. A scenario's column can be moved left or right, which changes the project's order (section 7.1) – so the scenario differences are measured from is chosen by moving it first.
