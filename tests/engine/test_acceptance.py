@@ -67,6 +67,6 @@ def test_matches_reference_workbook(
     # the whole project file, so an older schema goes through its upgrade (spec 8.2)
     project = project_from_dict(raw)
     scenario = next(s for s in project.scenarios if s.name == name)
-    result = run(scenario)
+    result = run(project.runnable(scenario))
     problems = mismatches(result, expected)
     assert not problems, "\n".join(problems)

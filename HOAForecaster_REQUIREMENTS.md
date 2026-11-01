@@ -102,6 +102,11 @@ An every-few-years line with a last year counts only for years up to it. Monthly
 
 An expense set is a named, saved copy of the project's expenses – every expense line (input 3, with its source notes), the Fully Funded Balance (input 5 – the typed figures, their source note and whether it is worked out) and the expense base year (input 4). The reserve inflation rate and every other fact stay as they are when a set is loaded.
 
+- A monthly or yearly line with a blank first year means the project's start year; a set stores that year as the line's first year, so loading the set after the start year has moved gives the figures it was saved with.
+- A set records the reserve inflation rate it was saved with, for information. Loading a set saved with a different rate says so ("This set was saved with 5.0% reserve inflation – the project uses 3.5%") and offers to switch the project's rate to it; a reserve study states its dollars and its inflation together.
+- Loading replaces the typed Fully Funded Balance years the set has and keeps the project's years it lacks; years still missing for the horizon are problems, as usual.
+- Two sets are the same when their lines (in any order), Fully Funded Balance, base year and notes are the same.
+
 - **Save as a set** – saves the project's expenses under a new name, unique in the project.
 - **Save changes to the set** – when the expenses came from a set and have been edited since, writes them back into that set.
 - **Load a set** – replaces the project's expenses, Fully Funded Balance and base year with a copy of the set. Before it does, if the expenses came from no set the app offers to save them as one first; if they came from a set and have been edited since, it asks whether to save the changes to that set, save them as a new set, or discard them.
@@ -121,6 +126,8 @@ A scenario uses the project's facts, expenses and Fully Funded Balance (section 
 | 4 | Dues rounding | choice | Round to whole dollars (default) or no rounding |
 
 The dues path must be shown resolved (the actual number for every year) next to the inputs so the user sees what mode b produced.
+
+When a dues path moves onto a horizon with a different start year – a scenario started from an adopted plan of another time, a plan un-adopted after the project's years moved, or the schema 3 upgrade – a grown path's first-year value becomes what the path charged in the new start year (when that year was in its old horizon), so the dues carry on as they were; periods, pinned years, explicit years and assessments keep their years, and any outside the new horizon are kept and shown as problems or ignored as section 6 says.
 
 ### 5.1 Yearly increases by period
 
@@ -254,9 +261,10 @@ Charts view (the equivalent of the Charts tab) – chart 1 for each selected sce
 - Local file store – one JSON file per project in a user-chosen folder (or app data directory), human-readable, with a schema version field. SQLite is acceptable instead if simpler for the chosen stack.
 - Schema version 4 (v2.0) moves the facts, expenses and Fully Funded Balance from the scenarios to the project, adds the project's expense sets (each with its name and timestamps) and the name of the set the expenses came from with whether they have been edited since, and gives each adopted plan its frozen copy (section 5.2). A version 3 file still opens –
   - The project's facts and expenses are those of the first scenario in the project's order that is not an adopted plan (the first scenario, if every one is adopted), and they came from the expense set made from that scenario.
-  - Each different set of scenario expenses (lines, Fully Funded Balance and base year together) is saved as an expense set named after the first scenario that has it ("Expenses from Insurance shock"); scenarios with the same expenses share one set.
-  - Every adopted plan keeps its own facts and expenses as its frozen copy, so its figures are the same.
-  - Another scenario whose facts or expenses differed from the project's now uses the project's, so its figures change. The first time the upgraded project opens, it lists those scenarios and what differed ("Insurance shock – its interest rate, 5 expense lines – its expenses are saved as the set 'Expenses from Insurance shock'"), and the original file is kept beside the project as a backup until the project is next deleted.
+  - Each different set of scenario expenses (section 4.3's sameness – adopted plans' included) is saved as an expense set named after the first scenario that has it ("Expenses from Insurance shock", shortened and numbered to stay unique), recording that scenario's reserve inflation; scenarios with the same expenses share one set.
+  - Every adopted plan keeps its own facts and expenses as its frozen copy, recording the set its expenses are saved as, so its figures are the same.
+  - Another scenario whose facts or expenses differed from the project's now uses the project's. The first time the upgraded project opens, it lists those scenarios, what differed, whether their figures change, and any that now match another scenario exactly ("Insurance shock – its interest rate, its owner-vote limits, 3 expense lines, its Fully Funded Balance – its figures change – its expenses are saved as the set 'Expenses from Insurance shock'; loading it does not bring back its other facts"), and the original file is kept beside the project as a backup until the project is next deleted.
+  - A schema 3 file with no scenarios gets the facts a new project starts with.
   - The file is then saved as version 4.
 - Schema version 3 (v1.6) moved the baseline into every scenario. A version 2 file still opens – each scenario receives the baseline with its own changes applied (an adopted plan, its frozen baseline), so every figure is the same; a project with no scenarios gets one holding the baseline, with dues starting at its current dues. A version 1 file also opens – first its expense lines become once lines and its operating-expense figure one yearly line with no first year and no rate of its own, so it grows at input 7 from the start year and the figures are the same. Either is then upgraded to version 4 as above.
 - Every edit is saved as it is made (section 7.2). No version history – "Export project" is the snapshot.

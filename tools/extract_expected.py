@@ -162,10 +162,13 @@ def _plan_sheet(wb: Any, name: str) -> Any:
 
 
 def _horizon(project: dict[str, Any], s: dict[str, Any]) -> tuple[int, int]:
-    """A scenario's start and end year – its own facts (schema 3), or in an older project file
-    the baseline as the scenario saw it (an adopted plan's frozen copy, its own values)."""
-    if "facts" in s:
+    """A scenario's start and end year – an adopted plan's own facts or else the project's
+    (schema 4), its own facts (schema 3), or in an older project file the baseline as the
+    scenario saw it (an adopted plan's frozen copy, its own values)."""
+    if s.get("facts") is not None:
         own = s["facts"]
+    elif "facts" in project:
+        own = project["facts"]
     else:
         frozen = (s.get("adoption") or {}).get("baseline")
         own = {**(frozen or project["baseline"]), **s.get("changes", {}).get("values", {})}

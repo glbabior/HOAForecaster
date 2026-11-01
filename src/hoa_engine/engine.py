@@ -265,6 +265,7 @@ def run(scenario: Scenario) -> ScenarioResult:
         if problems:
             raise InvalidInputs(problems)
         f = scenario.facts
+        assert f is not None  # validate_run refuses a scenario without its facts
         ffb = {y: v for y, v in ffb_of(f).items() if f.start_year <= y <= f.end_year + 1}
         years = project_years(f, scenario, ffb)
         return ScenarioResult(years=years, summary=summarise(years), ffb=ffb)

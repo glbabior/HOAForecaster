@@ -189,7 +189,9 @@ class _Plan:
 
     @property
     def facts(self) -> Facts:
-        return self.scenario.facts
+        facts = self.scenario.facts
+        assert facts is not None  # build_workbook gives every scenario the facts it runs on
+        return facts
 
 
 # ---------------------------------------------------------------- Project
@@ -969,10 +971,12 @@ def build_workbook(
     unknown = [n for n in scenario_names or [] if n not in names]
     if unknown:
         raise ValueError("no scenario named " + ", ".join(repr(n) for n in unknown))
+    # each with the facts it runs on – the project's, or an adopted plan's own
+    runnable = project.runnable_scenarios()
     chosen = (
-        list(project.scenarios)
+        list(runnable)
         if scenario_names is None
-        else [next(sc for sc in project.scenarios if sc.name == n) for n in scenario_names]
+        else [next(sc for sc in runnable if sc.name == n) for n in scenario_names]
     )
     if not chosen:
         raise ValueError("there are no scenarios to export")

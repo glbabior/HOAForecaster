@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+from dataclasses import replace
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
-from hoa_engine.model import DuesMode, Rounding, Scenario
+from hoa_engine.model import DuesMode, Facts, Rounding, Scenario
+from hoa_engine.validate import validate_scenario
+
+
+def rebase_dues(scenario: Scenario, old: Facts, start_year: int) -> Scenario:
+    """The scenario moved from `old`'s horizon to one starting `start_year` (spec 5) – a grown
+    path's first-year value becomes what it charged in that year, when its old horizon had it,
+    so its dues carry on as they were. Everything else keeps its years. A path with problems
+    on its old horizon is left as it was."""
+    path = scenario.dues
+    if (
+        path.mode is DuesMode.EXPLICIT
+        or start_year == old.start_year
+        or not old.start_year <= start_year <= old.end_year
+        or validate_scenario(scenario, old)
+    ):
+        return scenario
+    with localcontext(prec=28):
+        charged = resolve_dues(scenario, range(old.start_year, start_year + 1))[start_year]
+    return replace(scenario, dues=replace(path, first_value=charged))
 
 
 def resolve_dues(scenario: Scenario, years: range) -> dict[int, Decimal]:

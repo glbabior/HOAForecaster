@@ -1,29 +1,43 @@
-"""Older project files in today's form, with the same figures (spec 8.2).
+"""Older project files in today's form (spec 8.2).
 
 Schema 1 had a single operating-expense figure; schema 2 had one baseline per project, with
 each scenario holding only its changes to it (and an adopted plan a frozen copy). Schema 3
-gives every scenario all of its own inputs. These work on the JSON form, before it is read,
-with the model's own field readers – the same checks as a schema 3 file.
+gave every scenario all of its own inputs; schema 4 gives them back to the project, with each
+scenario's own expenses saved as a set. The schema 1 and 2 upgrades work on the JSON form,
+before it is read, with the model's own field readers and the same figures; the schema 3
+upgrade works on the scenarios as read, and says which scenarios' figures change.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from typing import Any
 
+from hoa_engine.dues import rebase_dues
 from hoa_engine.model import (
+    EXPENSE_SOURCES,
     LIMITS,
+    MAX_SET_NAME,
     ExpenseLine,
+    ExpenseSet,
     Facts,
+    Project,
+    Scenario,
     _dec,
     _int,
     _line_id,
     _sources,
     _str,
     _year_map,
+    blank_facts,
+    check_project,
     expense_line_from_dict,
+    expenses_of,
     facts_from_dict,
     facts_to_dict,
+    same_expenses,
+    same_set,
 )
 
 OPERATING_LINE_ID = "operating"
@@ -47,6 +61,143 @@ MAX_LINES = 1000  # a schema 2 baseline's lines, or one scenario's line changes
 # lines the upgrade may write in all – each scenario gets its own copy of the baseline's, so a
 # small crafted file must not grow into one too large to hold
 UPGRADE_BUDGET = 50_000
+
+
+SET_PREFIX = "Expenses from "
+
+# what each fact is called in the upgrade's report – the expense parts are told apart below
+_FACT_WORDS = {
+    "start_year": "its years",
+    "end_year": "its years",
+    "starting_balance": "its starting balance",
+    "units": "its number of units",
+    "current_dues": "its current dues",
+    "expense_inflation": "its reserve inflation rate",
+    "operating_inflation": "its operating inflation rate",
+    "interest_rate": "its interest rate",
+    "cushion": "its cushion",
+    "target": "its percent-funded target",
+    "max_dues_increase": "its owner-vote limits",
+    "max_assessment_share": "its owner-vote limits",
+}
+
+
+def _unique(base: str, taken: set[str]) -> str:
+    base = base[:MAX_SET_NAME]
+    name, n = base, 2
+    while name in taken:
+        tail = f" ({n})"
+        name, n = base[: MAX_SET_NAME - len(tail)] + tail, n + 1
+    return name
+
+
+def _differences(own: Facts, project: Facts) -> list[str]:
+    """What a scenario's own facts had that the project's do not, in words."""
+    words = [w for k, w in _FACT_WORDS.items() if getattr(own, k) != getattr(project, k)]
+    notes = {k: v for k, v in own.sources.items() if k not in EXPENSE_SOURCES}
+    if notes != {k: v for k, v in project.sources.items() if k not in EXPENSE_SOURCES}:
+        words.append("its source notes")
+    mine = {line.id: line for line in own.expense_lines}
+    theirs = {line.id: line for line in project.expense_lines}
+    lines = sum(mine.get(i) != theirs.get(i) for i in mine.keys() | theirs.keys())
+    if lines:
+        words.append("1 expense line" if lines == 1 else f"{lines} expense lines")
+    elif [line.id for line in own.expense_lines] != list(theirs):
+        words.append("the order of its expense lines")
+    if (own.ffb, own.ffb_from_lines, own.sources.get("ffb")) != (
+        project.ffb,
+        project.ffb_from_lines,
+        project.sources.get("ffb"),
+    ):
+        words.append("its Fully Funded Balance")
+    if (own.expense_base_year, own.sources.get("expense_base_year")) != (
+        project.expense_base_year,
+        project.sources.get("expense_base_year"),
+    ):
+        words.append("its expense base year")
+    return list(dict.fromkeys(words))  # each once, in order
+
+
+def _figures(s: Scenario) -> object:
+    """A scenario's figures, or its problems when it has no figures – to tell whether the
+    upgrade changes them."""
+    from hoa_engine.engine import InvalidInputs, run
+
+    try:
+        return run(s)
+    except InvalidInputs as e:
+        return e.problems
+
+
+def upgrade_v3_project(
+    name: str, notes: str, scenarios: tuple[Scenario, ...], report: bool = True
+) -> tuple[Project, list[str]]:
+    """A schema 3 project in schema 4 form (spec 8.2) – the facts and expenses of its first
+    scenario that is not an adopted plan become the project's, each different set of scenario
+    expenses is saved as a set, and adopted plans keep theirs. Also, for each other scenario
+    that had facts of its own, a sentence saying what they were and whether its figures
+    change."""
+    for s in scenarios:
+        if s.facts is None:
+            raise ValueError(f"{s.name!r} is missing its facts and assumptions")
+    if not scenarios:
+        return Project(name=name, notes=notes, facts=blank_facts(date.today().year + 1)), []
+    own = [s.facts for s in scenarios if s.facts is not None]
+    first = next((s for s in scenarios if s.adoption is None), scenarios[0]).facts
+    assert first is not None  # every scenario has its facts, checked above
+    sets: list[ExpenseSet] = []
+    for s, f in zip(scenarios, own, strict=True):
+        if not any(same_set(expenses_of(f), e) for e in sets):
+            taken = {e.name for e in sets}
+            sets.append(expenses_of(f, _unique(SET_PREFIX + s.name, taken)))
+
+    def set_of(f: Facts) -> str:
+        return next(e.name for e in sets if same_set(expenses_of(f), e))
+
+    out = []
+    for s, f in zip(scenarios, own, strict=True):
+        if s.adoption is not None:  # keeps its own, frozen
+            out.append(replace(s, adoption=replace(s.adoption, expenses_from=set_of(f))))
+        else:  # the project's facts from now on, its dues carried on to their start year
+            out.append(replace(rebase_dues(s, f, first.start_year), facts=None))
+    project = Project(
+        name=name,
+        notes=notes,
+        facts=first,
+        scenarios=tuple(out),
+        expense_sets=tuple(sets),
+        expenses_from=set_of(first),
+    )
+    check_project(project)
+    if not report:
+        return project, []
+
+    def funding(s: Scenario) -> tuple[object, ...]:
+        return (s.dues, s.assessments, s.rounding)
+
+    sentences = []
+    plans = [s for s in project.scenarios if s.adoption is None]
+    for before, after, f in zip(scenarios, project.scenarios, own, strict=True):
+        differs = _differences(f, first) if after.adoption is None else []
+        if not differs:
+            continue
+        changed = _figures(before) != _figures(project.runnable(after))
+        parts = [
+            ", ".join(differs),
+            "its figures change" if changed else "its figures stay the same",
+        ]
+        twin = next(
+            (p.name for p in plans if p is not after and funding(p) == funding(after)), None
+        )
+        if twin is not None:
+            parts.append(f"it now matches {twin} exactly")
+        sentence = f"{before.name} – " + " – ".join(parts)
+        if not same_expenses(f, first):
+            sentence += f" – its expenses are saved as the set '{set_of(f)}'"
+            if any(w in _FACT_WORDS.values() or w == "its source notes" for w in differs):
+                sentence += "; loading it does not bring back its other facts"
+        sentences.append(sentence)
+    return project, sentences
 
 
 def upgrade_v1_baseline(d: Any) -> dict[str, Any]:

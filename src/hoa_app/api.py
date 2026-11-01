@@ -14,7 +14,7 @@ import re
 import secrets
 import unicodedata
 from collections.abc import Awaitable, Callable
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import date
 from decimal import Decimal
 from importlib.metadata import version
@@ -35,7 +35,10 @@ from hoa_engine import InvalidInputs, ProjectFormatError, ScenarioResult, run
 from hoa_engine.model import (
     MAX_NOTE,
     Project,
+    _dec,
+    _str,
     adoption_date,
+    facts_from_dict,
     project_from_dict,
     project_to_dict,
     scenario_from_dict,
@@ -120,14 +123,17 @@ def stored_json(stored: StoredProject) -> dict[str, Any]:
         "revision": stored.revision,
         "times": stored.times,
         "scenario_times": stored.scenario_times,
+        "set_times": stored.set_times,
+        "upgrade_notes": list(stored.upgrade_notes),
         "project": project_to_dict(stored.project),
     }
 
 
 def _results(project: Project) -> dict[str, Any]:
-    """Every scenario's results, or its problems when its inputs are invalid."""
+    """Every scenario's results, or its problems when its inputs are invalid – each on the facts
+    it runs on (the project's, or an adopted plan's own)."""
     out: dict[str, Any] = {}
-    for s in project.scenarios:
+    for s in project.runnable_scenarios():
         try:
             out[s.name] = {"result": result_json(run(s))}
         except InvalidInputs as e:
@@ -138,7 +144,7 @@ def _results(project: Project) -> dict[str, Any]:
 def dollar_axis(project: Project, names: list[str]) -> tuple[Decimal, Decimal] | None:
     """The shared dollar range for the Charts sheet – expenses, collections and balances."""
     values: list[Decimal] = []
-    for s in project.scenarios:
+    for s in project.runnable_scenarios():
         if s.name in names:
             try:
                 for y in run(s).years:
@@ -333,14 +339,19 @@ def create_app(
         return stored_json(store.create(project))
 
     @app.get("/api/blank-scenario")
-    def new_blank_scenario(name: str = "New scenario") -> dict[str, Any]:
-        """A blank scenario with the spec's defaults, for the new-scenario screen (spec 7.2)."""
-        if not name.strip() or len(name) > 200 or any(ord(c) < 32 for c in name):
+    def new_blank_scenario(name: str = "New scenario", dues: str = "0") -> dict[str, Any]:
+        """A blank funding plan, its dues starting at the project's current dues, for the
+        new-scenario screen (spec 7.2)."""
+        try:
+            usable = _str(name).strip()  # no control characters, as in any project text
+        except ValueError:
+            usable = ""
+        if not usable or len(name) > 200:
             raise ApiError(422, "a new scenario needs a usable name")
         try:
-            return scenario_to_dict(blank_scenario(name.strip(), date.today()))
-        except ProjectFormatError:
-            raise ApiError(422, "a new scenario needs a usable name") from None
+            return scenario_to_dict(blank_scenario(usable, str(_dec(dues))))
+        except (TypeError, ValueError):
+            raise ApiError(422, "the current dues should be a number") from None
 
     @app.get("/api/about")
     def about() -> dict[str, Any]:
@@ -393,6 +404,12 @@ def create_app(
         )
         return stored_json(stored)
 
+    @app.post("/api/projects/{project_id}/dismiss-notes")
+    async def dismiss_notes(project_id: str, request: Request) -> dict[str, Any]:
+        """The upgrade notes have been read (spec 8.2)."""
+        body = await body_json(request)
+        return stored_json(store.dismiss_notes(project_id, revision(body.get("revision"))))
+
     @app.post("/api/projects/{project_id}/unadopt")
     async def unadopt(project_id: str, request: Request) -> dict[str, Any]:
         """Un-adopt the current adopted plan (spec 5.2)."""
@@ -416,12 +433,22 @@ def create_app(
         body = await body_json(request)
         try:
             scenario = scenario_from_dict(body.get("scenario") or {})
+            # one on the project's facts gets them sent alongside, as they are being edited
+            if scenario.facts is None and body.get("facts") is not None:
+                scenario = replace(scenario, facts=facts_from_dict(body["facts"]))
         except ProjectFormatError as e:
             raise ApiError(422, str(e)) from None
         try:
             return result_json(run(scenario))
         except InvalidInputs as e:
             raise ApiError(422, "the inputs have problems", e.problems) from None
+
+    @app.post("/api/run-project")
+    async def run_project(request: Request) -> dict[str, Any]:
+        """Every scenario of a project as it is being edited – the project's facts and expenses
+        screens show each scenario's key results (spec 7.1)."""
+        body = await body_json(request)
+        return {"scenarios": _results(parse_project(body.get("project")))}
 
     # ------------------------------------------------------------ export and import
 

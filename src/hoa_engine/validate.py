@@ -104,6 +104,8 @@ def validate_facts(b: Facts) -> list[str]:
 
 def validate_run(s: Scenario) -> list[str]:
     """Everything that stops the scenario from running."""
+    if s.facts is None:  # a project's scenario, not yet given the project's facts
+        return [f"{s.name} has no facts to run on – give it the project's first"]
     horizon = horizon_problem(s.facts)
     if horizon:
         return [horizon]  # its years cannot be walked

@@ -10,7 +10,7 @@ import functools
 import re
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -147,12 +147,17 @@ class Adoption:
     adopted_on: date  # as entered – the board's date, not the order of adoption
     note: str
     sequence: int  # adoption order; the highest is the current adopted plan
+    # the expense set the frozen expenses came from when it was adopted, and whether they had
+    # been edited since it was loaded
+    expenses_from: str | None = None
+    expenses_edited: bool = False
 
 
 @dataclass(frozen=True)
 class Scenario:
     name: str
-    facts: Facts
+    # None – the project's facts (spec 3); an adopted plan's own, frozen when it was adopted
+    facts: Facts | None
     dues: DuesPath
     assessments: tuple[Assessment, ...] = ()
     rounding: Rounding = Rounding.DOLLAR
@@ -166,14 +171,117 @@ def current_adoption(scenarios: tuple[Scenario, ...]) -> Scenario | None:
     return max(adopted, key=lambda s: s.adoption.sequence if s.adoption else 0, default=None)
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+# the source notes that belong with the expenses, and so travel with an expense set
+EXPENSE_SOURCES = ("ffb", "expense_base_year")
+
+
+@dataclass(frozen=True)
+class ExpenseSet:
+    """A named, saved copy of the project's expenses (spec 4.3) – its lines, its Fully Funded
+    Balance (typed or worked out) and the base year whose dollars the amounts are in."""
+
+    name: str
+    expense_lines: tuple[ExpenseLine, ...]
+    expense_base_year: int
+    ffb: dict[int, Decimal]
+    ffb_from_lines: bool = False
+    sources: dict[str, str] = field(default_factory=dict)  # the notes on the FFB and base year
+    # the reserve inflation the set was saved with – for information, so loading it under
+    # another rate can say so (a study states its dollars and its inflation together)
+    saved_inflation: Decimal | None = None
+
+
+def expenses_of(facts: Facts, name: str = "") -> ExpenseSet:
+    """The expense parts of a set of facts, as a set named `name` – an operating line's blank
+    first year (the start year) written as that year, so the set means the same figures
+    whenever it is loaded (spec 4.3)."""
+    return ExpenseSet(
+        name=name,
+        expense_lines=tuple(
+            replace(line, year=facts.start_year)
+            if line.frequency.operating and line.year is None
+            else line
+            for line in facts.expense_lines
+        ),
+        expense_base_year=facts.expense_base_year,
+        ffb=dict(facts.ffb),
+        ffb_from_lines=facts.ffb_from_lines,
+        sources={k: v for k, v in facts.sources.items() if k in EXPENSE_SOURCES},
+        saved_inflation=facts.expense_inflation,
+    )
+
+
+def with_expenses(facts: Facts, expenses: ExpenseSet) -> Facts:
+    """`facts` with a set's expenses loaded in place of their own – every other fact as it was,
+    and the Fully Funded Balance years the set lacks kept (spec 4.3)."""
+    kept = {k: v for k, v in facts.sources.items() if k not in EXPENSE_SOURCES}
+    return replace(
+        facts,
+        expense_lines=expenses.expense_lines,
+        expense_base_year=expenses.expense_base_year,
+        ffb={**facts.ffb, **expenses.ffb},
+        ffb_from_lines=expenses.ffb_from_lines,
+        sources={**kept, **expenses.sources},
+    )
+
+
+def same_set(a: ExpenseSet, b: ExpenseSet) -> bool:
+    """The same expenses, whatever the sets are called, the order of their lines or the
+    inflation they were saved with (spec 4.3)."""
+
+    def key(s: ExpenseSet) -> ExpenseSet:
+        lines = tuple(sorted(s.expense_lines, key=lambda line: line.id))
+        return replace(s, name="", expense_lines=lines, saved_inflation=None)
+
+    return key(a) == key(b)
+
+
+def same_expenses(a: Facts, b: Facts) -> bool:
+    return same_set(expenses_of(a), expenses_of(b))
+
+
+def blank_facts(start_year: int) -> Facts:
+    """A project's facts before any are entered – the spec's defaults (section 4) – 14 years from
+    `start_year`, 3% inflation, 2% interest, a 70% target and the vote limits; amounts zero."""
+    end = start_year + 13
+    return Facts(
+        start_year=start_year,
+        end_year=end,
+        starting_balance=Decimal(0),
+        expense_lines=(),
+        expense_inflation=Decimal("0.03"),
+        expense_base_year=start_year - 1,
+        ffb={y: Decimal(0) for y in range(start_year, end + 2)},
+        operating_inflation=Decimal("0.03"),
+        interest_rate=Decimal("0.02"),
+        units=1,
+        current_dues=Decimal(0),
+        cushion=Decimal(0),
+        target=Decimal("0.7"),
+    )
 
 
 @dataclass(frozen=True)
 class Project:
+    """One building – its facts and expenses, shared by every scenario that is not an adopted
+    plan, its saved expense sets and its funding scenarios (spec 3)."""
+
     name: str
-    scenarios: tuple[Scenario, ...]
+    facts: Facts
+    scenarios: tuple[Scenario, ...] = ()
     notes: str = ""
+    expense_sets: tuple[ExpenseSet, ...] = ()
+    expenses_from: str | None = None  # the set the expenses were loaded from, if any
+    expenses_edited: bool = False  # and whether they have been edited since
+
+    def runnable(self, s: Scenario) -> Scenario:
+        """The scenario with the facts it runs on – the project's, or an adopted plan's own."""
+        return s if s.facts is not None else replace(s, facts=self.facts)
+
+    def runnable_scenarios(self) -> tuple[Scenario, ...]:
+        return tuple(self.runnable(s) for s in self.scenarios)
 
 
 # ---------------------------------------------------------------- JSON form
@@ -380,7 +488,7 @@ def scenario_from_dict(d: dict[str, Any]) -> Scenario:
     return Scenario(
         name=_str(d["name"]),
         description=_str(d.get("description", "")),
-        facts=facts_from_dict(d["facts"]),
+        facts=None if d.get("facts") is None else facts_from_dict(d["facts"]),
         dues=DuesPath(
             mode=DuesMode(dues["mode"]),
             explicit=_year_map(dues.get("explicit", {})),
@@ -431,10 +539,13 @@ def _adoption(d: Any) -> Adoption | None:
     note = _str(d.get("note", ""))
     if len(note) > MAX_NOTE:
         raise ValueError(f"an adoption note may be at most {MAX_NOTE:,} characters")
+    expenses_from = d.get("expenses_from")
     return Adoption(
         adopted_on=adoption_date(_str(d["date"])),
         note=note,
         sequence=sequence,
+        expenses_from=None if expenses_from is None else _set_name(expenses_from),
+        expenses_edited=expenses_from is not None and _bool(d.get("expenses_edited", False)),
     )
 
 
@@ -456,6 +567,47 @@ def adoption_to_dict(a: Adoption) -> dict[str, Any]:
         "date": a.adopted_on.isoformat(),
         "note": a.note,
         "sequence": a.sequence,
+        "expenses_from": a.expenses_from,
+        "expenses_edited": a.expenses_edited,
+    }
+
+
+MAX_SETS = 200  # expense sets in a project
+MAX_SET_NAME = 100  # characters
+
+
+def _set_name(value: Any) -> str:
+    name = _str(value)
+    if not name.strip():
+        raise ValueError("an expense set needs a name")
+    if len(name) > MAX_SET_NAME:
+        raise ValueError(f"an expense set's name may be at most {MAX_SET_NAME} characters")
+    return name
+
+
+@_reading("expense set")
+def expense_set_from_dict(d: dict[str, Any]) -> ExpenseSet:
+    sources = _sources(d.get("sources", {}))
+    return ExpenseSet(
+        name=_set_name(d["name"]),
+        expense_lines=_expense_lines(d.get("expense_lines", [])),
+        expense_base_year=_int(d["expense_base_year"]),
+        ffb=_year_map(d["ffb"]),
+        ffb_from_lines=_bool(d.get("ffb_from_lines", False)),
+        sources={k: v for k, v in sources.items() if k in EXPENSE_SOURCES},
+        saved_inflation=_opt_dec(d.get("saved_inflation")),
+    )
+
+
+def expense_set_to_dict(s: ExpenseSet) -> dict[str, Any]:
+    return {
+        "name": s.name,
+        "expense_lines": [{"id": e.id, **expense_line_to_dict(e)} for e in s.expense_lines],
+        "expense_base_year": s.expense_base_year,
+        "ffb": _year_map_out(s.ffb),
+        "ffb_from_lines": s.ffb_from_lines,
+        "sources": dict(s.sources),
+        "saved_inflation": None if s.saved_inflation is None else str(s.saved_inflation),
     }
 
 
@@ -473,7 +625,7 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
     return {
         "name": s.name,
         "description": s.description,
-        "facts": facts_to_dict(s.facts),
+        "facts": None if s.facts is None else facts_to_dict(s.facts),
         "dues": dues,
         "assessments": [
             {"year": a.year, "amount": str(a.amount), "note": a.note} for a in s.assessments
@@ -483,21 +635,11 @@ def scenario_to_dict(s: Scenario) -> dict[str, Any]:
     }
 
 
-@_reading("project")
-def project_from_dict(d: dict[str, Any]) -> Project:
-    from hoa_engine.upgrade import upgrade_v1_baseline, upgrade_v2_project
-
-    version = _int(d.get("schema_version", SCHEMA_VERSION))
-    raw_scenarios = d.get("scenarios", [])
-    if isinstance(raw_scenarios, list) and len(raw_scenarios) > MAX_SCENARIOS:
-        raise ValueError(f"a project may have at most {MAX_SCENARIOS} scenarios")
-    if version == 1:
-        d = {**d, "baseline": upgrade_v1_baseline(d["baseline"])}
-    if version in (1, 2):
-        d = upgrade_v2_project(d)
-    elif version != SCHEMA_VERSION:
-        raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
-    scenarios = tuple(scenario_from_dict(s) for s in d.get("scenarios", []))
+def _scenarios(d: dict[str, Any]) -> tuple[Scenario, ...]:
+    raw = d.get("scenarios", [])
+    if not isinstance(raw, list):
+        raise TypeError("scenarios should be a list")
+    scenarios = tuple(scenario_from_dict(s) for s in raw)
     names = [s.name for s in scenarios]
     duplicates = sorted({n for n in names if names.count(n) > 1})
     if duplicates:
@@ -507,7 +649,82 @@ def project_from_dict(d: dict[str, Any]) -> Project:
     orders = [s.adoption.sequence for s in scenarios if s.adoption is not None]
     if len(set(orders)) != len(orders):
         raise ValueError("two adopted plans have the same adoption order")
-    return Project(name=_str(d["name"]), notes=_str(d.get("notes", "")), scenarios=scenarios)
+    return scenarios
+
+
+def _expense_sets(raw: Any) -> tuple[ExpenseSet, ...]:
+    if not isinstance(raw, list):
+        raise TypeError("expense sets should be a list")
+    if len(raw) > MAX_SETS:
+        raise ValueError(f"a project may have at most {MAX_SETS} expense sets")
+    sets = tuple(expense_set_from_dict(s) for s in raw)
+    names = [s.name for s in sets]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(
+            "expense set names must be unique – " + ", ".join(repr(n) for n in duplicates)
+        )
+    return sets
+
+
+def check_project(p: Project) -> None:
+    """What a project must be, however it was made – raises ValueError."""
+    for s in p.scenarios:
+        if s.adoption is not None and s.facts is None:
+            raise ValueError(
+                f"the adopted plan {s.name!r} is missing the facts it was adopted with"
+            )
+        if s.adoption is None and s.facts is not None:
+            raise ValueError(
+                f"{s.name!r} has facts of its own – only an adopted plan keeps its own"
+            )
+    if p.expenses_from is not None and p.expenses_from not in {e.name for e in p.expense_sets}:
+        raise ValueError(f"the expenses came from {p.expenses_from!r}, which is not a saved set")
+    if p.expenses_edited and p.expenses_from is None:
+        raise ValueError("expenses from no set cannot have been edited since it was loaded")
+
+
+def read_project(d: dict[str, Any], report: bool = True) -> tuple[Project, list[str]]:
+    """A project file of any schema, in today's form – with, for an older file, what the upgrade
+    changed (spec 8.2), in plain sentences (none when `report` is false – working out whether
+    figures change runs the engine)."""
+    return _read_project({**d, "_report": report})
+
+
+@_reading("project")
+def _read_project(d: dict[str, Any]) -> tuple[Project, list[str]]:
+    from hoa_engine.upgrade import upgrade_v1_baseline, upgrade_v2_project, upgrade_v3_project
+
+    version = _int(d.get("schema_version", SCHEMA_VERSION))
+    raw_scenarios = d.get("scenarios", [])
+    if isinstance(raw_scenarios, list) and len(raw_scenarios) > MAX_SCENARIOS:
+        raise ValueError(f"a project may have at most {MAX_SCENARIOS} scenarios")
+    if version == 1:
+        d = {**d, "baseline": upgrade_v1_baseline(d["baseline"])}
+    if version in (1, 2):
+        d = upgrade_v2_project(d)
+    if version in (1, 2, 3):
+        return upgrade_v3_project(
+            _str(d["name"]), _str(d.get("notes", "")), _scenarios(d), report=d["_report"]
+        )
+    if version != SCHEMA_VERSION:
+        raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
+    expenses_from = d.get("expenses_from")
+    project = Project(
+        name=_str(d["name"]),
+        notes=_str(d.get("notes", "")),
+        facts=facts_from_dict(d["facts"]),
+        scenarios=_scenarios(d),
+        expense_sets=_expense_sets(d.get("expense_sets", [])),
+        expenses_from=None if expenses_from is None else _set_name(expenses_from),
+        expenses_edited=_bool(d.get("expenses_edited", False)),
+    )
+    check_project(project)
+    return project, []
+
+
+def project_from_dict(d: dict[str, Any]) -> Project:
+    return read_project(d)[0]
 
 
 def project_to_dict(p: Project) -> dict[str, Any]:
@@ -515,5 +732,9 @@ def project_to_dict(p: Project) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "name": p.name,
         "notes": p.notes,
+        "facts": facts_to_dict(p.facts),
+        "expense_sets": [expense_set_to_dict(e) for e in p.expense_sets],
+        "expenses_from": p.expenses_from,
+        "expenses_edited": p.expenses_edited,
         "scenarios": [scenario_to_dict(s) for s in p.scenarios],
     }

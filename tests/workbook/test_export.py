@@ -68,7 +68,7 @@ def _load(path: Path) -> Project:
 
 
 DEMO = _load(ROOT / "demo" / "fixtures" / "project.json")
-FACTS = DEMO.scenarios[0].facts  # the demo's shared starting point
+FACTS = DEMO.facts  # the demo's facts and expenses
 
 
 def _short_project() -> Project:
@@ -84,23 +84,24 @@ def _short_project() -> Project:
     years = range(f.start_year, f.end_year + 1)
     typed = Scenario(
         "Typed: dues / cents?",
-        f,
+        None,
         DuesPath(DuesMode.EXPLICIT, explicit={y: D("601.25") + i for i, y in enumerate(years)}),
         assessments=(Assessment(f.start_year + 1, D(1000), "=not a formula"),),
         description="+1 is text, not a formula",
     )
     grown = Scenario(
         "It's grown",
-        f,
+        None,
         DuesPath(DuesMode.RATE, first_value=D("700.40"), increases=(Increase(D("0.05")),)),
         rounding=Rounding.NONE,
     )
-    return Project("=Short demo", (typed, grown), notes="@note stays text")
+    return Project("=Short demo", f, (typed, grown), notes="@note stays text")
 
 
 def _varied_project() -> Project:
-    """The demo with scenarios whose facts differ every way a scenario's can – one on a
-    horizon of its own, so Compare has to line up different years – and adopted plans."""
+    """The demo with facts and expenses changed every way they can be, and adopted plans
+    whose frozen facts differ from them every way – one on a horizon of its own, so Compare has
+    to line up different years, and one with a worked-out Fully Funded Balance."""
     f = FACTS
     insurance = next(line for line in f.expense_lines if line.id == "insurance")
     lines = tuple(
@@ -206,7 +207,17 @@ def _varied_project() -> Project:
         ),
         grown,
     )
-    return replace(DEMO, scenarios=(*DEMO.scenarios[:2], own, later, short, adopted, first, worked))
+    assert own.facts is not None
+    plans = (
+        *DEMO.scenarios[:2],
+        replace(own, facts=None),  # on the project's facts, which are these
+        replace(later, adoption=Adoption(date(2025, 9, 1), "", 3)),
+        replace(short, adoption=Adoption(date(2026, 1, 5), "", 4)),
+        adopted,
+        first,
+        replace(worked, adoption=Adoption(date(2026, 12, 1), "Worked out", 5)),
+    )
+    return replace(DEMO, facts=own.facts, scenarios=plans, expenses_edited=True)
 
 
 def _projects() -> list[Any]:

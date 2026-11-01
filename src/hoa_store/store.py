@@ -2,6 +2,8 @@
 
     <data folder>/projects/<id>.json   saved projects
     <data folder>/trash/<id>.json      deleted projects, kept until the user empties the folder
+    <data folder>/backups/<id>.json    a project file as it was before its schema upgrade,
+                                       moved to the trash with the project (spec 8.2)
 
 File names come only from server-generated ids, never from user text, so no
 name or upload can reach outside the data folder. Saves are atomic (write a
@@ -20,19 +22,21 @@ import secrets
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from hoa_engine.dues import rebase_dues
 from hoa_engine.model import (
     MAX_ADOPTIONS,
+    SCHEMA_VERSION,
     Adoption,
     Project,
     ProjectFormatError,
     current_adoption,
-    project_from_dict,
     project_to_dict,
+    read_project,
 )
 from hoa_engine.validate import validate_run
 
@@ -90,6 +94,9 @@ class StoredProject:
     revision: int  # bumped on every save; a save must name the revision it started from
     times: Times  # the project
     scenario_times: dict[str, Times]  # by scenario name – a renamed scenario is a new one
+    set_times: dict[str, Times] = field(default_factory=dict)  # by expense set name, the same
+    # what the schema upgrade changed, shown until the user has read it (spec 8.2)
+    upgrade_notes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -189,8 +196,42 @@ def _dump(payload: dict[str, Any]) -> bytes:
     return (text + "\n").encode("utf-8")
 
 
-def parse_project_file(data: bytes) -> tuple[Project, dict[str, Any]]:
-    """A project from file bytes and the raw object it came from (for its timestamps)."""
+MAX_NOTES = 200  # sentences in an upgrade report – one per scenario at most
+MAX_NOTE_TEXT = 2000
+
+
+def _notes(value: Any) -> tuple[str, ...]:
+    """Stored upgrade notes – anything damaged is no notes."""
+    if not isinstance(value, list) or len(value) > MAX_NOTES:
+        return ()
+    if not all(isinstance(n, str) and len(n) <= MAX_NOTE_TEXT for n in value):
+        return ()
+    return tuple(value)
+
+
+def _kept_times(
+    before: dict[str, Any], after: list[tuple[str, Any]], old: dict[str, Times], now: str
+) -> dict[str, Times]:
+    """Timestamps for named things after a save – a new one is created now, a changed one
+    modified now, and one name swapped for another is a rename that keeps its history."""
+    names = {n for n, _ in after}
+    gone = [n for n in before if n not in names]
+    new = [n for n, _ in after if n not in before]
+    renamed = {new[0]: gone[0]} if len(gone) == 1 and len(new) == 1 else {}
+    out = {}
+    for name, item in after:
+        was = renamed.get(name, name)
+        times = old.get(was)
+        if times is None:
+            out[name] = {"created": now, "modified": now}
+        else:
+            out[name] = {**times, "modified": now} if before[was] != item else times
+    return out
+
+
+def parse_project_file(data: bytes) -> tuple[Project, dict[str, Any], list[str]]:
+    """A project from file bytes, the raw object it came from (for its timestamps) and, for an
+    older file, what its upgrade changed."""
     if len(data) > MAX_PROJECT_BYTES:
         raise BadProjectFile("the file is larger than 5 MB – not a project file")
     try:
@@ -200,9 +241,10 @@ def parse_project_file(data: bytes) -> tuple[Project, dict[str, Any]]:
     if not isinstance(raw, dict):
         raise BadProjectFile("the file is not a project file")
     try:
-        return project_from_dict(raw), raw
+        project, notes = read_project(raw)
     except ProjectFormatError as e:
         raise BadProjectFile(str(e)) from None
+    return project, raw, notes
 
 
 class ProjectStore:
@@ -210,6 +252,7 @@ class ProjectStore:
         self.root = root
         self.projects = root / "projects"
         self.trash = root / "trash"
+        self.backups = root / "backups"
         # one write at a time, so a revision check and its write cannot interleave
         self._lock = threading.RLock()
 
@@ -257,7 +300,7 @@ class ProjectStore:
         if raw is None:
             raise BadProjectFile("the saved project cannot be read – the file is damaged")
         try:
-            project = project_from_dict(raw)
+            project, notes = read_project(raw)
         except ProjectFormatError as e:
             raise BadProjectFile(f"the saved project cannot be read – {e}") from None
         revision = raw.get("revision", 1)
@@ -266,19 +309,42 @@ class ProjectStore:
         unknown = _now()
         stored = raw.get("scenario_times")
         stored = stored if isinstance(stored, dict) else {}
-        return StoredProject(
+        sets = raw.get("set_times")
+        sets = sets if isinstance(sets, dict) else {}
+        found = StoredProject(
             id=project_id,
             project=project,
             revision=revision,
             times=_times(raw.get("times"), unknown),
             scenario_times={s.name: _times(stored.get(s.name), unknown) for s in project.scenarios},
+            set_times={e.name: _times(sets.get(e.name), unknown) for e in project.expense_sets},
+            upgrade_notes=_notes(raw.get("upgrade_notes")),
         )
+        if raw.get("schema_version") != SCHEMA_VERSION:
+            return self._upgraded(path, found, notes)
+        return found
+
+    def _upgraded(self, path: Path, found: StoredProject, notes: list[str]) -> StoredProject:
+        """An older project file, saved in today's form the first time it is opened – the
+        original kept in the backups folder, and what changed kept to show (spec 8.2)."""
+        with self._lock:
+            backup = self._path(self.backups, found.id)
+            if not backup.exists():  # the file was just read, so it can be copied as it is
+                _atomic_write(backup, path.read_bytes())
+            upgraded = replace(found, upgrade_notes=tuple(notes))
+            self._write_stored(upgraded)
+            return upgraded
 
     # ------------------------------------------------------------ writing
 
-    def create(self, project: Project, history: dict[str, Any] | None = None) -> StoredProject:
+    def create(
+        self,
+        project: Project,
+        history: dict[str, Any] | None = None,
+        notes: tuple[str, ...] = (),
+    ) -> StoredProject:
         """A new project. `history` carries timestamps from an exported file; missing or
-        invalid ones become now."""
+        invalid ones become now. `notes` say what an upgrade of that file changed."""
         with self._lock:
             project_id = secrets.token_hex(6)
             while any(  # pragma: no cover – 1 in 2^48
@@ -289,12 +355,20 @@ class ProjectStore:
             history = history or {}
             stored = history.get("scenario_times")
             stored = stored if isinstance(stored, dict) else {}
-            self._write(
-                project_id,
-                project,
-                revision=1,
-                times=_times(history.get("times"), now),
-                scenario_times={s.name: _times(stored.get(s.name), now) for s in project.scenarios},
+            sets = history.get("set_times")
+            sets = sets if isinstance(sets, dict) else {}
+            self._write_stored(
+                StoredProject(
+                    id=project_id,
+                    project=project,
+                    revision=1,
+                    times=_times(history.get("times"), now),
+                    scenario_times={
+                        s.name: _times(stored.get(s.name), now) for s in project.scenarios
+                    },
+                    set_times={e.name: _times(sets.get(e.name), now) for e in project.expense_sets},
+                    upgrade_notes=notes,
+                )
             )
             return self.get(project_id)
 
@@ -328,13 +402,20 @@ class ProjectStore:
                 raise NotFound("there is no scenario of that name")
             if s.adoption is not None:
                 raise ReadOnly(f"{name} is already an adopted plan")
-            if validate_run(s):
+            if validate_run(project.runnable(s)):
                 raise Unusable(f"{name} has problems in its inputs – fix them before adopting it")
             order = max((x.adoption.sequence for x in project.scenarios if x.adoption), default=0)
             if order >= MAX_ADOPTIONS:
                 raise Unusable("the project has as many adopted plans as it can hold")
-            adoption = Adoption(adopted_on, note, order + 1)
-            adopted = replace(s, adoption=adoption)
+            # it keeps the project's facts and expenses as they are now, and where they came from
+            adoption = Adoption(
+                adopted_on,
+                note,
+                order + 1,
+                expenses_from=project.expenses_from,
+                expenses_edited=project.expenses_edited,
+            )
+            adopted = replace(s, facts=project.facts, adoption=adoption)
             scenarios = tuple(adopted if x is s else x for x in project.scenarios)
             return self._replace(current, replace(project, scenarios=scenarios))
 
@@ -347,34 +428,45 @@ class ProjectStore:
             plan = current_adoption(project.scenarios)
             if plan is None:
                 raise NotFound("the project has no adopted plan")
-            back = replace(plan, adoption=None)
+            # the project's facts again, its dues carried on to their start year (spec 5)
+            assert plan.facts is not None  # an adopted plan keeps its own
+            back = replace(
+                rebase_dues(plan, plan.facts, project.facts.start_year), facts=None, adoption=None
+            )
             scenarios = tuple(back if x is plan else x for x in project.scenarios)
             return self._replace(current, replace(project, scenarios=scenarios))
+
+    def dismiss_notes(self, project_id: str, base_revision: int) -> StoredProject:
+        """The upgrade notes have been read – they are not shown again."""
+        with self._lock:
+            current = self._current(project_id, base_revision)
+            self._write_stored(replace(current, revision=current.revision + 1, upgrade_notes=()))
+            return self.get(project_id)
 
     def _replace(self, current: StoredProject, project: Project) -> StoredProject:
         """Write `project` over `current` – the caller holds the lock and has checked it."""
         now = _now()
-        before = {s.name: s for s in current.project.scenarios}
-        after = {s.name for s in project.scenarios}
-        gone = [n for n in before if n not in after]
-        new = [s.name for s in project.scenarios if s.name not in before]
-        # one name swapped for another in a save is a rename – it keeps its history
-        renamed = {new[0]: gone[0]} if len(gone) == 1 and len(new) == 1 else {}
-        scenario_times = {}
-        for s in project.scenarios:
-            was = renamed.get(s.name, s.name)
-            old = current.scenario_times.get(was)
-            if old is None:  # new
-                scenario_times[s.name] = {"created": now, "modified": now}
-            else:
-                changed = before[was] != s
-                scenario_times[s.name] = {**old, "modified": now} if changed else old
-        self._write(
-            current.id,
-            project,
-            revision=current.revision + 1,
-            times={**current.times, "modified": now},
-            scenario_times=scenario_times,
+        scenario_times = _kept_times(
+            {s.name: s for s in current.project.scenarios},
+            [(s.name, s) for s in project.scenarios],
+            current.scenario_times,
+            now,
+        )
+        set_times = _kept_times(
+            {e.name: e for e in current.project.expense_sets},
+            [(e.name, e) for e in project.expense_sets],
+            current.set_times,
+            now,
+        )
+        self._write_stored(
+            replace(
+                current,
+                project=project,
+                revision=current.revision + 1,
+                times={**current.times, "modified": now},
+                scenario_times=scenario_times,
+                set_times=set_times,
+            )
         )
         return self.get(current.id)
 
@@ -387,26 +479,23 @@ class ProjectStore:
             self.trash.mkdir(mode=0o700, parents=True, exist_ok=True)
             try:
                 os.replace(path, self._path(self.trash, project_id))
+                backup = self._path(self.backups, project_id)
+                if backup.is_file():  # kept until the project is deleted, then with it
+                    os.replace(backup, self.trash / f"{project_id}.before-upgrade.json")
             except OSError:
                 raise StoreError(
                     "the project could not be deleted – the data folder is busy"
                 ) from None
 
-    def _write(
-        self,
-        project_id: str,
-        project: Project,
-        *,
-        revision: int,
-        times: Times,
-        scenario_times: dict[str, Times],
-    ) -> None:
+    def _write_stored(self, stored: StoredProject) -> None:
         payload = {
-            **project_to_dict(project),
-            "id": project_id,
-            "revision": revision,
-            "times": times,
-            "scenario_times": scenario_times,
+            **project_to_dict(stored.project),
+            "id": stored.id,
+            "revision": stored.revision,
+            "times": stored.times,
+            "scenario_times": stored.scenario_times,
+            "set_times": stored.set_times,
+            "upgrade_notes": list(stored.upgrade_notes),
         }
         data = _dump(payload)
         if len(data) > MAX_PROJECT_BYTES:  # it could never be opened again
@@ -414,7 +503,7 @@ class ProjectStore:
                 "the project would be larger than 5 MB – too large to save; remove some "
                 "scenarios or expense lines first"
             )
-        _atomic_write(self._path(self.projects, project_id), data)
+        _atomic_write(self._path(self.projects, stored.id), data)
 
     # ------------------------------------------------------------ export and import
 
@@ -428,14 +517,15 @@ class ProjectStore:
                 **project_to_dict(stored.project),
                 "times": stored.times,
                 "scenario_times": stored.scenario_times,
+                "set_times": stored.set_times,
             }
         )
 
     def import_bytes(self, data: bytes) -> StoredProject:
         """A new project from a project file, keeping its valid timestamps. The file's own id
         is never used."""
-        project, raw = parse_project_file(data)
-        return self.create(project, history=raw)
+        project, raw, notes = parse_project_file(data)
+        return self.create(project, history=raw, notes=tuple(notes))
 
     # ------------------------------------------------------------ first run
 

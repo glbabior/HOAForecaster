@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import zipfile
+from dataclasses import replace
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -20,7 +21,7 @@ import openpyxl
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from hoa_engine.model import LIMITS, Project, ProjectFormatError, project_from_dict
+from hoa_engine.model import LIMITS, Project, ProjectFormatError, read_project
 from hoa_engine.validate import MAX_YEARS, MIN_YEARS, validate_run
 from hoa_workbook.layout import (
     ADOPTED_ON_LABEL,
@@ -602,10 +603,21 @@ def read_workbook(source: Path | bytes) -> Project:
     if not scenarios:
         raise WorkbookFormatError("the workbook has no scenario sheets")
     try:
-        project = project_from_dict({**text, "schema_version": 3, "scenarios": scenarios})
+        # each sheet carries the facts its scenario runs on – read as a schema 3 project, whose
+        # upgrade gives the project's facts back to the project (spec 8.2)
+        project, _ = read_project(
+            {**text, "schema_version": 3, "scenarios": scenarios}, report=False
+        )
     except ProjectFormatError as e:
         raise WorkbookFormatError(str(e)) from None
-    problems = [f"{s.name} – {p}" for s in project.scenarios for p in validate_run(s)]
+    # a workbook holds no saved expense sets, so the expenses come back from none (spec 7.6)
+    plain = tuple(
+        s if s.adoption is None else replace(s, adoption=replace(s.adoption, expenses_from=None))
+        for s in project.scenarios
+    )
+    project = replace(project, scenarios=plain, expense_sets=(), expenses_from=None)
+    runnable = project.runnable_scenarios()
+    problems = [f"{s.name} – {p}" for s in runnable for p in validate_run(s)]
     if problems:
         raise WorkbookFormatError("; ".join(problems))
     return project

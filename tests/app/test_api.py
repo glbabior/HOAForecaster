@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -148,7 +149,7 @@ def test_project_lifecycle(client: TestClient, demo_id: str) -> None:
     [
         ({}, 422, "a new project needs a name"),
         ({"project": None}, 422, "the project is missing"),
-        ({"project": {"name": "x", "scenarios": [{"name": "y"}]}}, 422, "scenario is missing"),
+        ({"project": {"name": "x", "scenarios": [{"name": "y"}]}}, 422, "missing 'facts'"),
     ],
 )
 def test_bad_projects_are_refused(client: TestClient, body: Any, status: int, message: str) -> None:
@@ -187,26 +188,50 @@ def test_project_results_cover_every_scenario(client: TestClient, demo_id: str) 
 def test_results_report_each_scenario_s_problems_instead_of_failing(client: TestClient) -> None:
     raw = json.loads(json.dumps(DEMO_RAW))
     raw["scenarios"][0]["dues"]["overrides"] = {"2099": "5"}  # outside the horizon
-    raw["scenarios"][1]["facts"]["units"] = 0
+    raw["scenarios"][1]["dues"]["increases"] = []  # no increase for its years
     created = client.post("/api/projects", json={"project": raw}).json()
     body = client.get(f"/api/projects/{created['id']}/results").json()["scenarios"]
     first, second, third = (s["name"] for s in raw["scenarios"][:3])
     assert "outside" in body[first]["problems"][0]
-    assert body[second]["problems"] == ["there must be at least one unit"]
+    assert body[second]["problems"]
     assert "result" in body[third]  # one scenario's problems are its own
+    # the project's facts are every scenario's – a problem there is every one's, but an
+    # adopted plan keeps its own
+    raw["facts"]["units"] = 0
+    created = client.post("/api/projects", json={"project": raw}).json()
+    body = client.get(f"/api/projects/{created['id']}/results").json()["scenarios"]
+    adopted = {s["name"] for s in raw["scenarios"] if s["adoption"]}
+    for name, outcome in body.items():
+        assert ("result" in outcome) == (name in adopted), name
 
 
 def test_live_run_for_the_editors(client: TestClient) -> None:
-    scenario = DEMO_RAW["scenarios"][0]
-    result = client.post("/api/run", json={"scenario": scenario}).json()
-    facts = DEMO.scenarios[0].facts
-    assert len(result["years"]) == facts.end_year - facts.start_year + 1
+    scenario, facts = DEMO_RAW["scenarios"][0], DEMO_RAW["facts"]
+    result = client.post("/api/run", json={"scenario": scenario, "facts": facts}).json()
+    assert len(result["years"]) == DEMO.facts.end_year - DEMO.facts.start_year + 1
 
-    bad = {**scenario, "facts": {**scenario["facts"], "units": 0}}
-    response = client.post("/api/run", json={"scenario": bad})
+    bad = {**facts, "units": 0}  # the facts as they are being edited
+    response = client.post("/api/run", json={"scenario": scenario, "facts": bad})
     assert response.status_code == 422 and "at least one unit" in response.json()["problems"][0]
+    alone = client.post("/api/run", json={"scenario": scenario})  # no facts to run on
+    assert alone.status_code == 422 and "no facts to run on" in alone.json()["problems"][0]
+    broken = client.post("/api/run", json={"scenario": scenario, "facts": {"units": 1}})
+    assert broken.status_code == 422 and "missing" in broken.json()["message"]
     assert client.post("/api/run", json={"scenario": {}}).status_code == 422
     assert client.post("/api/run", json={}).status_code == 422
+
+
+def test_live_results_for_every_scenario_as_the_projects_facts_are_edited(
+    client: TestClient,
+) -> None:
+    raw = json.loads(json.dumps(DEMO_RAW))
+    raw["facts"]["interest_rate"] = "0.05"
+    body = client.post("/api/run-project", json={"project": raw}).json()["scenarios"]
+    assert set(body) == {s.name for s in DEMO.scenarios}
+    before = client.post("/api/run-project", json={"project": DEMO_RAW}).json()["scenarios"]
+    for s in DEMO.scenarios:  # a richer rate changes every plan but an adopted one
+        assert (body[s.name] == before[s.name]) == (s.adoption is not None), s.name
+    assert client.post("/api/run-project", json={}).status_code == 422
 
 
 def test_removed_addresses_are_gone(client: TestClient, demo_id: str) -> None:
@@ -257,11 +282,11 @@ def test_workbook_export_carries_the_chosen_scenarios_and_a_shared_scale(
 def test_workbook_export_refuses_a_chosen_scenario_with_problems(client: TestClient) -> None:
     raw = json.loads(json.dumps(DEMO_RAW))
     raw["scenarios"][0]["dues"]["overrides"] = {"2099": "5"}
-    raw["scenarios"][1]["facts"]["units"] = 0
+    raw["scenarios"][1]["dues"]["increases"] = []
     created = client.post("/api/projects", json={"project": raw}).json()
     url = f"/api/projects/{created['id']}/export.xlsx"
     first, second, third = (s["name"] for s in raw["scenarios"][:3])
-    for name, problem in ((first, "outside"), (second, "at least one unit")):
+    for name, problem in ((first, "outside"), (second, "increase")):
         response = client.get(url, params={"scenario": name})
         assert response.status_code == 422
         assert name in response.json()["message"] and problem in response.json()["message"]
@@ -272,7 +297,14 @@ def test_workbook_export_refuses_a_chosen_scenario_with_problems(client: TestCli
 def test_workbook_import(client: TestClient) -> None:
     response = client.post("/api/import/workbook", content=export_workbook(DEMO))
     assert response.status_code == 201
-    assert project_from_dict(response.json()["project"]) == DEMO  # equal values, not text
+    # equal values, not text – a workbook holds no saved expense sets (spec 7.6)
+    plain = tuple(
+        s if s.adoption is None else replace(s, adoption=replace(s.adoption, expenses_from=None))
+        for s in DEMO.scenarios
+    )
+    assert project_from_dict(response.json()["project"]) == replace(
+        DEMO, scenarios=plain, expense_sets=(), expenses_from=None
+    )
     bad = client.post("/api/import/workbook", content=b"not a zip")
     assert bad.status_code == 422 and "not an Excel workbook" in bad.json()["message"]
 
@@ -346,10 +378,11 @@ def test_a_blank_project_from_the_specs_defaults(client: TestClient) -> None:
     created = client.post("/api/projects", json={"name": "  New building  "})
     assert created.status_code == 201
     project = created.json()["project"]
-    assert project["name"] == "New building" and project["schema_version"] == 3
+    assert project["name"] == "New building" and project["schema_version"] == 4
     assert "baseline" not in project
     (scenario,) = project["scenarios"]
-    f = scenario["facts"]
+    assert scenario["facts"] is None  # it uses the project's
+    f = project["facts"]
     assert f["end_year"] - f["start_year"] == 13
     assert (f["expense_inflation"], f["interest_rate"], f["target"]) == ("0.03", "0.02", "0.7")
     assert set(f["ffb"]) == {str(y) for y in range(f["start_year"], f["end_year"] + 2)}
@@ -365,14 +398,18 @@ def test_a_blank_scenario_from_the_specs_defaults(client: TestClient) -> None:
     assert blank.status_code == 200
     scenario = blank.json()
     assert scenario["name"] == "Option C" and scenario["adoption"] is None
-    f = scenario["facts"]
-    assert f["end_year"] - f["start_year"] == 13 and f["expense_lines"] == []
+    assert scenario["facts"] is None  # a funding plan on the project's facts
     assert scenario["dues"] == {
         "mode": "rate",
         "first_value": "0",
         "increases": [{"first_year": None, "last_year": None, "rate": "0.03"}],
         "overrides": {},
     }
+    # its dues start at the project's current dues when the screen says what they are
+    at = client.get("/api/blank-scenario", params={"name": "D", "dues": "560"}).json()
+    assert at["dues"]["first_value"] == "560"
+    refused = client.get("/api/blank-scenario", params={"name": "D", "dues": "lots"})
+    assert refused.status_code == 422 and "should be a number" in refused.json()["message"]
     for name in ("", "   ", "x" * 201, "bell\a", "del\x7f"):
         refused = client.get("/api/blank-scenario", params={"name": name})
         assert refused.status_code == 422, name
@@ -380,9 +417,10 @@ def test_a_blank_scenario_from_the_specs_defaults(client: TestClient) -> None:
 
 
 def test_a_run_carries_the_fully_funded_balance_it_used(client: TestClient) -> None:
-    worked = next(s for s in DEMO_RAW["scenarios"] if s["facts"]["ffb_from_lines"])
-    result = client.post("/api/run", json={"scenario": worked}).json()
-    f = worked["facts"]
+    facts = {**DEMO_RAW["facts"], "ffb_from_lines": True}
+    worked = DEMO_RAW["scenarios"][0]
+    result = client.post("/api/run", json={"scenario": worked, "facts": facts}).json()
+    f = facts
     assert list(result["ffb"]) == [str(y) for y in range(f["start_year"], f["end_year"] + 2)]
     assert all(isinstance(v, str) and float(v) > 0 for v in result["ffb"].values())
     for year in result["years"]:  # each year's percent funded is against next year's figure
@@ -462,8 +500,9 @@ def test_an_adopted_plan_keeps_its_inputs_and_figures(client: TestClient, demo_i
     project = client.post(f"/api/projects/{demo_id}/adopt", json=body).json()["project"]
     plan = next(s for s in project["scenarios"] if s["name"] == "Dues only")
     original = next(s for s in DEMO_RAW["scenarios"] if s["name"] == "Dues only")
-    assert set(plan["adoption"]) == {"date", "note", "sequence"}  # no frozen copy of anything
-    assert plan["facts"] == original["facts"]
+    # it keeps the project's facts as they were, and the set they came from
+    assert plan["adoption"]["expenses_from"] == DEMO_RAW["expenses_from"]
+    assert original["facts"] is None and plan["facts"] == DEMO_RAW["facts"]
     after = client.get(f"/api/projects/{demo_id}/results").json()["scenarios"]["Dues only"]
     assert after == before
     # its facts cannot be edited by a save
@@ -540,3 +579,15 @@ def test_a_stop_key_comes_with_what_stopping_does(store: ProjectStore) -> None:
         create_app(store, TOKEN, None, stop_key="stop-key")
     with pytest.raises(ValueError, match="together"):
         create_app(store, TOKEN, None, on_stop=lambda: None)
+
+
+def test_an_upgraded_projects_notes_are_shown_until_dismissed(client: TestClient) -> None:
+    older = Path(__file__).resolve().parents[1] / "engine" / "fixtures" / "demo_schema3.json"
+    imported = client.post("/api/import/project", content=older.read_bytes()).json()
+    assert len(imported["upgrade_notes"]) == 2
+    assert set(imported["set_times"]) == {e["name"] for e in imported["project"]["expense_sets"]}
+    url = f"/api/projects/{imported['id']}/dismiss-notes"
+    read = client.post(url, json={"revision": imported["revision"]}).json()
+    assert read["upgrade_notes"] == []
+    assert client.post(url, json={"revision": imported["revision"]}).status_code == 409
+    assert client.post(url, json={}).status_code == 422

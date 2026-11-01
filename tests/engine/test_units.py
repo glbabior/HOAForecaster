@@ -36,7 +36,7 @@ from hoa_engine import (
 )
 from hoa_engine.dues import resolve_dues
 from hoa_engine.model import current_adoption
-from hoa_engine.upgrade import NO_SCENARIOS_NAME
+from hoa_engine.upgrade import NO_SCENARIOS_NAME, upgrade_v1_baseline, upgrade_v2_project
 from hoa_engine.validate import validate_facts, validate_run, validate_scenario
 
 D = Decimal
@@ -278,11 +278,11 @@ def test_validate_scenario_reports_each_rule() -> None:
 
 def test_demo_project_round_trips_through_json() -> None:
     raw = json.loads(DEMO.read_text(encoding="utf-8"))
-    assert raw["schema_version"] == 3
+    assert raw["schema_version"] == 4
     project = project_from_dict(raw)
     assert project_to_dict(project) == raw
+    assert facts_from_dict(facts_to_dict(project.facts)) == project.facts
     for s in project.scenarios:
-        assert facts_from_dict(facts_to_dict(s.facts)) == s.facts
         assert scenario_from_dict(scenario_to_dict(s)) == s
 
 
@@ -358,8 +358,8 @@ def test_project_files_from_an_unknown_schema_version_are_refused() -> None:
     raw["schema_version"] = 99
     with pytest.raises(ProjectFormatError, match="schema version 99 is not supported"):
         project_from_dict(raw)
-    raw["schema_version"] = 3
-    assert project_to_dict(project_from_dict(raw))["schema_version"] == 3
+    raw["schema_version"] = 4
+    assert project_to_dict(project_from_dict(raw))["schema_version"] == 4
 
 
 @pytest.mark.parametrize(
@@ -520,8 +520,9 @@ def _version_1(operating: str) -> dict[str, Any]:
 
 
 def test_a_version_1_project_opens_with_the_same_figures() -> None:
-    project = project_from_dict(_version_1("12000"))
-    b = project.scenarios[0].facts
+    (s,) = _as_schema_3(_version_1("12000"))
+    b = s.facts
+    assert b is not None
     operating = b.expense_lines[0]
     assert (operating.frequency, operating.year, operating.inflation) == (
         Frequency.YEARLY,
@@ -530,16 +531,17 @@ def test_a_version_1_project_opens_with_the_same_figures() -> None:
     )
     assert (operating.amount, operating.source, b.sources) == (D(12000), "Budget", {})
     assert [line.id for line in b.expense_lines] == ["operating", "line-1", "line-2"]
-    upgraded, expected = run(project.scenarios[0]), on(baseline(), project.scenarios[0])
+    upgraded, expected = run(s), on(baseline(), s)
     assert upgraded.summary == expected.summary
     assert [(y.operating, y.expenses, y.ending_balance) for y in upgraded.years] == [
         (y.operating, y.expenses, y.ending_balance) for y in expected.years
     ]
-    assert project_to_dict(project)["schema_version"] == 3
+    assert project_to_dict(project_from_dict(_version_1("12000")))["schema_version"] == 4
 
 
 def test_a_version_1_project_without_operating_costs_gets_no_operating_line() -> None:
-    b = project_from_dict(_version_1("0")).scenarios[0].facts
+    b = _as_schema_3(_version_1("0"))[0].facts
+    assert b is not None
     assert [line.frequency for line in b.expense_lines] == [Frequency.ONCE, Frequency.ONCE]
     assert b.sources == {}
 
@@ -599,11 +601,10 @@ def test_absurd_numbers_of_lines_are_refused() -> None:
     ]
 
 
-def test_a_scenario_without_facts_is_refused() -> None:
+def test_a_scenario_without_facts_uses_the_projects() -> None:
     raw = scenario_to_dict(rate("1", "0"))
     del raw["facts"]
-    with pytest.raises(ProjectFormatError, match="the scenario is missing 'facts'"):
-        scenario_from_dict(raw)
+    assert scenario_from_dict(raw).facts is None
 
 
 def test_unusable_facts_are_refused_in_plain_language() -> None:
@@ -627,7 +628,8 @@ def test_an_adopted_plan_runs_on_its_own_inputs() -> None:
 
 def test_adoptions_round_trip_and_the_latest_is_current() -> None:
     first, second = adopted(rate("1", "0"), 1), replace(adopted(rate("2", "0"), 2), name="T")
-    project = Project("P", (second, first, replace(rate("3", "0"), name="U")))
+    plain = replace(rate("3", "0"), name="U", facts=None)
+    project = Project("P", baseline(), (second, first, plain))
     again = project_from_dict(project_to_dict(project))
     assert again == project
     assert "baseline" not in project_to_dict(project)["scenarios"][0]["adoption"]
@@ -656,7 +658,7 @@ def test_unusable_adoptions_are_refused(change: object, message: str) -> None:
 def test_two_plans_cannot_share_an_adoption_order() -> None:
     plans = (adopted(rate("1", "0")), replace(adopted(rate("2", "0")), name="T"))
     with pytest.raises(ProjectFormatError, match="same adoption order"):
-        project_from_dict(project_to_dict(Project("P", plans)))
+        project_from_dict(project_to_dict(Project("P", baseline(), plans)))
 
 
 # ---------------------------------------------------------------- the schema 2 upgrade (8.2)
@@ -677,15 +679,20 @@ def _version_2(*scenarios: dict[str, Any], b: Facts | None = None) -> dict[str, 
     }
 
 
-def _upgraded(raw: dict[str, Any]) -> Project:
-    project = project_from_dict(raw)
-    assert project_to_dict(project)["schema_version"] == 3
-    return project
+def _as_schema_3(raw: dict[str, Any]) -> tuple[Scenario, ...]:
+    """A schema 1 or 2 project as the schema 3 scenarios it upgrades to – each with its own
+    facts, before the schema 4 upgrade gives them to the project."""
+    schema_2 = raw
+    if raw["schema_version"] == 1:
+        schema_2 = {**raw, "baseline": upgrade_v1_baseline(raw["baseline"])}
+    scenarios = tuple(scenario_from_dict(s) for s in upgrade_v2_project(schema_2)["scenarios"])
+    assert project_to_dict(project_from_dict(raw))["schema_version"] == 4  # and on to schema 4
+    return scenarios
 
 
 def test_a_version_2_scenario_receives_the_baseline_it_saw() -> None:
     plain = _plain(rate("200", "0"))
-    (s,) = _upgraded(_version_2(plain)).scenarios
+    (s,) = _as_schema_3(_version_2(plain))
     assert s.facts == baseline()
     assert (s.name, s.dues) == ("S", rate("200", "0").dues)
 
@@ -704,7 +711,7 @@ def test_a_version_2_scenario_gets_its_changes_applied() -> None:
         "ffb": {"2031": "100000"},
     }
     b = replace(baseline(), sources={"cushion": "Board"})
-    (s,) = _upgraded(_version_2(raw, b=b)).scenarios
+    (s,) = _as_schema_3(_version_2(raw, b=b))
     f = s.facts
     assert (f.interest_rate, f.max_dues_increase) == (D("0.05"), None)
     assert f.sources == {"cushion": "Board", "interest_rate": "Bank"}
@@ -720,15 +727,15 @@ def test_a_version_2_adopted_plan_keeps_its_frozen_baseline() -> None:
     raw["changes"] = {"values": {"units": 12}}  # already in the frozen copy – applying it again
     raw["adoption"] = {"date": "2026-11-03", "note": "Vote", "sequence": 1}
     raw["adoption"]["baseline"] = facts_to_dict(frozen)
-    (s,) = _upgraded(_version_2(raw, b=baseline(units=99))).scenarios
+    (s,) = _as_schema_3(_version_2(raw, b=baseline(units=99)))
     assert s.facts == frozen
     assert s.adoption == Adoption(date(2026, 11, 3), "Vote", 1)
 
 
 def test_a_version_2_project_without_scenarios_gets_one_at_current_dues() -> None:
-    project = _upgraded(_version_2())
+    project = project_from_dict(_version_2())
     assert (project.name, project.notes) == ("P", "N")
-    (s,) = project.scenarios
+    (s,) = _as_schema_3(_version_2())
     assert s.name == NO_SCENARIOS_NAME
     assert s.facts == baseline()
     assert (s.dues.mode, s.dues.first_value, s.dues.increases) == (
@@ -797,7 +804,8 @@ def test_a_version_2_file_cannot_grow_too_large_while_it_is_upgraded() -> None:
 
 def test_a_project_holds_at_most_200_scenarios() -> None:
     plain = scenario_to_dict(rate("200", "0"))
-    raw = project_to_dict(Project("P", ()))
+    raw = project_to_dict(Project("P", baseline()))
+    plain = {**plain, "facts": None}
     raw["scenarios"] = [{**plain, "name": f"S{i}"} for i in range(201)]
     with pytest.raises(ProjectFormatError, match="at most 200 scenarios"):
         project_from_dict(raw)
@@ -809,8 +817,14 @@ def test_the_schema_2_demo_upgrades_to_todays_demo() -> None:
     old = json.loads((Path(__file__).parent / "fixtures" / "demo_schema2.json").read_text("utf-8"))
     today = json.loads(DEMO.read_text(encoding="utf-8"))
     upgraded, now = project_from_dict(old), project_from_dict(today)
-    # today's demo has one scenario more – the worked-out Fully Funded Balance (spec 4.2)
-    assert upgraded == replace(now, scenarios=now.scenarios[: len(upgraded.scenarios)])
+    # today's demo has one scenario more – the worked-out Fully Funded Balance (spec 4.2) – and
+    # the expense set made from it
+    worked = "Expenses from Worked-out Fully Funded Balance"
+    assert upgraded == replace(
+        now,
+        scenarios=now.scenarios[: len(upgraded.scenarios)],
+        expense_sets=tuple(e for e in now.expense_sets if e.name != worked),
+    )
 
 
 def test_version_2_lines_of_a_scenarios_own_never_share_an_id_with_a_different_line() -> None:
@@ -819,7 +833,7 @@ def test_version_2_lines_of_a_scenarios_own_never_share_an_id_with_a_different_l
         return {**_plain(rate("200", "0")), "changes": {"expense_lines": {"own-1": line}}}
 
     a, b, c = own("1"), {**own("2"), "name": "T"}, {**own("1"), "name": "U"}
-    first, second, third = _upgraded(_version_2(a, b, c)).scenarios
+    first, second, third = _as_schema_3(_version_2(a, b, c))
     ids = [[line.id for line in s.facts.expense_lines] for s in (first, second, third)]
     assert ids[0][-1] == "own-1" and ids[2][-1] == "own-1"  # the same line, copied – one id
     assert ids[1][-1] not in ("own-1", *ids[1][:-1])  # a different line – an id of its own
@@ -836,7 +850,7 @@ def test_a_renamed_version_2_line_skips_ids_already_taken() -> None:
 
     first = own(**{"own-1": "1", "line-1": "5"})
     second = {**own(**{"own-1": "2"}), "name": "T"}
-    _, renamed = _upgraded(_version_2(first, second)).scenarios
+    _, renamed = _as_schema_3(_version_2(first, second))
     assert renamed.facts.expense_lines[-1].id == "line-2"
 
 

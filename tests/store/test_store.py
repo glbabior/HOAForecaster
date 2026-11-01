@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from hoa_engine import project_from_dict, run
+from hoa_engine.dues import resolve_dues
 from hoa_engine.model import current_adoption
 from hoa_store import store as store_module
 from hoa_store.store import (
@@ -79,9 +80,10 @@ def test_the_file_is_readable_json_with_decimal_strings(store: ProjectStore) -> 
     saved = store.create(DEMO)
     raw = json.loads(_file(store, saved.id).read_text(encoding="utf-8"))
     assert raw["name"] == DEMO.name
-    assert raw["schema_version"] == 3
+    assert raw["schema_version"] == 4
     assert "baseline" not in raw and "baseline_times" not in raw
-    assert isinstance(raw["scenarios"][0]["facts"]["starting_balance"], str)
+    assert isinstance(raw["facts"]["starting_balance"], str)
+    assert raw["scenarios"][0]["facts"] is None  # it uses the project's
 
 
 # ---------------------------------------------------------------- saving
@@ -108,15 +110,41 @@ def test_saving_stamps_only_what_changed(store: ProjectStore, clock: list[str]) 
     assert again.scenario_times["New"] == {"created": saved_at, "modified": saved_at}
 
 
-def test_a_change_to_one_scenario_s_facts_stamps_only_that_scenario(
+def test_a_change_to_one_scenario_stamps_only_that_scenario(
     store: ProjectStore, clock: list[str]
 ) -> None:
     saved = store.create(DEMO)
     first, *rest = DEMO.scenarios
-    edited = replace(first, facts=replace(first.facts, units=30))
+    edited = replace(first, description="Changed")
     again = store.save(saved.id, replace(DEMO, scenarios=(edited, *rest)), base_revision=1)
     assert again.scenario_times[first.name]["modified"] == again.times["modified"]
     assert all(again.scenario_times[s.name] == saved.scenario_times[s.name] for s in rest)
+
+
+def test_a_change_to_the_projects_facts_stamps_no_scenario(
+    store: ProjectStore, clock: list[str]
+) -> None:
+    saved = store.create(DEMO)
+    again = store.save(saved.id, replace(DEMO, facts=replace(DEMO.facts, units=30)), 1)
+    assert again.times["modified"] != saved.times["modified"]
+    assert again.scenario_times == saved.scenario_times
+
+
+def test_expense_sets_keep_their_times_like_scenarios(
+    store: ProjectStore, clock: list[str]
+) -> None:
+    saved = store.create(DEMO)
+    first, second, *rest = DEMO.expense_sets
+    assert set(saved.set_times) == {e.name for e in DEMO.expense_sets}
+    renamed = replace(first, name="Renamed")
+    edited = replace(second, expense_base_year=second.expense_base_year - 1)
+    again = store.save(
+        saved.id, replace(DEMO, expense_sets=(renamed, edited, *rest), expenses_from=None), 1
+    )
+    # a rename keeps its history
+    assert again.set_times["Renamed"]["created"] == saved.set_times[first.name]["created"]
+    assert again.set_times[second.name]["modified"] == again.times["modified"]
+    assert all(again.set_times[e.name] == saved.set_times[e.name] for e in rest)
 
 
 def test_a_renamed_scenario_keeps_its_history(store: ProjectStore, clock: list[str]) -> None:
@@ -267,7 +295,7 @@ def test_a_missing_project(store: ProjectStore) -> None:
     [
         ("{broken", "the file is damaged"),
         pytest.param("[" * 100_000 + "]" * 100_000, "the file is damaged", id="deeply-nested"),
-        ('{"name": "x", "scenarios": [{"name": "y"}]}', "the scenario is missing"),
+        ('{"name": "x", "scenarios": [{"name": "y"}]}', "the project is missing 'facts'"),
     ],
 )
 def test_a_damaged_saved_file_gets_a_plain_message(
@@ -344,7 +372,7 @@ def test_export_then_import_keeps_the_history_but_not_the_identity(
         pytest.param(b"[" * 200_000 + b"]" * 200_000, "not a readable", id="deeply-nested"),
         (b'{"name": "x", "n": NaN}', "not a readable project file"),
         (b"[]", "not a project file"),
-        (b'{"name": "x", "scenarios": [{"name": "y"}]}', "the scenario is missing"),
+        (b'{"name": "x", "scenarios": [{"name": "y"}]}', "the project is missing 'facts'"),
         (b'{"name": "x", "schema_version": 2}', "missing 'baseline'"),
     ],
 )
@@ -416,7 +444,7 @@ def test_adopting_makes_the_plan_read_only_with_its_inputs_as_they_were(
 ) -> None:
     created = store.create(DEMO)
     before = next(s for s in DEMO.scenarios if s.name == "Dues only")
-    pid, _ = _adopted(store, created)
+    pid, revision = _adopted(store, created)
     stored = store.get(pid)
     plan = next(s for s in stored.project.scenarios if s.name == "Dues only")
     assert plan.adoption is not None
@@ -425,8 +453,20 @@ def test_adopting_makes_the_plan_read_only_with_its_inputs_as_they_were(
         "Vote",
         2,  # the demo already has an adopted plan
     )
-    assert replace(plan, adoption=None) == before  # nothing else about it changed
-    assert run(plan).summary == run(before).summary
+    # it keeps the project's facts as they were, and the set they came from
+    assert plan.facts == DEMO.facts
+    assert (plan.adoption.expenses_from, plan.adoption.expenses_edited) == (
+        DEMO.expenses_from,
+        DEMO.expenses_edited,
+    )
+    assert replace(plan, adoption=None, facts=None) == before  # nothing else about it changed
+    assert run(plan).summary == run(DEMO.runnable(before)).summary
+    # a later change to the project's facts leaves it as it was
+    changed = store.save(
+        pid, replace(stored.project, facts=replace(DEMO.facts, units=99)), revision
+    )
+    kept = next(s for s in changed.project.scenarios if s.name == "Dues only")
+    assert kept.facts == DEMO.facts
 
 
 @pytest.mark.parametrize(
@@ -490,15 +530,10 @@ def test_adoption_refuses_what_it_cannot_adopt(store: ProjectStore) -> None:
     with pytest.raises(NotFound, match="no scenario of that name"):
         store.adopt(pid, "Nobody", date(2026, 1, 1), "", revision)
     project = store.get(pid).project
-    other = project.scenarios[1]
-    broken = replace(other, facts=replace(other.facts, ffb={}))
-    revision = store.save(
-        pid,
-        replace(project, scenarios=(project.scenarios[0], broken, *project.scenarios[2:])),
-        revision,
-    ).revision
+    broken = replace(project, facts=replace(project.facts, ffb={}))
+    revision = store.save(pid, broken, revision).revision
     with pytest.raises(Unusable, match="has problems"):
-        store.adopt(pid, broken.name, date(2026, 1, 1), "", revision)
+        store.adopt(pid, project.scenarios[1].name, date(2026, 1, 1), "", revision)
 
 
 def test_un_adopting_needs_an_adopted_plan(store: ProjectStore) -> None:
@@ -524,3 +559,77 @@ def test_adoption_stops_at_the_most_adoptions_a_project_can_hold(
     monkeypatch.setattr(store_module, "MAX_ADOPTIONS", 1)
     with pytest.raises(Unusable, match="as many adopted plans as it can hold"):
         store.adopt(created.id, "Dues only", date(2026, 1, 1), "", created.revision)
+
+
+def test_un_adopting_drops_the_frozen_facts_and_carries_the_dues_on(store: ProjectStore) -> None:
+    pid, revision = _adopted(store)
+    project = store.get(pid).project
+    # the project's years move on two years after the plan was adopted
+    later = replace(project.facts, start_year=project.facts.start_year + 2)
+    revision = store.save(pid, replace(project, facts=later), revision).revision
+    plan = next(s for s in store.get(pid).project.scenarios if s.name == "Dues only")
+    assert plan.facts is not None
+    charged = resolve_dues(plan, range(plan.facts.start_year, later.start_year + 1))
+    back = next(s for s in store.unadopt(pid, revision).project.scenarios if s.name == "Dues only")
+    assert (back.facts, back.adoption) == (None, None)
+    assert back.dues.first_value == charged[later.start_year]
+
+
+# ---------------------------------------------------------------- the schema 3 upgrade (8.2)
+
+SCHEMA_3 = Path(__file__).resolve().parents[1] / "engine" / "fixtures" / "demo_schema3.json"
+
+
+def _schema_3_project(store: ProjectStore) -> str:
+    """The demo as an older version saved it – a schema 3 file in the data folder."""
+    saved = store.create(DEMO)
+    original = json.loads(SCHEMA_3.read_text(encoding="utf-8"))
+    _file(store, saved.id).write_text(
+        json.dumps({**original, "id": saved.id, "revision": 7}), encoding="utf-8"
+    )
+    return saved.id
+
+
+def test_an_older_file_is_upgraded_once_keeping_the_original_and_what_changed(
+    store: ProjectStore,
+) -> None:
+    pid = _schema_3_project(store)
+    before = _file(store, pid).read_bytes()
+    opened = store.get(pid)
+    assert opened.revision == 7  # the same project, in today's form
+    assert [n.split(" – ")[0] for n in opened.upgrade_notes] == [
+        "Insurance shock",
+        "Worked-out Fully Funded Balance",
+    ]
+    assert json.loads(_file(store, pid).read_text(encoding="utf-8"))["schema_version"] == 4
+    backup = store.root / "backups" / f"{pid}.json"
+    assert backup.read_bytes() == before
+    assert store.get(pid).upgrade_notes == opened.upgrade_notes  # shown until read
+    read = store.dismiss_notes(pid, 7)
+    assert (read.upgrade_notes, read.revision) == ((), 8)
+    assert store.get(pid).upgrade_notes == ()
+    store.delete(pid)  # the backup goes to the trash with it
+    assert not backup.exists()
+    assert (store.trash / f"{pid}.before-upgrade.json").read_bytes() == before
+
+
+def test_a_backup_is_never_overwritten_and_damaged_notes_are_none(store: ProjectStore) -> None:
+    pid = _schema_3_project(store)
+    backup = store.root / "backups" / f"{pid}.json"
+    backup.parent.mkdir(parents=True)
+    backup.write_text("the first backup", encoding="utf-8")
+    store.get(pid)
+    assert backup.read_text(encoding="utf-8") == "the first backup"
+    for damaged in ("not a list", ["x" * 3000], [1], ["n"] * 201):
+        _edit_file(store, pid, upgrade_notes=damaged)
+        assert store.get(pid).upgrade_notes == ()
+
+
+def test_an_imported_older_project_file_says_what_its_upgrade_changed(
+    store: ProjectStore,
+) -> None:
+    imported = store.import_bytes(SCHEMA_3.read_bytes())
+    assert len(imported.upgrade_notes) == 2
+    exported = json.loads(store.export_bytes(imported.id))
+    assert exported["schema_version"] == 4 and "upgrade_notes" not in exported
+    assert set(exported["set_times"]) == {e.name for e in imported.project.expense_sets}
