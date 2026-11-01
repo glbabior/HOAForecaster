@@ -120,7 +120,7 @@ As of October 31, 2026 – requirements v1.9 are built: v1.7's worked-out Fully 
 Next, roughly in this order –
 
 1. **Look and feel** – Gregory finds the plain black-and-white screens "not great"; a colour, type and layout pass across every screen.
-2. **Documentation** – `docs/engine.md`, `docs/workbook.md`, `CHANGELOG.md` and `docs/user-guide.md` need refreshing for v1.6. Required before calling anything a release (section 10.2), with a security review.
+2. **Documentation** – brought up to date on November 1, 2026 (v1.9, the new look and Compare's extra-cost labels): README, user guide, engine.md, workbook.md and the CHANGELOG match the code. Refresh with each feature; required before calling anything a release (section 10.2), with a security review.
 3. **Choosing a data set in the app** – open either the demo or the real data held in the private `HOAForecaster-data` repository from the screens, not only through `HOA_DATA_DIR` before launch. The app starts on the data set chosen last time, and can switch to another one, or to the demo, whenever wanted.
 4. **Trash** – list and restore deleted projects in the app (and a way to empty it).
 5. **Section 7.1a** – CSV import of a scenario's expense and Fully Funded Balance tables, with one server-side parser for CSV and pasted text; its columns must carry a line's frequency, years, interval and own rate.

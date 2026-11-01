@@ -1,6 +1,6 @@
 # HOAForecaster
 
-A local app for homeowners association boards. Enter a building's reserve facts – balance, expenses, the reserve study's Fully Funded Balance – into a funding plan with its dues and special assessments, copy it into other plans that differ in any input, and see each plan's year-by-year reserve balance, percent funded and cost per owner. Every edit saves itself. When the board decides, adopt a plan – it becomes read-only – and export the same Excel workbook a board already knows, with live formulas.
+A local app that shows a homeowners association board where its reserve fund is heading. You enter a building's reserve facts – balance, expenses, the reserve study's Fully Funded Balance – into a funding plan with its dues and special assessments, copy it into other plans that differ in any input, and compare each plan's year-by-year reserve balance, percent funded and cost per owner. When the board decides, it adopts a plan, which becomes read-only, and exports the Excel workbook it already knows, with live formulas.
 
 It runs on your own computer only – nothing is sent anywhere. See [the user guide](docs/user-guide.md), [the requirements](HOAForecaster_REQUIREMENTS.md), [how the figures are worked out](docs/engine.md) and [the exported workbook](docs/workbook.md).
 
