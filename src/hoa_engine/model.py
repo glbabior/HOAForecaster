@@ -338,14 +338,14 @@ def _bool(value: Any) -> bool:
     return value
 
 
-def _reading(kind: str) -> Callable[[Callable[[dict[str, Any]], T]], Callable[[dict[str, Any]], T]]:
+def _reading(kind: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Turn any failure while reading a project file into one plain-language error."""
 
-    def wrap(read: Callable[[dict[str, Any]], T]) -> Callable[[dict[str, Any]], T]:
+    def wrap(read: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(read)
-        def reader(d: dict[str, Any]) -> T:
+        def reader(d: dict[str, Any], *args: Any) -> T:
             try:
-                return read(d)
+                return read(d, *args)
             except KeyError as e:
                 raise ProjectFormatError(f"the {kind} is missing {e.args[0]!r}") from None
             except (TypeError, ValueError, AttributeError) as e:
@@ -688,11 +688,11 @@ def read_project(d: dict[str, Any], report: bool = True) -> tuple[Project, list[
     """A project file of any schema, in today's form – with, for an older file, what the upgrade
     changed (spec 8.2), in plain sentences (none when `report` is false – working out whether
     figures change runs the engine)."""
-    return _read_project({**d, "_report": report})
+    return _read_project(d, report)
 
 
 @_reading("project")
-def _read_project(d: dict[str, Any]) -> tuple[Project, list[str]]:
+def _read_project(d: dict[str, Any], report: bool) -> tuple[Project, list[str]]:
     from hoa_engine.upgrade import upgrade_v1_baseline, upgrade_v2_project, upgrade_v3_project
 
     version = _int(d.get("schema_version", SCHEMA_VERSION))
@@ -705,7 +705,7 @@ def _read_project(d: dict[str, Any]) -> tuple[Project, list[str]]:
         d = upgrade_v2_project(d)
     if version in (1, 2, 3):
         return upgrade_v3_project(
-            _str(d["name"]), _str(d.get("notes", "")), _scenarios(d), report=d["_report"]
+            _str(d["name"]), _str(d.get("notes", "")), _scenarios(d), report=report
         )
     if version != SCHEMA_VERSION:
         raise ValueError(f"schema version {version} is not supported (expected {SCHEMA_VERSION})")
@@ -724,7 +724,8 @@ def _read_project(d: dict[str, Any]) -> tuple[Project, list[str]]:
 
 
 def project_from_dict(d: dict[str, Any]) -> Project:
-    return read_project(d)[0]
+    """The project alone – an older file's upgrade report is not wanted, so not worked out."""
+    return read_project(d, report=False)[0]
 
 
 def project_to_dict(p: Project) -> dict[str, Any]:

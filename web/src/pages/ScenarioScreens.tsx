@@ -1,5 +1,13 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
-import { Link, Outlet, matchPath, useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  Outlet,
+  matchPath,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
 import { Loading, ProjectNav, ScenarioTabs, useProject } from "../App";
 import { ApiError, api } from "../api";
@@ -11,7 +19,6 @@ import {
   OwnerCostChart,
   balanceSummary,
 } from "../components/charts";
-import { CopyDialog } from "../components/CopyDialog";
 import { PlanTable } from "../components/PlanTable";
 import { numberOf, useSort } from "../components/sort";
 import { ExpenseTable, FfbTable, useRowIds } from "../components/tables";
@@ -29,17 +36,17 @@ import { roundCents } from "../decimal";
 import { dues as duesText, longDate, money, percent, today } from "../format";
 import { useAutosave, useDebounced, useUnsavedGuard, type SaveStatus } from "../hooks";
 import {
-  copyFact,
-  copyFfb,
-  copyLine,
   currentAdoption,
+  expensesOf,
+  factsWithHorizon,
   horizonOf,
   plausibleHorizon,
-  withHorizon,
+  uniqueName,
   type FactKey,
 } from "../template";
 import type {
   Assessment,
+  Dec,
   Facts,
   Increase,
   Scenario,
@@ -49,7 +56,7 @@ import type {
 
 // ---------------------------------------------------------------- the screens of a scenario
 
-/** A scenario's screens, by the last part of their address (spec 7.2). */
+/** Every screen a scenario can show, by the last part of their address (spec 7.2). */
 export const SCENARIO_SCREENS: { path: string; label: string }[] = [
   { path: "", label: "Results" },
   { path: "facts", label: "Facts and assumptions" },
@@ -58,6 +65,13 @@ export const SCENARIO_SCREENS: { path: string; label: string }[] = [
   { path: "dues", label: "Dues" },
   { path: "assessments", label: "Special assessments" },
 ];
+
+/** A scenario's own screens – its funding; an adopted plan's also the facts and expenses it
+ * was adopted with, read-only (spec 5.2, 7.2). */
+export const screensOf = (s: Scenario): { path: string; label: string }[] =>
+  s.adoption
+    ? SCENARIO_SCREENS
+    : SCENARIO_SCREENS.filter((x) => !["facts", "expenses", "ffb"].includes(x.path));
 
 /** The screen part of a scenario address – "" for Results. */
 function screenOf(pathname: string): string {
@@ -76,12 +90,36 @@ interface ScenarioScreen {
   readOnly: boolean;
   result: ScenarioResult | null;
   problems: string[];
-  /** the other scenarios of the project, as saved */
-  others: Scenario[];
-  /** copy something of this scenario into the scenarios named – `apply` makes each copy */
-  copyTo: (names: string[], apply: (target: Scenario) => Scenario) => Promise<void>;
-  /** an entry is not yet usable – nothing is copied while the screen shows other figures */
+  /** the facts it runs on – the project's, or an adopted plan's own */
+  facts: Facts;
+  /** an entry is not yet usable */
   blocked: boolean;
+}
+
+/** What the facts, expenses and Fully Funded Balance screens edit – the project's, or show –
+ * an adopted plan's own, read-only. */
+export interface FactsEditor {
+  facts: Facts;
+  setFacts: (facts: Facts) => void;
+  readOnly: boolean;
+  /** the Fully Funded Balance the results worked out, for a worked-out figure */
+  ffb: Record<string, Dec> | null;
+  /** what sits beside the inputs – key results */
+  aside: React.ReactNode;
+  /** expense line ids in use elsewhere, so a new line never takes one */
+  takenIds: string[];
+  /** above the expense table – the expense sets, on the project's screen */
+  setsPanel?: React.ReactNode;
+  /** a line above the inputs, saying whose facts they are */
+  note?: string;
+}
+
+export const FactsContext = createContext<FactsEditor | null>(null);
+
+function useFacts(): FactsEditor {
+  const editor = useContext(FactsContext);
+  if (!editor) throw new Error("a facts screen outside the project or an adopted plan");
+  return editor;
 }
 
 const ScenarioContext = createContext<ScenarioScreen | null>(null);
@@ -164,10 +202,12 @@ function ScenarioForm({
   const others = stored.project.scenarios.filter((s) => s.name !== savedName);
   const name = form.name.trim();
   const nameProblem = !name
-    ? "The scenario needs a name – on Facts and assumptions."
+    ? "The scenario needs a name – on Dues."
     : others.some((s) => s.name === name)
-      ? `Another scenario is already called “${name}” – choose another name on Facts and assumptions.`
+      ? `Another scenario is already called “${name}” – choose another name on Dues.`
       : null;
+  // the facts it runs on – an adopted plan's own, frozen when adopted, or the project's
+  const facts = original.facts ?? stored.project.facts;
 
   const renameProblem =
     renaming === null
@@ -219,9 +259,10 @@ function ScenarioForm({
 
   // Live results as the inputs change (spec 7.2) – debounced, and a newer run cancels an older one.
   const settled = useDebounced(form, 250);
+  const projectFacts = stored.project.facts;
   useEffect(() => {
     const controller = new AbortController();
-    api.run(settled, controller.signal).then(
+    api.run(settled, settled.facts === null ? projectFacts : null, controller.signal).then(
       (r) => {
         if (controller.signal.aborted) return;
         setResult(r);
@@ -233,16 +274,7 @@ function ScenarioForm({
       },
     );
     return () => controller.abort();
-  }, [settled]);
-
-  async function copyTo(names: string[], apply: (target: Scenario) => Scenario) {
-    setActionError(null);
-    try {
-      await saveScenarios((list) => list.map((x) => (names.includes(x.name) ? apply(x) : x)));
-    } catch (e) {
-      setActionError(e);
-    }
-  }
+  }, [settled, projectFacts]);
 
   async function remove() {
     setConfirmDelete(false);
@@ -286,10 +318,28 @@ function ScenarioForm({
   const isCurrent = current?.name === original.name;
   const title = form.name.trim() || original.name;
   const here = SCENARIO_SCREENS.find((s) => s.path === screenOf(pathname))?.label;
+  // an adopted plan's facts screens show the facts it was adopted with, read-only
+  const frozen: FactsEditor | null = original.facts
+    ? {
+        facts: original.facts,
+        setFacts: () => undefined,
+        readOnly: true,
+        ffb: result?.ffb ?? null,
+        aside: <KeyResults />,
+        takenIds: [],
+        note: "The facts and expenses this plan was adopted with. The project's own are on its Facts and assumptions, Expenses and Fully Funded Balance screens.",
+      }
+    : null;
+
+  // an ordinary scenario's facts are the project's – an old address, or one an un-adopted plan
+  // was on, goes to the project's screen of that name
+  const onScreen = screenOf(pathname);
+  if (!readOnly && ["facts", "expenses", "ffb"].includes(onScreen))
+    return <Navigate to={`/projects/${encodeURIComponent(id)}/${onScreen}`} replace />;
 
   return (
     <ScenarioContext.Provider
-      value={{ id, stored, form, setForm, readOnly, result, problems, others, copyTo, blocked }}
+      value={{ id, stored, form, setForm, readOnly, result, problems, facts, blocked }}
     >
       <ProjectNav stored={stored} within={{ path: "scenarios", label: "Scenarios" }} here={title} />
       <div className="scenario-head">
@@ -338,7 +388,7 @@ function ScenarioForm({
           </button>
         </div>
       </div>
-      <ScenarioTabs id={id} scenario={savedName} />
+      <ScenarioTabs id={id} scenario={savedName} screens={screensOf(original)} />
       {adoption && (
         <section className="panel adopted" aria-label="Adopted plan">
           <p>
@@ -370,9 +420,13 @@ function ScenarioForm({
           items={invalid}
         />
       )}
+      {/* above the read-only fieldset – saving a set changes no plan */}
+      {readOnly && screenOf(pathname) === "expenses" && <SaveFrozenAsSet plan={original} />}
       <Provider>
         <fieldset className="plain" disabled={readOnly}>
-          <Outlet />
+          <FactsContext.Provider value={frozen}>
+            <Outlet />
+          </FactsContext.Provider>
         </fieldset>
       </Provider>
 
@@ -447,7 +501,9 @@ function ScenarioForm({
       >
         <p>
           It becomes an ordinary scenario again, and the plan adopted before it – if any – becomes
-          the adopted plan. Use this only to correct a mistake.
+          the adopted plan. Use this only to correct a mistake. It drops the facts and expenses it
+          was adopted with and uses the project's again, so its figures change if the project's have
+          changed since – save its expenses as a set first, on its Expenses tab, to keep them.
         </p>
       </Confirm>
       <Confirm
@@ -469,7 +525,7 @@ function ScenarioForm({
   );
 }
 
-function SaveNote({ status }: { status: SaveStatus }) {
+export function SaveNote({ status }: { status: SaveStatus }) {
   const text = {
     saved: "All changes saved",
     saving: "Saving…",
@@ -524,7 +580,7 @@ function KeyResults() {
 // ---------------------------------------------------------------- Results
 
 export function ResultsScreen() {
-  const { result, problems, form } = useScenario();
+  const { result, problems, form, facts } = useScenario();
   return (
     <section className="results" aria-live="polite" aria-label="Results">
       <Problems title="Fix these to see results" items={problems} />
@@ -532,8 +588,8 @@ export function ResultsScreen() {
         <>
           <PlanTable
             result={result}
-            cushion={form.facts.cushion}
-            target={form.facts.target}
+            cushion={facts.cushion}
+            target={facts.target}
             caption={`${form.name} – year by year`}
             filename={`${form.name} - plan.csv`}
           />
@@ -561,66 +617,27 @@ export function ResultsScreen() {
 
 /** An inputs screen – its inputs, with the key results beside them, or above a table too wide
  * to share the row. */
-function InputsScreen({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+function InputsScreen({
+  children,
+  wide = false,
+  aside = <KeyResults />,
+}: {
+  children: React.ReactNode;
+  wide?: boolean;
+  aside?: React.ReactNode;
+}) {
   if (wide)
     return (
       <div className="wide-inputs">
-        <KeyResults />
+        {aside}
         {children}
       </div>
     );
   return (
     <div className="split">
       <div className="inputs">{children}</div>
-      <KeyResults />
+      {aside}
     </div>
-  );
-}
-
-/** "Copy to…" for one thing on a screen, with its dialog. Hidden on an adopted plan. */
-function CopyButton({
-  what,
-  label,
-  apply,
-}: {
-  what: string;
-  label: string;
-  apply: (target: Scenario) => Scenario;
-}) {
-  const { readOnly, others, copyTo, blocked } = useScenario();
-  const [open, setOpen] = useState(false);
-  const [done, setDone] = useState("");
-  if (readOnly) return null;
-  return (
-    <>
-      <button
-        type="button"
-        className="small"
-        aria-label={label}
-        disabled={blocked}
-        title={blocked ? "Fix the entries that are not usable first" : undefined}
-        onClick={() => setOpen(true)}
-      >
-        Copy to…
-      </button>
-      {done && (
-        <span className="hint" role="status">
-          {" "}
-          {done}
-        </span>
-      )}
-      {open && (
-        <CopyDialog
-          what={what}
-          others={others}
-          onClose={() => setOpen(false)}
-          onCopy={(names) => {
-            setOpen(false);
-            void copyTo(names, apply).then(() => setDone(`Copied to ${names.join(", ")}.`));
-          }}
-        />
-      )}
-    </>
   );
 }
 
@@ -757,8 +774,7 @@ const FACTS: { title: string; facts: Fact[] }[] = [
   },
 ];
 
-/** One figure as a table row – its name and hint, its value, where it came from, and a way to
- * copy it into other scenarios. */
+/** One figure as a table row – its name and hint, its value and where it came from. */
 function FactRow({
   fact,
   facts,
@@ -816,60 +832,31 @@ function FactRow({
           onChange={(e) => onSource(e.target.value)}
         />
       </td>
-      <td className="no-print">
-        <CopyButton
-          what={`the ${label.toLowerCase()}`}
-          label={`Copy ${label.toLowerCase()} to other scenarios`}
-          apply={(target) => copyFact(target, facts, key)}
-        />
-      </td>
     </tr>
   );
 }
 
 export function FactsScreen() {
-  const { form, setForm } = useScenario();
-  const f = form.facts;
-  const set = (change: Partial<Facts>) => setForm({ ...form, facts: { ...f, ...change } });
+  const { facts: f, setFacts, aside, note } = useFacts();
+  const set = (change: Partial<Facts>) => setFacts({ ...f, ...change });
 
   function setValue(key: FactKey, value: string | number | null) {
-    if (key === "start_year") setForm(withHorizon(form, value as number, f.end_year));
-    else if (key === "end_year") setForm(withHorizon(form, f.start_year, value as number));
+    if (key === "start_year") setFacts(factsWithHorizon(f, value as number, f.end_year));
+    else if (key === "end_year") setFacts(factsWithHorizon(f, f.start_year, value as number));
     else set({ [key]: value });
   }
 
   return (
-    <InputsScreen>
-      <section className="panel">
-        <h2>This scenario</h2>
-        <Field label="Name">
-          {(fid) => (
-            <input
-              id={fid}
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-          )}
-        </Field>
-        <Field label="Description">
-          {(fid) => (
-            <textarea
-              id={fid}
-              rows={2}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-          )}
-        </Field>
-      </section>
+    <InputsScreen aside={aside}>
       <section className="panel">
         <h2>Figures, and where they came from</h2>
+        {note && <p className="hint">{note}</p>}
         <p className="hint">
+          {!note &&
+            "Every scenario uses these figures – an adopted plan keeps the ones it was adopted with. "}
           Beside each figure, a source note says where it came from and when – a document, a page, a
           date – so anyone reading the plan later can check it. Notes are optional, and each travels
-          into the exported workbook. Copy to… puts a figure and its note into other scenarios – a
-          new balance or a revised rate, for example.
+          into the exported workbook.
         </p>
         <table className="facts">
           <caption className="visually-hidden">Facts and assumptions</caption>
@@ -878,15 +865,12 @@ export function FactsScreen() {
               <th scope="col">Figure</th>
               <th scope="col">Value</th>
               <th scope="col">Source note – where the figure came from</th>
-              <th scope="col" className="no-print">
-                <span className="visually-hidden">Copy</span>
-              </th>
             </tr>
           </thead>
           {FACTS.map((group) => (
             <tbody key={group.title}>
               <tr className="fact-group">
-                <th scope="rowgroup" colSpan={4}>
+                <th scope="rowgroup" colSpan={3}>
                   {group.title}
                 </th>
               </tr>
@@ -910,19 +894,17 @@ export function FactsScreen() {
 // ---------------------------------------------------------------- Expenses
 
 export function ExpensesScreen() {
-  const { form, setForm, others, copyTo, readOnly, blocked } = useScenario();
-  const [copying, setCopying] = useState<Facts["expense_lines"][number] | null>(null);
-  const [done, setDone] = useState("");
-  const f = form.facts;
+  const { facts: f, setFacts, aside, note, takenIds, setsPanel } = useFacts();
   return (
-    <InputsScreen wide>
+    <InputsScreen wide aside={aside}>
+      {setsPanel}
       <section className="panel">
+        {note && <p className="hint">{note}</p>}
         <ExpenseTable
           lines={f.expense_lines}
           defaultYear={f.start_year}
-          onChange={(expense_lines) => setForm({ ...form, facts: { ...f, expense_lines } })}
-          onCopy={readOnly || blocked ? undefined : setCopying}
-          taken={others.flatMap((s) => s.facts.expense_lines.map((l) => l.id))}
+          onChange={(expense_lines) => setFacts({ ...f, expense_lines })}
+          taken={takenIds}
           horizon={{
             start: f.start_year,
             end: f.end_year,
@@ -930,28 +912,7 @@ export function ExpensesScreen() {
             baseYear: f.expense_base_year,
           }}
         />
-        {done && (
-          <p className="hint" role="status">
-            {done}
-          </p>
-        )}
       </section>
-      {copying && (
-        <CopyDialog
-          what={copying.description ? `“${copying.description}”` : "this expense"}
-          others={others}
-          onClose={() => setCopying(null)}
-          onCopy={(names) => {
-            const line = copying;
-            setCopying(null);
-            void copyTo(names, (target) => copyLine(target, line)).then(() =>
-              setDone(
-                `Copied ${line.description ? `“${line.description}”` : "the expense"} to ${names.join(", ")} – it replaces the same expense there, or is added.`,
-              ),
-            );
-          }}
-        />
-      )}
     </InputsScreen>
   );
 }
@@ -959,21 +920,20 @@ export function ExpensesScreen() {
 // ---------------------------------------------------------------- Fully Funded Balance
 
 export function FfbScreen() {
-  const { form, setForm, result } = useScenario();
-  const f = form.facts;
+  const { facts: f, setFacts, ffb, aside, note } = useFacts();
   const years = plausibleHorizon(f.start_year, f.end_year)
     ? Array.from({ length: f.end_year - f.start_year + 2 }, (_, i) => f.start_year + i)
     : [];
-  const set = (change: Partial<Facts>) => setForm({ ...form, facts: { ...f, ...change } });
+  const set = (change: Partial<Facts>) => setFacts({ ...f, ...change });
   // the reserve lines that count towards a worked-out figure, and those that cannot yet
   const reserve = f.expense_lines.filter((l) => l.frequency === "every" || l.frequency === "once");
   const lifeless = reserve.filter((l) => l.frequency === "once" && !l.useful_life);
   const worked = useSort(years, {
     year: (y) => y,
-    ffb: (y) => numberOf(result?.ffb[String(y)]),
+    ffb: (y) => numberOf(ffb?.[String(y)]),
   });
   return (
-    <InputsScreen>
+    <InputsScreen aside={aside}>
       <section className="panel explainer" aria-label="What the Fully Funded Balance means">
         <p>
           The Fully Funded Balance is what should have been saved by a given year, added up across
@@ -998,6 +958,7 @@ export function FfbScreen() {
         </p>
       </section>
       <section className="panel">
+        {note && <p className="hint">{note}</p>}
         <fieldset className="plain">
           <legend className="visually-hidden">Where the Fully Funded Balance comes from</legend>
           <label className="check">
@@ -1016,7 +977,7 @@ export function FfbScreen() {
               checked={f.ffb_from_lines}
               onChange={() => set({ ffb_from_lines: true })}
             />{" "}
-            Worked out from this scenario's expenses and their useful lives
+            Worked out from the expenses and their useful lives
           </label>
         </fieldset>
         {f.ffb_from_lines ? (
@@ -1030,7 +991,7 @@ export function FfbScreen() {
                 ? ` – ${lifeless.length} one-time cost${lifeless.length === 1 ? " has" : "s have"} no useful life yet.`
                 : "."}
             </p>
-            {result && (
+            {ffb && (
               <table className="list ffb-worked">
                 <caption className="visually-hidden">Fully Funded Balance, worked out</caption>
                 <thead>
@@ -1045,7 +1006,7 @@ export function FfbScreen() {
                     .map((y) => (
                       <tr key={y}>
                         <th scope="row">{y}</th>
-                        <td className="num">{money(result.ffb[String(y)])}</td>
+                        <td className="num">{money(ffb[String(y)])}</td>
                       </tr>
                     ))}
                 </tbody>
@@ -1070,13 +1031,6 @@ export function FfbScreen() {
             />
           )}
         </Field>
-        <div className="row-actions">
-          <CopyButton
-            what="the Fully Funded Balance"
-            label="Copy the Fully Funded Balance to other scenarios"
-            apply={(target) => copyFfb(target, f)}
-          />
-        </div>
       </section>
     </InputsScreen>
   );
@@ -1201,10 +1155,9 @@ function Increases({
 }
 
 export function DuesScreen() {
-  const { form, setForm, result, problems } = useScenario();
+  const { form, setForm, result, problems, facts: f } = useScenario();
   const [mode, setMode] = useState<Mode>(modeOf(form));
-  const years = horizonOf(form);
-  const f = form.facts;
+  const years = horizonOf(f);
   const resolved = new Map(result?.years.map((y) => [y.year, y.dues]) ?? []);
   const typedFor = (y: number) =>
     form.dues.mode === "explicit"
@@ -1247,6 +1200,29 @@ export function DuesScreen() {
 
   return (
     <InputsScreen>
+      <section className="panel">
+        <h2>This scenario</h2>
+        <Field label="Name">
+          {(fid) => (
+            <input
+              id={fid}
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+            />
+          )}
+        </Field>
+        <Field label="Description">
+          {(fid) => (
+            <textarea
+              id={fid}
+              rows={2}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          )}
+        </Field>
+      </section>
       <section className="panel">
         <fieldset className="dues-settings">
           <legend>Dues per unit per month</legend>
@@ -1399,7 +1375,7 @@ export function DuesScreen() {
 // ---------------------------------------------------------------- Special assessments
 
 export function AssessmentsScreen() {
-  const { form, setForm } = useScenario();
+  const { form, setForm, facts } = useScenario();
   const rows = useRowIds(form.assessments.length);
   const setAssessments = (assessments: Assessment[]) => setForm({ ...form, assessments });
   const { order, header } = useSort(
@@ -1489,7 +1465,7 @@ export function AssessmentsScreen() {
             rows.added();
             setAssessments([
               ...form.assessments,
-              { year: form.facts.start_year, amount: "0", note: "" },
+              { year: facts.start_year, amount: "0", note: "" },
             ]);
           }}
         >
@@ -1497,5 +1473,61 @@ export function AssessmentsScreen() {
         </button>
       </section>
     </InputsScreen>
+  );
+}
+
+/** An adopted plan's frozen expenses saved as an expense set, to load as the project's later
+ * (spec 5.2). */
+function SaveFrozenAsSet({ plan }: { plan: Scenario }) {
+  const { stored, save } = useProject();
+  const [name, setName] = useState<string | null>(null);
+  const [done, setDone] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  if (!plan.facts || !stored) return null;
+  const facts = plan.facts;
+  const taken = stored.project.expense_sets.map((s) => s.name);
+  const problem =
+    name === null
+      ? null
+      : !name.trim()
+        ? "A set needs a name."
+        : taken.includes(name.trim())
+          ? `There is already a set called “${name.trim()}”.`
+          : null;
+  return (
+    <section className="panel expense-sets" aria-label="Expense sets">
+      <p>
+        To use these expenses for the project's scenarios, save them as an expense set and load it
+        on the project's Expenses screen.
+      </p>
+      <ErrorBanner error={error} />
+      {done && (
+        <p className="hint" role="status">
+          {done}
+        </p>
+      )}
+      <button type="button" onClick={() => setName(uniqueName(`Expenses of ${plan.name}`, taken))}>
+        Save these expenses as a set…
+      </button>
+      <Confirm
+        open={name !== null}
+        title="Save the adopted plan's expenses as a set"
+        confirmLabel="Save"
+        onCancel={() => setName(null)}
+        onConfirm={() => {
+          if (name === null || problem) return;
+          const set = expensesOf(facts, name.trim());
+          setName(null);
+          save((p) => ({ ...p, expense_sets: [...p.expense_sets, set] })).then(
+            () => setDone(`Saved as the set “${set.name}”.`),
+            setError,
+          );
+        }}
+      >
+        <Field label="Name of the set" error={problem}>
+          {(fid) => <input id={fid} value={name ?? ""} onChange={(e) => setName(e.target.value)} />}
+        </Field>
+      </Confirm>
+    </section>
   );
 }

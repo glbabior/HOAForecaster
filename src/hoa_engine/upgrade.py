@@ -10,7 +10,7 @@ upgrade works on the scenarios as read, and says which scenarios' figures change
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import date
 from typing import Any
 
@@ -82,6 +82,11 @@ _FACT_WORDS = {
 }
 
 
+def _short(name: str) -> str:
+    """A name as a report sentence quotes it – a long one shortened, so a sentence stays short."""
+    return name if len(name) <= MAX_SET_NAME else name[: MAX_SET_NAME - 1] + "…"
+
+
 def _unique(base: str, taken: set[str]) -> str:
     base = base[:MAX_SET_NAME]
     name, n = base, 2
@@ -120,13 +125,18 @@ def _differences(own: Facts, project: Facts) -> list[str]:
 
 def _figures(s: Scenario) -> object:
     """A scenario's figures, or its problems when it has no figures – to tell whether the
-    upgrade changes them."""
+    upgrade changes them. Only the numbers – a line's words or place in the list change none."""
     from hoa_engine.engine import InvalidInputs, run
 
     try:
-        return run(s)
+        r = run(s)
     except InvalidInputs as e:
         return e.problems
+    years = [
+        tuple(getattr(y, f.name) for f in fields(y) if not f.name.endswith("_lines"))
+        for y in r.years
+    ]
+    return r.summary, r.ffb, years
 
 
 def upgrade_v3_project(
@@ -190,8 +200,8 @@ def upgrade_v3_project(
             (p.name for p in plans if p is not after and funding(p) == funding(after)), None
         )
         if twin is not None:
-            parts.append(f"it now matches {twin} exactly")
-        sentence = f"{before.name} – " + " – ".join(parts)
+            parts.append(f"it now matches {_short(twin)} exactly")
+        sentence = f"{_short(before.name)} – " + " – ".join(parts)
         if not same_expenses(f, first):
             sentence += f" – its expenses are saved as the set '{set_of(f)}'"
             if any(w in _FACT_WORDS.values() or w == "its source notes" for w in differs):

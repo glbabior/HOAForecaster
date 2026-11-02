@@ -817,13 +817,18 @@ def test_the_schema_2_demo_upgrades_to_todays_demo() -> None:
     old = json.loads((Path(__file__).parent / "fixtures" / "demo_schema2.json").read_text("utf-8"))
     today = json.loads(DEMO.read_text(encoding="utf-8"))
     upgraded, now = project_from_dict(old), project_from_dict(today)
-    # today's demo has one scenario more – the worked-out Fully Funded Balance (spec 4.2) – and
-    # the expense set made from it
-    worked = "Expenses from Worked-out Fully Funded Balance"
+    # today's demo adds sets of its own – one worked out from useful lives (spec 4.2), one in
+    # 2024's dollars – and a scenario with stepped increases (spec 5.1)
+    added = ("Worked out from useful lives", "Older study, in 2024 dollars")
+    # and Insurance shock is described as what it runs on since v2.0 – its shock a set to load
+    described = {s.name: s.description for s in upgraded.scenarios}
     assert upgraded == replace(
         now,
-        scenarios=now.scenarios[: len(upgraded.scenarios)],
-        expense_sets=tuple(e for e in now.expense_sets if e.name != worked),
+        scenarios=tuple(
+            replace(s, description=described[s.name])
+            for s in now.scenarios[: len(upgraded.scenarios)]
+        ),
+        expense_sets=tuple(e for e in now.expense_sets if e.name not in added),
     )
 
 

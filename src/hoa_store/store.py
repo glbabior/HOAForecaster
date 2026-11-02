@@ -15,6 +15,7 @@ message.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -201,12 +202,10 @@ MAX_NOTE_TEXT = 2000
 
 
 def _notes(value: Any) -> tuple[str, ...]:
-    """Stored upgrade notes – anything damaged is no notes."""
+    """Stored upgrade notes – a damaged list is none, a damaged note is left out."""
     if not isinstance(value, list) or len(value) > MAX_NOTES:
         return ()
-    if not all(isinstance(n, str) and len(n) <= MAX_NOTE_TEXT for n in value):
-        return ()
-    return tuple(value)
+    return tuple(n for n in value if isinstance(n, str) and len(n) <= MAX_NOTE_TEXT)
 
 
 def _kept_times(
@@ -328,11 +327,17 @@ class ProjectStore:
         """An older project file, saved in today's form the first time it is opened – the
         original kept in the backups folder, and what changed kept to show (spec 8.2)."""
         with self._lock:
+            # another request may have upgraded it, and a save followed, since it was read
+            now = _loads_object(_read_capped(path, MAX_PROJECT_BYTES))
+            if now is not None and now.get("schema_version") == SCHEMA_VERSION:
+                return self.get(found.id)
             backup = self._path(self.backups, found.id)
             if not backup.exists():  # the file was just read, so it can be copied as it is
                 _atomic_write(backup, path.read_bytes())
             upgraded = replace(found, upgrade_notes=tuple(notes))
-            self._write_stored(upgraded)
+            # too large in today's form – it opens as it is, so it can be made smaller
+            with contextlib.suppress(BadProjectFile):
+                self._write_stored(upgraded)
             return upgraded
 
     # ------------------------------------------------------------ writing
@@ -479,13 +484,14 @@ class ProjectStore:
             self.trash.mkdir(mode=0o700, parents=True, exist_ok=True)
             try:
                 os.replace(path, self._path(self.trash, project_id))
-                backup = self._path(self.backups, project_id)
-                if backup.is_file():  # kept until the project is deleted, then with it
-                    os.replace(backup, self.trash / f"{project_id}.before-upgrade.json")
             except OSError:
                 raise StoreError(
                     "the project could not be deleted – the data folder is busy"
                 ) from None
+            backup = self._path(self.backups, project_id)
+            if backup.is_file():  # kept until the project is deleted, then with it
+                with contextlib.suppress(OSError):  # the project is gone either way
+                    os.replace(backup, self.trash / f"{project_id}.before-upgrade.json")
 
     def _write_stored(self, stored: StoredProject) -> None:
         payload = {

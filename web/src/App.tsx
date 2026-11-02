@@ -23,6 +23,7 @@ import { ChartsPage } from "./pages/ChartsPage";
 import { ComparePage } from "./pages/ComparePage";
 import { ExportPage } from "./pages/ExportPage";
 import { NewScenario } from "./pages/NewScenario";
+import { PROJECT_INPUTS, ProjectInputsLayout } from "./pages/ProjectInputs";
 import { ProjectList } from "./pages/ProjectList";
 import {
   AssessmentsScreen,
@@ -31,7 +32,6 @@ import {
   FactsScreen,
   FfbScreen,
   ResultsScreen,
-  SCENARIO_SCREENS,
   ScenarioLayout,
   scenarioPath,
 } from "./pages/ScenarioScreens";
@@ -262,6 +262,7 @@ export function ProjectNav({
 // The project's screens – a scenario's own screens open under Scenarios (spec 7.1, 7.2).
 const SCREENS: { path: string; label: string }[] = [
   { path: "scenarios", label: "Scenarios" },
+  ...PROJECT_INPUTS,
   { path: "compare", label: "Compare" },
   { path: "charts", label: "Charts" },
   { path: "export", label: "Export" },
@@ -303,10 +304,43 @@ function ProjectScreens({ id }: { id: string }) {
       </div>
       <div className="screen">
         <ProjectContext.Provider value={project}>
+          <UpgradeNotes />
           <Outlet />
         </ProjectContext.Provider>
       </div>
     </div>
+  );
+}
+
+/** What the schema upgrade changed, until it has been read (spec 8.2). */
+function UpgradeNotes() {
+  const { stored, act } = useProject();
+  const [error, setError] = useState<unknown>(null);
+  if (!stored || stored.upgrade_notes.length === 0) return null;
+  return (
+    <section className="panel upgrade-notes" aria-label="What changed in this version">
+      <h2>This project now keeps its facts and expenses in one place</h2>
+      <p>
+        Every scenario now uses the project's facts and expenses, so scenarios differ only in how
+        they are paid for. Adopted plans keep the ones they were adopted with. These scenarios had
+        figures of their own – their expenses are kept as expense sets, to load on Expenses, and the
+        project file as it was is kept in the data folder's backups.
+      </p>
+      <ul>
+        {stored.upgrade_notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+      <ErrorBanner error={error} />
+      <button
+        type="button"
+        onClick={() =>
+          act((current) => api.dismissNotes(current.id, current.revision)).catch(setError)
+        }
+      >
+        Dismiss
+      </button>
+    </section>
   );
 }
 
@@ -315,11 +349,19 @@ export function Loading({ error }: { error: unknown }) {
 }
 
 /** A scenario's screens as a row of tabs under its name (spec 7.2). */
-export function ScenarioTabs({ id, scenario }: { id: string; scenario: string }) {
+export function ScenarioTabs({
+  id,
+  scenario,
+  screens,
+}: {
+  id: string;
+  scenario: string;
+  screens: { path: string; label: string }[];
+}) {
   return (
     <nav className="tabs no-print" aria-label="Scenario screens">
       <ul aria-label={`${scenario} – screens`}>
-        {SCENARIO_SCREENS.map((sc) => (
+        {screens.map((sc) => (
           <li key={sc.path}>
             <NavLink to={scenarioPath(id, scenario, sc.path)} end>
               {sc.label}
@@ -355,6 +397,15 @@ export const routes: RouteObject[] = [
               { path: "ffb", element: <FfbScreen /> },
               { path: "dues", element: <DuesScreen /> },
               { path: "assessments", element: <AssessmentsScreen /> },
+            ],
+          },
+          {
+            // one form across the project's facts screens, saving itself
+            element: <ProjectInputsLayout />,
+            children: [
+              { path: "facts", element: <FactsScreen /> },
+              { path: "expenses", element: <ExpensesScreen /> },
+              { path: "ffb", element: <FfbScreen /> },
             ],
           },
           { path: "compare", element: <ComparePage /> },

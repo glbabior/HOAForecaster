@@ -633,3 +633,51 @@ def test_an_imported_older_project_file_says_what_its_upgrade_changed(
     exported = json.loads(store.export_bytes(imported.id))
     assert exported["schema_version"] == 4 and "upgrade_notes" not in exported
     assert set(exported["set_times"]) == {e.name for e in imported.project.expense_sets}
+
+
+def test_an_upgrade_never_writes_over_a_save_made_since_it_read_the_file(
+    store: ProjectStore,
+) -> None:
+    pid = _schema_3_project(store)
+    path = _file(store, pid)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    stale, notes = store_module.read_project(raw)  # read before another request upgraded it
+    opened = store.get(pid)  # that other request – upgraded, then saved over
+    saved = store.save(pid, replace(opened.project, notes="Saved meanwhile"), opened.revision)
+    found = replace(opened, project=stale)
+    again = store._upgraded(path, found, notes)
+    assert again.project.notes == "Saved meanwhile"
+    assert store.get(pid).revision == saved.revision
+
+
+def test_an_upgrade_too_large_to_save_still_opens(
+    store: ProjectStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid = _schema_3_project(store)
+
+    def too_large(_: object) -> None:
+        raise store_module.BadProjectFile("too large")
+
+    monkeypatch.setattr(store, "_write_stored", too_large)
+    opened = store.get(pid)
+    assert opened.project.facts is not None and len(opened.upgrade_notes) == 2
+    assert json.loads(_file(store, pid).read_text(encoding="utf-8"))["schema_version"] == 3
+
+
+def test_a_project_is_deleted_even_when_its_backup_cannot_be_moved(
+    store: ProjectStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid = _schema_3_project(store)
+    store.get(pid)  # upgraded, its backup kept
+    real = os.replace
+
+    def busy(src: object, dst: object) -> None:
+        if str(dst).endswith(".before-upgrade.json"):
+            raise OSError("busy")
+        real(src, dst)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_module.os, "replace", busy)
+    store.delete(pid)
+    with pytest.raises(NotFound):
+        store.get(pid)
+    assert (store.root / "backups" / f"{pid}.json").exists()  # left behind, harmless

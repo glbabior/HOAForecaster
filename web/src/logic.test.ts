@@ -7,14 +7,16 @@ import { fromPercent, grouped, num, parseDecimal, roundCents, shift, toPercent }
 import { dues, money, percent, span } from "./format";
 import { sharedDomain, sharedGrid } from "./scale";
 import {
-  copyFact,
-  copyFfb,
-  copyLine,
+  carriedOn,
+  duesWithHorizon,
+  expensesOf,
+  factsWithHorizon,
   horizonOf,
   moveScenario,
   plausibleHorizon,
+  sameExpenses,
   startFrom,
-  withHorizon,
+  withExpenses,
 } from "./template";
 import { withAnother } from "./pages/ScenarioScreens";
 import type { ExpenseLine, Facts, Scenario } from "./types";
@@ -254,72 +256,131 @@ describe("starting a scenario from another", () => {
     adoption: { date: "2026-11-03", note: "", sequence: 1 },
   });
 
-  it("copies every input but not its name or adoption", () => {
+  it("copies its funding but not its name, adoption or facts", () => {
     const seeded = startFrom(adopted, "New scenario");
     expect(seeded.adoption).toBeNull();
+    expect(seeded.facts).toBeNull(); // it uses the project's, even started from an adopted plan
     expect([seeded.name, seeded.description, seeded.rounding]).toEqual([
       "New scenario",
       "As voted",
       "none",
     ]);
-    expect(seeded.facts).toEqual(adopted.facts);
     expect(seeded.dues).toEqual(adopted.dues);
     seeded.assessments.push({ year: 2030, amount: "1", note: "" });
-    seeded.facts.expense_lines.push(line("pool", 2030));
-    // a copy, not the source's own lists
-    expect(adopted.assessments).toHaveLength(1);
-    expect(adopted.facts.expense_lines).toHaveLength(2);
+    expect(adopted.assessments).toHaveLength(1); // a copy, not the source's own list
   });
 });
 
-describe("copying into other scenarios", () => {
-  it("copies a figure with its source note, or clears the target's note", () => {
-    const from = facts({ interest_rate: "0.05", sources: { interest_rate: "New bank" } });
-    const target = scenario("T", {
-      facts: facts({ sources: { interest_rate: "Old", units: "Deed" } }),
+describe("expense sets", () => {
+  const operating = (id: string, year: number | null): ExpenseLine => ({
+    id,
+    frequency: "yearly",
+    year,
+    amount: "1000",
+    description: "Running",
+    source: "",
+    end_year: null,
+    inflation: null,
+  });
+
+  it("save the expenses, the Fully Funded Balance and the base year, with blank years pinned", () => {
+    const f = facts({
+      expense_lines: [line("roof", 2028), operating("run", null)],
+      sources: { ffb: "Study", expense_base_year: "Study date", interest_rate: "Bank" },
     });
-    const copied = copyFact(target, from, "interest_rate");
-    expect(copied.facts.interest_rate).toBe("0.05");
-    expect(copied.facts.sources).toEqual({ interest_rate: "New bank", units: "Deed" });
-    const noNote = copyFact(target, facts({ interest_rate: "0.01", sources: {} }), "interest_rate");
-    expect(noNote.facts.sources).toEqual({ units: "Deed" });
-    expect(target.facts.interest_rate).toBe("0.02"); // the target itself is left alone
+    const set = expensesOf(f, "2026 study");
+    expect(set.name).toBe("2026 study");
+    expect(set.expense_lines.map((l) => l.year)).toEqual([2028, 2027]); // the start year, kept
+    expect(set.expense_base_year).toBe(f.expense_base_year);
+    expect(set.sources).toEqual({ ffb: "Study", expense_base_year: "Study date" });
+    expect(set.saved_inflation).toBe(f.expense_inflation);
+    set.expense_lines.push(line("pool", 2030));
+    expect(f.expense_lines).toHaveLength(2); // a copy, not the facts' own list
   });
 
-  it("reshapes the target's tables when a horizon year is copied", () => {
-    const typed = scenario("T", { dues: { mode: "explicit", explicit: { "2027": "500" } } });
-    const longer = copyFact(typed, facts({ end_year: 2033 }), "end_year");
-    expect(longer.facts.end_year).toBe(2033);
-    expect(longer.facts.ffb["2034"]).toBe("0");
-    expect(longer.dues).toMatchObject({ explicit: { "2033": "500" } });
+  it("load in place of the expenses, keeping every other fact and years the set lacks", () => {
+    const f = facts({ ffb: { "2027": "1", "2040": "40" }, sources: { interest_rate: "Bank" } });
+    const set = {
+      ...expensesOf(facts({ expense_lines: [line("gate", 2030)], expense_base_year: 2024 }), "S"),
+      ffb: { "2027": "7", "2028": "8" },
+      sources: { ffb: "New study" },
+    };
+    const loaded = withExpenses(f, set);
+    expect(loaded.expense_lines.map((l) => l.id)).toEqual(["gate"]);
+    expect(loaded.expense_base_year).toBe(2024);
+    expect(loaded.ffb).toEqual({ "2027": "7", "2028": "8", "2040": "40" });
+    expect(loaded.sources).toEqual({ interest_rate: "Bank", ffb: "New study" });
+    expect(loaded.interest_rate).toBe(f.interest_rate);
   });
 
-  it("replaces the line with the same id, or adds it last", () => {
-    const target = scenario("T");
-    const changed = copyLine(target, line("gate", 2035, "9000"));
-    expect(changed.facts.expense_lines.map((l) => `${l.id} ${l.year} ${l.amount}`)).toEqual([
-      "roof 2028 1",
-      "gate 2035 9000",
-    ]);
-    const added = copyLine(target, line("pool", 2030));
-    expect(added.facts.expense_lines.map((l) => l.id)).toEqual(["roof", "gate", "pool"]);
-  });
-
-  it("copies the Fully Funded Balance over the target's years, keeping years only it has", () => {
-    const target = scenario("T", {
-      facts: facts({ ffb: { "2027": "1", "2040": "40" }, sources: { ffb: "Old study" } }),
+  it("are the same expenses whatever the set is called or the inflation it was saved with", () => {
+    const f = facts();
+    expect(sameExpenses(f, facts({ expense_inflation: "0.09", interest_rate: "0.07" }))).toBe(true);
+    expect(sameExpenses(f, facts({ expense_base_year: 2024 }))).toBe(false);
+    // in any order, and 1 is 1.00 – sorting a table or retyping an amount changes nothing
+    const two = facts({ expense_lines: [line("roof", 2028), line("gate", 2030, "9000")] });
+    const reordered = { ...two, expense_lines: [...two.expense_lines].reverse() };
+    expect(sameExpenses(two, reordered)).toBe(true);
+    const retyped = {
+      ...two,
+      expense_lines: two.expense_lines.map((l) => ({ ...l, amount: `${l.amount}.00` })),
+    };
+    expect(sameExpenses(two, retyped)).toBe(true);
+    // a line made on screen – its keys in another order, a blank field missing – is the same
+    // line as the server writes it
+    const fromServer = facts({
+      expense_lines: [
+        {
+          frequency: "once",
+          year: 2028,
+          amount: "1",
+          description: "Roof",
+          source: "",
+          nominal: false,
+          useful_life: null,
+          id: "roof",
+        },
+      ],
     });
-    const copied = copyFfb(target, facts({ ffb: { "2027": "7", "2028": "8" }, sources: {} }));
-    expect(copied.facts.ffb).toEqual({ "2027": "7", "2028": "8", "2040": "40" });
-    expect(copied.facts.sources.ffb).toBeUndefined();
+    const onScreen = facts({
+      expense_lines: [
+        { id: "roof", frequency: "once", year: 2028, amount: "1", description: "Roof", source: "" },
+      ],
+    });
+    expect(sameExpenses(fromServer, onScreen)).toBe(true);
+    expect(sameExpenses(f, facts({ expense_lines: [line("gate", 2030)] }))).toBe(false);
+  });
+});
+
+describe("carrying grown dues on to a new start year", () => {
+  it("takes what they charged then, and tidies the periods and pinned years to the new start", () => {
+    const dues = {
+      mode: "rate" as const,
+      first_value: "700",
+      increases: [
+        { first_year: 2028, last_year: 2030, rate: "0.08" },
+        { first_year: 2031, last_year: null, rate: "0.03" },
+      ],
+      overrides: { "2029": "800", "2033": "900" },
+    };
+    expect(carriedOn(dues, "864", 2030)).toEqual({
+      mode: "rate",
+      first_value: "864",
+      increases: [{ first_year: 2031, last_year: null, rate: "0.03" }],
+      overrides: { "2033": "900" },
+    });
+    const across = { ...dues, increases: [{ first_year: 2028, last_year: null, rate: "0.03" }] };
+    expect((carriedOn(across, "800", 2030) as typeof dues).increases[0]?.first_year).toBeNull();
+    const typed = { mode: "explicit" as const, explicit: { "2027": "500" } };
+    expect(carriedOn(typed, "1", 2030)).toBe(typed);
   });
 });
 
 describe("horizon changes", () => {
   it("keep every Fully Funded Balance and add zeros for new years", () => {
-    const s = scenario("S", { facts: facts({ ffb: { "2027": "1", "2032": "6" } }) });
-    const longer = withHorizon(s, 2027, 2033);
-    expect(longer.facts.ffb).toEqual({
+    const f = facts({ ffb: { "2027": "1", "2032": "6" } });
+    const longer = factsWithHorizon(f, 2027, 2033);
+    expect(longer.ffb).toEqual({
       "2027": "1",
       "2028": "0",
       "2029": "0",
@@ -329,8 +390,8 @@ describe("horizon changes", () => {
       "2033": "0",
       "2034": "0",
     });
-    const shorter = withHorizon(longer, 2029, 2033);
-    expect(shorter.facts.ffb["2027"]).toBe("1"); // shortening never discards an entry
+    const shorter = factsWithHorizon(longer, 2029, 2033);
+    expect(shorter.ffb["2027"]).toBe("1"); // shortening never discards an entry
   });
 
   it("act only on a horizon that makes sense", () => {
@@ -338,26 +399,27 @@ describe("horizon changes", () => {
     expect(plausibleHorizon(2027, 2030)).toBe(false); // four years
     expect(plausibleHorizon(2027, 2057)).toBe(false); // thirty-one
     expect(plausibleHorizon(2027, 2)).toBe(false); // an end year half typed
-    const typing = withHorizon(scenario("S"), 2027, 2);
-    expect(typing.facts.end_year).toBe(2);
-    expect(typing.facts.ffb).toEqual(scenario("S").facts.ffb);
+    const typing = factsWithHorizon(facts(), 2027, 2);
+    expect(typing.end_year).toBe(2);
+    expect(typing.ffb).toEqual(facts().ffb);
     expect(horizonOf(typing)).toEqual([]);
-    expect(horizonOf(scenario("S"))).toEqual([2027, 2028, 2029, 2030, 2031]);
+    expect(horizonOf(facts())).toEqual([2027, 2028, 2029, 2030, 2031]);
   });
 
   it("carry typed dues into new years and leave grown dues alone", () => {
     const typed = scenario("T", {
       dues: { mode: "explicit", explicit: { "2027": "500", "2028": "520" } },
     });
-    const reshaped = withHorizon(typed, 2027, 2031);
+    const reshaped = duesWithHorizon(typed, 2027, 2031);
     expect(reshaped.dues).toEqual({
       mode: "explicit",
       explicit: { "2027": "500", "2028": "520", "2029": "520", "2030": "520", "2031": "520" },
     });
-    const earlier = withHorizon(reshaped, 2025, 2029);
+    const earlier = duesWithHorizon(reshaped, 2025, 2029);
     expect(earlier.dues).toMatchObject({ explicit: { "2025": "500", "2026": "500" } });
     const grown = scenario("G");
-    expect(withHorizon(grown, 2027, 2033).dues).toBe(grown.dues);
+    expect(duesWithHorizon(grown, 2027, 2033)).toBe(grown);
+    expect(duesWithHorizon(typed, 2027, 2)).toBe(typed); // still being typed
   });
 });
 

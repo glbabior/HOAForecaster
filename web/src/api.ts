@@ -2,8 +2,10 @@
 // this page, so no other web page can talk to the app.
 
 import type {
+  Facts,
   Project,
   ProjectResults,
+  ProjectRun,
   ProjectSummary,
   Scenario,
   ScenarioResult,
@@ -145,11 +147,28 @@ export const api = {
       method: "POST",
       body: json({ base_revision: baseRevision }),
     }),
-  /** A blank scenario with the spec's defaults (section 4), made by the server. */
-  blankScenario: (name: string) =>
-    call<Scenario>(`/api/blank-scenario?name=${encodeURIComponent(name)}`),
-  run: (scenario: Scenario, signal?: AbortSignal) =>
-    call<ScenarioResult>("/api/run", { method: "POST", body: json({ scenario }), signal }),
+  /** The upgrade notes have been read (spec 8.2). */
+  dismissNotes: (id: string, baseRevision: number) =>
+    call<StoredProject>(`${projectUrl(id)}/dismiss-notes`, {
+      method: "POST",
+      body: json({ base_revision: baseRevision }),
+    }),
+  /** A blank funding plan, its dues starting at the project's current dues, made by the server. */
+  blankScenario: (name: string, currentDues: string) =>
+    call<Scenario>(
+      `/api/blank-scenario?name=${encodeURIComponent(name)}&dues=${encodeURIComponent(currentDues)}`,
+    ),
+  /** One scenario as it is being edited – with the facts it runs on, when they are the
+   * project's (an adopted plan carries its own). */
+  run: (scenario: Scenario, facts: Facts | null, signal?: AbortSignal) =>
+    call<ScenarioResult>("/api/run", {
+      method: "POST",
+      body: json({ scenario, facts }),
+      signal,
+    }),
+  /** Every scenario of a project as its facts and expenses are being edited (spec 7.1). */
+  runProject: (project: Project, signal?: AbortSignal) =>
+    call<ProjectRun>("/api/run-project", { method: "POST", body: json({ project }), signal }),
   exportProject: (id: string) => download(`${projectUrl(id)}/export.json`),
   exportWorkbook: (id: string, scenarios: string[]) =>
     download(

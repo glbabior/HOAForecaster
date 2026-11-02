@@ -284,7 +284,12 @@ export function ComparePage() {
   const span: [number, number] | null = shared
     ? [shared[0]?.year ?? 0, shared.at(-1)?.year ?? 0]
     : null;
-  const factsOf = (n: string) => stored.project.scenarios.find((s) => s.name === n)?.facts as Facts;
+  // the facts each runs on – an adopted plan's own, or the project's
+  const factsOf = (n: string): Facts =>
+    stored.project.scenarios.find((s) => s.name === n)?.facts ?? stored.project.facts;
+  const frozen = shown.filter(
+    ([n]) => stored.project.scenarios.find((s) => s.name === n)?.adoption,
+  );
   const list = measures(
     span,
     Math.max(0, ...shown.map(([, r]) => r.years.length)),
@@ -342,6 +347,13 @@ export function ComparePage() {
               <h2>Summary</h2>
               <CsvButton table={summaryTable} filename={`${name} - compare.csv`} />
             </div>
+            <p className="hint">
+              {stored.project.expenses_from
+                ? `Expenses from the set “${stored.project.expenses_from}”${stored.project.expenses_edited ? ", edited since it was loaded" : ""}.`
+                : "Expenses not from a saved set."}
+              {frozen.length > 0 &&
+                ` ${frozen.map(([n]) => n).join(", ")} ${frozen.length === 1 ? "keeps" : "keep"} the facts and expenses ${frozen.length === 1 ? "it was" : "they were"} adopted with.`}
+            </p>
             <div className="table-scroll">
               <table className="compare" ref={summaryTable}>
                 <caption className="visually-hidden">Summary measures by scenario</caption>

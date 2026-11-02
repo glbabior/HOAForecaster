@@ -14,9 +14,13 @@ import pytest
 
 from hoa_engine import (
     Adoption,
+    DuesMode,
+    DuesPath,
+    Increase,
     InvalidInputs,
     Project,
     ProjectFormatError,
+    Scenario,
     expenses_of,
     project_from_dict,
     project_to_dict,
@@ -28,6 +32,7 @@ from hoa_engine import (
 from hoa_engine.dues import rebase_dues, resolve_dues
 from hoa_engine.model import MAX_SET_NAME, MAX_SETS, blank_facts, check_project, same_set
 from hoa_engine.upgrade import upgrade_v3_project
+from hoa_engine.validate import validate_scenario
 
 D = Decimal
 SCHEMA_3 = Path(__file__).parent / "fixtures" / "demo_schema3.json"
@@ -371,3 +376,60 @@ def test_a_blank_projects_facts_are_the_spec_defaults() -> None:
         D("0.7"),
     )
     assert f.expense_lines == () and f.units == 1
+
+
+def test_a_long_scenario_name_is_shortened_in_the_report() -> None:
+    project, _ = _upgraded()
+    base = project.facts
+    s = replace(project.scenarios[0], facts=replace(base, units=base.units + 1))
+    _, report = upgrade_v3_project("P", "", (replace(s, facts=base), replace(s, name="x" * 500)))
+    assert report[0].startswith("x" * (MAX_SET_NAME - 1) + "… – its number of units")
+    assert len(report[0]) < 300
+
+
+def test_the_report_says_figures_stay_the_same_when_only_words_or_order_differ() -> None:
+    project, _ = _upgraded()
+    base = project.facts
+    first, *rest = base.expense_lines
+    reworded = replace(
+        base, expense_lines=(replace(first, description="Renamed", source="Note"), *rest)
+    )
+    reordered = replace(base, expense_lines=tuple(reversed(base.expense_lines)))
+    s = project.scenarios[0]
+    for facts, words, new_set in (
+        (reworded, "1 expense line", True),
+        (reordered, "the order of its expense lines", False),
+    ):
+        upgraded, report = upgrade_v3_project(
+            "P", "", (replace(s, name="First", facts=base), replace(s, name="Other", facts=facts))
+        )
+        assert report[0].startswith(f"Other – {words} – its figures stay the same")
+        assert len(upgraded.expense_sets) == 1 + new_set
+
+
+def test_carrying_dues_on_tidies_the_periods_and_pinned_years_to_the_new_start() -> None:
+    project, _ = _upgraded()
+    f = replace(project.facts, start_year=2027, end_year=2040)
+    increases = (
+        Increase(D("0.08"), 2028, 2030),  # over by the new start – dropped
+        Increase(D("0.03"), 2031, 2034),  # starts after it – kept
+        Increase(D("0.02"), 2035, None),
+    )
+    path = DuesPath(DuesMode.RATE, first_value=D(700), increases=increases)
+    path = replace(path, overrides={2029: D(800), 2033: D(900)})
+    plan = Scenario("P", f, path)
+    moved = rebase_dues(plan, f, 2030)
+    # 2029 pinned at 800, then +8% – 864 in 2030, now its first-year value
+    assert moved.dues.first_value == 864
+    assert moved.dues.increases == increases[1:]
+    assert moved.dues.overrides == {2033: D(900)}
+    later = replace(f, start_year=2030, end_year=2043)
+    assert validate_scenario(replace(moved, facts=later), later) == []
+    # a period running into the new start starts with it
+    straddling = replace(plan, dues=replace(path, increases=(Increase(D("0.03")),), overrides={}))
+    assert rebase_dues(straddling, f, 2030).dues.increases == (Increase(D("0.03")),)
+    long = (Increase(D("0.03"), 2028, None),)
+    across = rebase_dues(
+        replace(straddling, dues=replace(straddling.dues, increases=long)), f, 2030
+    )
+    assert across.dues.increases == (Increase(D("0.03")),)

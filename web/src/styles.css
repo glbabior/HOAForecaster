@@ -683,7 +683,7 @@ table.expenses td.amount input:not([type="checkbox"]) {
   width: 8em;
 }
 
-/* how often, Copy to… and Remove stacked, so the row stays narrow */
+/* how often and Remove stacked, so the row stays narrow */
 table.expenses td.row-buttons > * {
   display: block;
   width: 100%;
@@ -721,6 +721,21 @@ table.expenses td.row-buttons > * + * {
   grid-template-columns: minmax(0, 1fr) 220px;
   gap: 20px;
   align-items: start;
+}
+
+/* the project's screens list every scenario's results beside the inputs – a wider column */
+.split:has(.all-results) {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+}
+
+table.all-results {
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+table.all-results th,
+table.all-results td {
+  padding: 4px 6px;
 }
 
 .key-results {
@@ -867,18 +882,6 @@ button.small {
 
 .row-buttons button + button {
   margin-left: 4px;
-}
-
-.copy-choices .check {
-  display: block;
-  padding: 3px 0;
-}
-
-.copy-choices .check.all {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 6px;
-  margin-bottom: 4px;
-  font-weight: 600;
 }
 
 .split > * {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, localcontext
 
 from hoa_engine.model import DuesMode, Facts, Rounding, Scenario
 from hoa_engine.validate import validate_scenario
@@ -12,7 +12,9 @@ from hoa_engine.validate import validate_scenario
 def rebase_dues(scenario: Scenario, old: Facts, start_year: int) -> Scenario:
     """The scenario moved from `old`'s horizon to one starting `start_year` (spec 5) – a grown
     path's first-year value becomes what it charged in that year, when its old horizon had it,
-    so its dues carry on as they were. Everything else keeps its years. A path with problems
+    so its dues carry on as they were. Its yearly increases are tidied to the new years – a
+    period over before the new start dropped, one running into it starting with it – and years
+    pinned before the start (or at it, now the first-year value) dropped. A path with problems
     on its old horizon is left as it was."""
     path = scenario.dues
     if (
@@ -22,9 +24,18 @@ def rebase_dues(scenario: Scenario, old: Facts, start_year: int) -> Scenario:
         or validate_scenario(scenario, old)
     ):
         return scenario
-    with localcontext(prec=28):
+    with localcontext(prec=28, rounding=ROUND_HALF_EVEN):  # the engine's – never the caller's
         charged = resolve_dues(scenario, range(old.start_year, start_year + 1))[start_year]
-    return replace(scenario, dues=replace(path, first_value=charged))
+    increases = tuple(
+        replace(i, first_year=None)
+        if i.first_year is not None and i.first_year <= start_year
+        else i
+        for i in path.increases
+        if i.last_year is None or i.last_year > start_year
+    )
+    overrides = {y: v for y, v in path.overrides.items() if y > start_year}
+    tidied = replace(path, first_value=charged, increases=increases, overrides=overrides)
+    return replace(scenario, dues=tidied)
 
 
 def resolve_dues(scenario: Scenario, years: range) -> dict[int, Decimal]:

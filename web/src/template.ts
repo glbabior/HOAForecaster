@@ -1,15 +1,37 @@
 // Shapes for new, copied and reshaped scenarios. Blank scenarios come from the server, which
 // holds the spec's defaults (src/hoa_app/template.py).
 
-import type { ExpenseLine, Facts, Scenario } from "./types";
+import { num } from "./decimal";
+import type { DuesPath, ExpenseSet, Facts, Scenario } from "./types";
 
-/** A new scenario started from another (spec 7.2) – a copy of all its inputs, but not its
- * name, its adoption or its timestamps. */
+/** A new scenario started from another (spec 7.2) – a copy of its funding (dues path, special
+ * assessments, rounding and description), not its name, its adoption or its timestamps. It uses
+ * the project's facts and expenses, even when started from an adopted plan. */
 export const startFrom = (source: Scenario, name: string): Scenario => ({
   ...structuredClone(source),
   name,
+  facts: null,
   adoption: null,
 });
+
+/** A grown dues path carried on to a new start year (spec 5, as the server's rebase_dues) – the
+ * figure it charged that year as its first-year value, a period over before the new start
+ * dropped, one running into it starting with it, and years pinned up to it dropped. */
+export function carriedOn(dues: DuesPath, charged: string, start: number): DuesPath {
+  if (dues.mode !== "rate") return dues;
+  return {
+    ...dues,
+    first_value: charged,
+    increases: dues.increases
+      .filter((i) => i.last_year === null || i.last_year > start)
+      .map((i) =>
+        i.first_year !== null && i.first_year <= start ? { ...i, first_year: null } : i,
+      ),
+    overrides: Object.fromEntries(
+      Object.entries(dues.overrides).filter(([y]) => Number(y) > start),
+    ),
+  };
+}
 
 /** The current adopted plan – the one adopted most recently (spec 5.2). */
 export function currentAdoption(scenarios: Scenario[]): Scenario | undefined {
@@ -35,10 +57,10 @@ export function moveScenario(
   return [...rest.slice(0, at), moving, ...rest.slice(at)];
 }
 
-/** The years a scenario runs over – none while it is not a usable horizon (a year half
+/** The years a set of facts runs over – none while it is not a usable horizon (a year half
  * typed). */
-export function horizonOf(scenario: Scenario): number[] {
-  const { start_year: start, end_year: end } = scenario.facts;
+export function horizonOf(facts: Facts): number[] {
+  const { start_year: start, end_year: end } = facts;
   if (!plausibleHorizon(start, end)) return [];
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }
@@ -48,17 +70,21 @@ export function horizonOf(scenario: Scenario): number[] {
 export const plausibleHorizon = (start: number, end: number): boolean =>
   start >= 1900 && end - start + 1 >= 5 && end - start + 1 <= 30;
 
-/** The scenario over a new horizon – every Fully Funded Balance and typed dues figure already
- * entered is kept (shortening must never discard data); new years get a zero Fully Funded
- * Balance, and typed dues the nearest earlier figure (or the first one, before the old
- * start). A horizon still being typed only changes the years. */
-export function withHorizon(scenario: Scenario, start: number, end: number): Scenario {
-  const facts = { ...scenario.facts, start_year: start, end_year: end };
-  if (!plausibleHorizon(start, end)) return { ...scenario, facts };
-  const ffb: Record<string, string> = { ...facts.ffb };
+/** The facts over a new horizon – every Fully Funded Balance figure already entered is kept
+ * (shortening must never discard data), new years get a zero. A horizon still being typed only
+ * changes the years. */
+export function factsWithHorizon(facts: Facts, start: number, end: number): Facts {
+  const moved = { ...facts, start_year: start, end_year: end };
+  if (!plausibleHorizon(start, end)) return moved;
+  const ffb: Record<string, string> = { ...moved.ffb };
   for (let y = start; y <= end + 1; y += 1) ffb[String(y)] ??= "0";
-  const reshaped = { ...scenario, facts: { ...facts, ffb } };
-  if (scenario.dues.mode !== "explicit") return reshaped;
+  return { ...moved, ffb };
+}
+
+/** A scenario's typed dues over a new horizon – every figure kept, new years the nearest
+ * earlier figure (or the first one, before the old start). Grown dues need nothing. */
+export function duesWithHorizon(scenario: Scenario, start: number, end: number): Scenario {
+  if (scenario.dues.mode !== "explicit" || !plausibleHorizon(start, end)) return scenario;
   const explicit: Record<string, string> = { ...scenario.dues.explicit };
   const known = Object.keys(explicit)
     .map(Number)
@@ -68,54 +94,92 @@ export function withHorizon(scenario: Scenario, start: number, end: number): Sce
     const earlier = known.filter((k) => k < y).at(-1) ?? known[0];
     explicit[String(y)] = earlier === undefined ? "0" : (explicit[String(earlier)] ?? "0");
   }
-  return { ...reshaped, dues: { mode: "explicit", explicit } };
-}
-
-// ---------------------------------------------------------------- copying into other scenarios
-
-/** Source notes with one note set – or removed, when the copied figure has none. */
-function withNote(sources: Record<string, string>, key: string, note: string | undefined) {
-  const rest = Object.fromEntries(Object.entries(sources).filter(([k]) => k !== key));
-  return note ? { ...rest, [key]: note } : rest;
+  return { ...scenario, dues: { mode: "explicit", explicit } };
 }
 
 /** A scalar fact or assumption, as a key of Facts. */
 export type FactKey = Exclude<keyof Facts, "expense_lines" | "ffb" | "sources">;
 
-/** The target with this scenario's figure and source note for one fact – the horizon
- * reshaping the target's tables as typing it there would. */
-export function copyFact(target: Scenario, from: Facts, key: FactKey): Scenario {
-  const sources = withNote(target.facts.sources, key, from.sources[key]);
-  const next = { ...target, facts: { ...target.facts, [key]: from[key], sources } };
-  if (key === "start_year" || key === "end_year")
-    return withHorizon(next, next.facts.start_year, next.facts.end_year);
-  return next;
-}
+// ---------------------------------------------------------------- expense sets (spec 4.3)
 
-/** The target with this expense line – replacing its line of the same id, or added last. */
-export function copyLine(target: Scenario, line: ExpenseLine): Scenario {
-  const lines = target.facts.expense_lines;
-  const copy = structuredClone(line);
-  const expense_lines = lines.some((l) => l.id === line.id)
-    ? lines.map((l) => (l.id === line.id ? copy : l))
-    : [...lines, copy];
-  return { ...target, facts: { ...target.facts, expense_lines } };
-}
+/** The source notes that belong with the expenses, and so travel with a set. */
+const EXPENSE_SOURCES = ["ffb", "expense_base_year"];
 
-/** The target with this Fully Funded Balance – every year this scenario has replaces the
- * target's, years only the target has are kept – its source note, and whether it is worked
- * out from the expenses. */
-export function copyFfb(target: Scenario, from: Facts): Scenario {
-  const sources = withNote(target.facts.sources, "ffb", from.sources.ffb);
+/** The expenses of a set of facts saved as a set named `name` – an operating line's blank
+ * first year (the start year) written as that year, so the set means the same figures whenever
+ * it is loaded, and the reserve inflation it was saved with. */
+export function expensesOf(facts: Facts, name: string): ExpenseSet {
   return {
-    ...target,
-    facts: {
-      ...target.facts,
-      ffb: { ...target.facts.ffb, ...from.ffb },
-      ffb_from_lines: from.ffb_from_lines,
-      sources,
-    },
+    name,
+    expense_lines: facts.expense_lines.map((l) =>
+      (l.frequency === "monthly" || l.frequency === "yearly") && l.year === null
+        ? { ...structuredClone(l), year: facts.start_year }
+        : structuredClone(l),
+    ),
+    expense_base_year: facts.expense_base_year,
+    ffb: { ...facts.ffb },
+    ffb_from_lines: facts.ffb_from_lines,
+    sources: Object.fromEntries(
+      Object.entries(facts.sources).filter(([k]) => EXPENSE_SOURCES.includes(k)),
+    ),
+    saved_inflation: facts.expense_inflation,
   };
+}
+
+/** The facts with a set loaded in place of their expenses – every other fact as it was, and
+ * the Fully Funded Balance years the set lacks kept. */
+export function withExpenses(facts: Facts, set: ExpenseSet): Facts {
+  const kept = Object.fromEntries(
+    Object.entries(facts.sources).filter(([k]) => !EXPENSE_SOURCES.includes(k)),
+  );
+  return {
+    ...facts,
+    expense_lines: structuredClone(set.expense_lines),
+    expense_base_year: set.expense_base_year,
+    ffb: { ...facts.ffb, ...set.ffb },
+    ffb_from_lines: set.ffb_from_lines,
+    sources: { ...kept, ...set.sources },
+  };
+}
+
+/** Whether two sets of facts have the same expenses – what a set holds, whatever its name. */
+export function sameExpenses(a: Facts, b: Facts): boolean {
+  // in any order, and amounts as numbers – sorting a table or typing 41000.00 for 41000 changes
+  // nothing (spec 4.3, as the server's same_set)
+  const value = (v: string | null | undefined) => (v === null || v === undefined ? null : num(v));
+  const key = (f: Facts) => {
+    const s = expensesOf(f, "");
+    // each line as the fields its frequency uses, in one order, blanks as null – however the
+    // line was made (the form, a paste, the server)
+    const lines = [...s.expense_lines]
+      .sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+      .map((l) => {
+        const operating = l.frequency === "monthly" || l.frequency === "yearly";
+        return [
+          l.id,
+          l.frequency,
+          l.year ?? null,
+          value(l.amount),
+          l.description,
+          l.source,
+          l.frequency === "once" ? null : (l.end_year ?? null),
+          l.frequency === "every" ? (l.interval ?? null) : null,
+          operating ? value(l.inflation) : null,
+          operating ? null : Boolean(l.nominal),
+          l.frequency === "once" ? (l.useful_life ?? null) : null,
+        ];
+      });
+    const sources = Object.fromEntries(
+      Object.entries(s.sources).sort(([x], [y]) => (x < y ? -1 : 1)),
+    );
+    const ffb = Object.fromEntries(
+      Object.entries(s.ffb)
+        .sort(([x], [y]) => Number(x) - Number(y))
+        .map(([y, v]) => [y, value(v)]),
+    );
+    return JSON.stringify([lines, s.expense_base_year, ffb, s.ffb_from_lines, sources]);
+  };
+  return key(a) === key(b);
 }
 
 export function uniqueName(base: string, taken: string[]): string {

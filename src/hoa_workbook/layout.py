@@ -2,9 +2,12 @@
 
 The layout follows the reference workbook (Method, Compare, Charts, one Plan
 sheet per scenario), generalised to any horizon, the three dues modes and any
-number of special assessments. The reference workbook's Inputs and Expenses
-sheets are part of every Plan sheet, since each scenario holds all of its own
-inputs (spec 7.6); a Project sheet holds the association's name and notes.
+number of special assessments. The Project sheet holds the association's name and
+notes and the project's facts and assumptions, and the Expenses sheet the
+project's Fully Funded Balance and expenses – every scenario's but an adopted
+plan's, which keeps its own below its charts (spec 7.6). A workbook exported
+before v2.0 has each scenario's facts and expenses on its own sheet, and is
+still read.
 """
 
 from __future__ import annotations
@@ -12,8 +15,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-METHOD, PROJECT, COMPARE, CHARTS = "Method", "Project", "Compare", "Charts"
-SHEET_ORDER = (METHOD, PROJECT, COMPARE, CHARTS)
+METHOD, PROJECT, EXPENSES, COMPARE, CHARTS = "Method", "Project", "Expenses", "Compare", "Charts"
+SHEET_ORDER = (METHOD, PROJECT, EXPENSES, COMPARE, CHARTS)
 RESERVED = {*SHEET_ORDER, "History"}  # Excel reserves "History"
 # the shared sheets of a workbook exported before each scenario held its own inputs
 OLD_SHEETS = ("Inputs", "Expenses")
@@ -25,6 +28,20 @@ HEADER_ROW = 4  # years run across this row on Plan sheets
 FIRST_PROJECT_ROW = 5  # the first row of values (row 4 is the column header)
 NAME_LABEL, NOTES_LABEL = "Association", "Project notes"
 PROJECT_ROW = {"name": FIRST_PROJECT_ROW, "notes": FIRST_PROJECT_ROW + 1}
+PROJECT_FACTS_ROW = FIRST_PROJECT_ROW + 3  # the facts heading, below the name and notes
+PROJECT_FACTS_HEADING = (
+    "The project's facts and assumptions – every scenario's but an adopted plan's"
+)
+
+# ---------------------------------------------------------------- Expenses sheet
+
+EXPENSES_FROM_LABEL = "Expense set"  # row 3 – the saved set the expenses came from, if any
+EXPENSES_TOP = 5  # the Fully Funded Balance heading
+PROJECT_FFB_HEADING = "The project's Fully Funded Balance"
+PROJECT_EXPENSES_HEADING = (
+    "The project's expenses – one row each (blank rows are spare). To add more, insert rows "
+    "inside the list and copy a whole row into them, so its year formulas come with it"
+)
 
 # ---------------------------------------------------------------- a scenario's facts
 

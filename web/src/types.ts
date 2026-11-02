@@ -85,12 +85,16 @@ export interface Adoption {
   note: string;
   /** adoption order – the highest is the current adopted plan */
   sequence: number;
+  /** the expense set its frozen expenses came from, and whether they had been edited since */
+  expenses_from?: string | null;
+  expenses_edited?: boolean;
 }
 
 export interface Scenario {
   name: string;
   description: string;
-  facts: Facts;
+  /** null – the project's facts (spec 3); an adopted plan's own, frozen when it was adopted */
+  facts: Facts | null;
   dues: DuesPath;
   assessments: Assessment[];
   rounding: "dollar" | "none";
@@ -98,10 +102,29 @@ export interface Scenario {
   adoption?: Adoption | null;
 }
 
+/** A named, saved copy of the project's expenses (spec 4.3). */
+export interface ExpenseSet {
+  name: string;
+  expense_lines: ExpenseLine[];
+  expense_base_year: number;
+  ffb: Record<string, Dec>;
+  ffb_from_lines: boolean;
+  /** the notes on the Fully Funded Balance and the base year */
+  sources: Record<string, string>;
+  /** the reserve inflation it was saved with – for information */
+  saved_inflation: Dec | null;
+}
+
 export interface Project {
   schema_version: number;
   name: string;
   notes: string;
+  /** the facts, expenses and Fully Funded Balance every scenario uses but an adopted plan */
+  facts: Facts;
+  expense_sets: ExpenseSet[];
+  /** the set the expenses were loaded from, and whether they have been edited since */
+  expenses_from: string | null;
+  expenses_edited: boolean;
   scenarios: Scenario[];
 }
 
@@ -115,6 +138,9 @@ export interface StoredProject {
   revision: number;
   times: Times;
   scenario_times: Record<string, Times>;
+  set_times: Record<string, Times>;
+  /** what the schema upgrade changed, until it has been read (spec 8.2) */
+  upgrade_notes: string[];
   project: Project;
 }
 
@@ -199,6 +225,13 @@ export interface ScenarioResult {
 }
 
 export type ScenarioOutcome = { result: ScenarioResult } | { problems: string[] };
+
+/** The project's live run – every scenario's results, and the project's own facts' problems
+ * and Fully Funded Balance (spec 7.1). */
+export interface ProjectRun extends ProjectResults {
+  problems: string[];
+  ffb: Record<string, Dec>;
+}
 
 export interface ProjectResults {
   scenarios: Record<string, ScenarioOutcome>;

@@ -1,7 +1,9 @@
 """Write a project as an Excel workbook with live formulas (spec section 7.6).
 
-Every result cell is a formula over the input cells of its scenario's sheet,
-so the workbook recalculates on its own when a board member edits it. This
+Every result cell is a formula over input cells – a scenario's dues and
+assessments on its own sheet, and the project's facts and expenses on the
+Project and Expenses sheets (an adopted plan's own, below its charts) – so the
+workbook recalculates on its own when a board member edits it. This
 module never runs the engine; its formulas are a second, independent
 implementation of section 6, and the tests hold the two to the same figures.
 """
@@ -9,11 +11,11 @@ implementation of section 6, and the tests hold the two to the same figures.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import Cell
@@ -25,7 +27,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 from hoa_engine.model import DuesMode, ExpenseLine, Facts, Project, Rounding, Scenario
-from hoa_engine.validate import validate_run
+from hoa_engine.validate import horizon_problem, validate_facts, validate_run
 from hoa_workbook import charts
 from hoa_workbook.layout import (
     ADOPTED_ON_LABEL,
@@ -43,7 +45,10 @@ from hoa_workbook.layout import (
     EXPENSE_COLUMNS,
     EXPENSE_SPARE_ROWS,
     EXPENSE_YEAR_COL,
+    EXPENSES,
+    EXPENSES_FROM_LABEL,
     EXPENSES_HEADING,
+    EXPENSES_TOP,
     FACT_ROWS,
     FACTS_HEADING,
     FFB_KEPT_LABEL,
@@ -70,6 +75,10 @@ from hoa_workbook.layout import (
     PLAN_RESERVE_LABEL,
     PLAN_ROWS,
     PROJECT,
+    PROJECT_EXPENSES_HEADING,
+    PROJECT_FACTS_HEADING,
+    PROJECT_FACTS_ROW,
+    PROJECT_FFB_HEADING,
     PROJECT_ROW,
     ROUND_DOLLAR,
     ROUND_NONE,
@@ -171,14 +180,13 @@ def _at(ws: Worksheet, row: int, col: int) -> Cell:
 
 
 ROW_NOTES = {
-    "operating": "The monthly and yearly lines in this sheet's expenses, below the charts, each "
-    "grown at its own inflation rate or the operating rate. Any dues above operating cost go to "
-    "reserves.",
+    "operating": "The monthly and yearly lines of the expenses, each grown at its own inflation "
+    "rate or the operating rate. Any dues above operating cost go to reserves.",
     "contribution": "Total dues less operating expenses, never below zero. A shortfall is flagged "
     "below, not taken from reserves.",
     "pf": "Year-end balance divided by the Fully Funded Balance at the start of the following "
     "year – the reserve study's figures, or worked out from the expenses' useful lives, as the "
-    "sheet's Fully Funded Balance block says. Under 30% is weak, 30–70% fair, over 70% strong.",
+    "Fully Funded Balance block says. Under 30% is weak, 30–70% fair, over 70% strong.",
 }
 
 
@@ -197,13 +205,15 @@ class _Plan:
 # ---------------------------------------------------------------- Project
 
 
-def _project(wb: Workbook, project: Project) -> None:
+def _project(wb: Workbook, project: Project) -> Worksheet:
     ws = wb.create_sheet(PROJECT)
-    _widths(ws, [30, 90])
+    _widths(ws, [52, 60, 15, 50])
     _text(ws["A1"], f"{project.name} – Project", bold=True, size=13)
     _text(
         ws["A2"],
-        "Each scenario's facts, assumptions and expenses are on its own sheet, below its charts.",
+        "The project's facts and assumptions are below, and its Fully Funded Balance and "
+        "expenses on the Expenses sheet – every scenario uses them but an adopted plan, which "
+        "keeps the ones it was adopted with below its charts.",
         italic=True,
         size=9,
     )
@@ -219,6 +229,7 @@ def _project(wb: Workbook, project: Project) -> None:
         _text(ws.cell(r, 2), value, color=BLUE)
         ws.cell(r, 2).fill = YELLOW
         ws.cell(r, 2).alignment = Alignment(wrap_text=True, vertical="top")
+    return cast(Worksheet, ws)
 
 
 # ---------------------------------------------------------------- expense lines
@@ -293,12 +304,15 @@ def _frequency_choice(ws: Worksheet) -> DataValidation:
 
 
 _FORMATS = {"money": CUR, "rate": PCT, "year": YEAR, "count": "0"}
+_OWN = (FACTS_HEADING, PLAN_FFB_HEADING, EXPENSES_HEADING)  # the headings below a Plan's charts
 
 
-def _plan_facts(ws: Worksheet, facts: Facts, top: int) -> tuple[dict[str, str], int]:
-    """The scenario's facts and assumptions, each with its source note. Returns the cell of
-    each, and the next free row."""
-    _text(_at(ws, top, 1), FACTS_HEADING, bold=True)
+def _plan_facts(
+    ws: Worksheet, facts: Facts, top: int, heading: str = FACTS_HEADING
+) -> tuple[dict[str, str], int]:
+    """Facts and assumptions, each with its source note. Returns the cell of each, and the
+    next free row."""
+    _text(_at(ws, top, 1), heading, bold=True)
     headings = [(1, "Assumption"), (VALUE_COL, "Value"), (SOURCE_COL, "Source / note")]
     for col, heading in headings:
         ws.cell(top + 1, col, heading)
@@ -324,12 +338,14 @@ class _Ffb:
     row: int
 
 
-def _plan_ffb(ws: Worksheet, facts: Facts, top: int) -> tuple[_Ffb, int]:
+def _plan_ffb(
+    ws: Worksheet, facts: Facts, top: int, heading: str = PLAN_FFB_HEADING
+) -> tuple[_Ffb, int]:
     """The scenario's Fully Funded Balance – its own years and one more, and any other year it
     holds (kept, though the horizon does not reach it) – and where it comes from. Typed, the row
     holds the study's figures; worked out (spec 4.2), formulas filled in later, with the typed
     figures kept in the row below. Returns where it is, and the next free row."""
-    _text(_at(ws, top, 1), PLAN_FFB_HEADING, bold=True)
+    _text(_at(ws, top, 1), heading, bold=True)
     _text(_at(ws, top + 1, 1), PLAN_FFB_YEARS_LABEL)
     _text(_at(ws, top + 2, 1), FFB_LABEL)
     _comment(_at(ws, top + 2, 1), facts.sources.get("ffb", ""))
@@ -392,11 +408,13 @@ class _Totals:
     lines: tuple[int, int]  # the first and last row of the expense table
 
 
-def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Totals:
-    """The scenario's expenses, one row each with its year formulas and spare rows below, and
-    its operating and reserve totals."""
+def _plan_expenses(
+    ws: Worksheet, facts: Facts, rates: _Rates, top: int, heading: str = EXPENSES_HEADING
+) -> _Totals:
+    """The expenses, one row each with its year formulas and spare rows below, and the
+    operating and reserve totals."""
     years = list(facts.years)
-    _text(_at(ws, top, 1), EXPENSES_HEADING, bold=True)
+    _text(_at(ws, top, 1), heading, bold=True)
     head = top + 1
     for col, column in enumerate(EXPENSE_COLUMNS, start=1):
         ws.cell(head, col, column.heading).alignment = Alignment(wrap_text=True)
@@ -449,7 +467,99 @@ def _plan_expenses(ws: Worksheet, facts: Facts, rates: _Rates, top: int) -> _Tot
     return _Totals(*totals, reserve_row, (first, last))
 
 
-def _plan(wb: Workbook, plan: _Plan) -> None:
+def _qualified(sheet: str, cells: dict[Any, str]) -> dict[Any, str]:
+    return {k: f"{quote(sheet)}!{v}" for k, v in cells.items()}
+
+
+@dataclass(frozen=True)
+class _Inputs:
+    """Where a Plan sheet's formulas find the facts, the Fully Funded Balance and the expense
+    totals – cells on `facts_sheet` and `expenses_sheet`."""
+
+    facts_sheet: str
+    ref: dict[str, str]
+    expenses_sheet: str
+    ffb: dict[int, str]
+    operating: dict[int, str]
+    reserve: dict[int, str]
+    last_row: int  # the reserve total's row
+
+    def seen_from(self, sheet: str) -> _Inputs:
+        """The same cells, named with their sheet where it is another."""
+
+        def on(where: str, cells: dict[Any, str]) -> dict[Any, str]:
+            return dict(cells) if where == sheet else _qualified(where, cells)
+
+        return replace(
+            self,
+            ref=on(self.facts_sheet, self.ref),
+            ffb=on(self.expenses_sheet, self.ffb),
+            operating=on(self.expenses_sheet, self.operating),
+            reserve=on(self.expenses_sheet, self.reserve),
+        )
+
+
+def _inputs(
+    facts_ws: Worksheet,
+    facts_top: int,
+    expenses_ws: Worksheet,
+    expenses_top: int | None,
+    facts: Facts,
+    headings: tuple[str, str, str],
+) -> _Inputs:
+    """Facts and assumptions at `facts_top` on one sheet, and the Fully Funded Balance and
+    expenses at `expenses_top` on another – or straight below the facts on the same sheet."""
+    ref, next_row = _plan_facts(facts_ws, facts, facts_top, headings[0])
+    seen = ref if facts_ws is expenses_ws else _qualified(facts_ws.title, ref)
+    rates = _Rates(
+        seen["operating_inflation"],
+        seen["expense_inflation"],
+        seen["expense_base_year"],
+        seen["start_year"],
+    )
+    ffb_at, row = _plan_ffb(expenses_ws, facts, expenses_top or next_row, headings[1])
+    totals = _plan_expenses(expenses_ws, facts, rates, row, headings[2])
+    if facts.ffb_from_lines:
+        _worked_out_ffb(expenses_ws, facts, ffb_at, totals.lines, rates)
+    return _Inputs(
+        facts_ws.title,
+        ref,
+        expenses_ws.title,
+        ffb_at.cells,
+        totals.operating,
+        totals.reserve,
+        totals.last_row,
+    )
+
+
+def _project_inputs(wb: Workbook, project_ws: Worksheet, project: Project) -> _Inputs:
+    """The project's facts on the Project sheet, and its Fully Funded Balance and expenses on
+    the Expenses sheet – every scenario's but an adopted plan's."""
+    facts = project.facts
+    ws = wb.create_sheet(EXPENSES)
+    _widths(ws, [52, 15] + [12] * (EXPENSE_YEAR_COL + len(facts.years)))
+    _text(ws["A1"], f"{project.name} – Expenses", bold=True, size=13)
+    _text(
+        ws["A2"],
+        "The project's Fully Funded Balance and expenses – every scenario uses them but an "
+        "adopted plan. Edit the blue cells; the facts they are grown with are on the Project "
+        "sheet.",
+        italic=True,
+        size=9,
+    )
+    _text(_at(ws, 3, 1), EXPENSES_FROM_LABEL)
+    loaded = (
+        "none – not loaded from a saved set"
+        if project.expenses_from is None
+        else project.expenses_from
+        + (" – edited since it was loaded" if project.expenses_edited else "")
+    )
+    _text(_at(ws, 3, VALUE_COL), loaded, italic=True)
+    headings = (PROJECT_FACTS_HEADING, PROJECT_FFB_HEADING, PROJECT_EXPENSES_HEADING)
+    return _inputs(project_ws, PROJECT_FACTS_ROW, ws, EXPENSES_TOP, facts, headings)
+
+
+def _plan(wb: Workbook, plan: _Plan, project: _Inputs) -> None:
     s, facts = plan.scenario, plan.facts
     years = list(facts.years)
     ws = wb.create_sheet(plan.sheet)
@@ -458,12 +568,14 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
     _text(ws["A2"], s.description, italic=True)
     on = s.adoption.adopted_on if s.adoption else None
     guide = (
-        f"Adopted plan – adopted {MONTHS[on.month - 1]} {on.day}, {on.year}. Read-only in the "
-        "app – start a new scenario from it there to revise it."
+        f"Adopted plan – adopted {MONTHS[on.month - 1]} {on.day}, {on.year}, with the facts and "
+        "expenses below its charts. Read-only in the app – start a new scenario from it there to "
+        "revise it."
         if on
         else "Edit the blue cells – dues, special assessments and the dues settings below the "
-        "table, and below the charts this scenario's facts and assumptions, Fully Funded Balance "
-        "and expenses. Everything else is calculated."
+        "table. The facts and assumptions are on the Project sheet and the Fully Funded Balance "
+        "and expenses on the Expenses sheet, shared by every scenario. Everything else is "
+        "calculated."
     )
     _text(ws["A3"], guide, italic=True, size=9)
     pc = {y: col_letter(PLAN_FIRST_COL + i) for i, y in enumerate(years)}
@@ -477,21 +589,16 @@ def _plan(wb: Workbook, plan: _Plan) -> None:
         _text(ws.cell(row, 1), label, bold=key in ("end", "pf"))
 
     n_assess, n_incr = len(s.assessments), len(s.dues.increases)
-    ref, row = _plan_facts(ws, facts, plan_inputs_row(n_assess, n_incr))
-    ffb_at, row = _plan_ffb(ws, facts, row)
-    ffb = ffb_at.cells
-    rates = _Rates(
-        ref["operating_inflation"],
-        ref["expense_inflation"],
-        ref["expense_base_year"],
-        ref["start_year"],
+    # an adopted plan's own facts and expenses, frozen when it was adopted, below its charts
+    own = (
+        _inputs(ws, plan_inputs_row(n_assess, n_incr), ws, None, facts, _OWN)
+        if s.adoption
+        else None
     )
-    totals = _plan_expenses(ws, facts, rates, row)
-    operating, reserve = totals.operating, totals.reserve
-    if facts.ffb_from_lines:
-        _worked_out_ffb(ws, facts, ffb_at, totals.lines, rates)
-    if s.adoption:
-        r = totals.last_row + 2
+    seen = (own or project).seen_from(ws.title)
+    ref, ffb, operating, reserve = seen.ref, seen.ffb, seen.operating, seen.reserve
+    if s.adoption and own:
+        r = own.last_row + 2
         for i, label in enumerate((ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL)):
             _text(_at(ws, r + i, 1), label, bold=True)
         _text(_at(ws, r, VALUE_COL), s.adoption.adopted_on.isoformat())
@@ -882,7 +989,7 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
         ("", False, 10),
         ("How it works", True, 11),
         (
-            "1. One sheet per scenario, each complete in itself. At the top, the board sets dues "
+            "1. One sheet per scenario. At the top, the board sets dues "
             "per unit per month, either typed for each year or grown from a first-year figure, "
             "and any special assessment per unit. Dues above operating cost flow to reserves. The "
             "sheet projects the reserve balance each year, compares it to the Fully Funded "
@@ -892,12 +999,13 @@ def _method(wb: Workbook, project: Project, plans: list[_Plan]) -> None:
             10,
         ),
         (
-            "2. Below each scenario's charts are its facts and assumptions – starting balance, "
-            "units, current dues, operating cost inflation, reserve expense inflation, interest, "
-            "the minimum cushion, the percent-funded target and the owner-vote limits – then its "
-            "Fully Funded Balance for each year (the reserve study's figures, or worked out from "
-            "the expenses' useful lives), then its expenses. Monthly and "
-            "yearly lines are operating costs paid from dues, each grown at its own inflation "
+            "2. Every scenario uses the project's facts and assumptions, on the Project sheet – "
+            "starting balance, units, current dues, operating cost inflation, reserve expense "
+            "inflation, interest, the minimum cushion, the percent-funded target and the "
+            "owner-vote limits – and its Fully Funded Balance for each year (the reserve study's "
+            "figures, or worked out from the expenses' useful lives) and expenses, on the Expenses "
+            "sheet – an adopted plan keeps the ones it was adopted with below its charts. Monthly "
+            "and yearly lines are operating costs paid from dues, each grown at its own inflation "
             "rate or the operating rate. Once and every-few-years lines are reserve expenses, "
             "grown from the expense base year at the reserve expense inflation rate unless marked "
             "as already in the dollars of their first year, when an every-few-years line's later "
@@ -984,15 +1092,19 @@ def build_workbook(
         _Plan(s, sheet)
         for s, sheet in zip(chosen, sheet_names([s.name for s in chosen]), strict=True)
     ]
+    horizon = horizon_problem(project.facts)
+    problems = [horizon] if horizon else validate_facts(project.facts)
+    if problems:  # the Project and Expenses sheets carry them whichever scenarios are chosen
+        raise ValueError("the project's facts and expenses – " + "; ".join(problems))
     for plan in plans:
         problems = validate_run(plan.scenario)
         if problems:  # an impossible horizon would also make its sheet absurdly wide
             raise ValueError(f"{plan.scenario.name} – " + "; ".join(problems))
     wb = Workbook()
     wb.remove(wb.worksheets[0])
-    _project(wb, project)
+    shared = _project_inputs(wb, _project(wb, project), project)
     for plan in plans:
-        _plan(wb, plan)
+        _plan(wb, plan, shared)
     _compare(wb, plans)
     charts.add_charts_sheet(
         wb,

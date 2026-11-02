@@ -272,7 +272,7 @@ def test_workbook_export_carries_the_chosen_scenarios_and_a_shared_scale(
     assert "the same dollar scale" in str(wb["Charts"]["A2"].value)
     everything = client.get(f"/api/projects/{demo_id}/export.xlsx")
     # Method, Project, Compare and Charts, then one sheet per scenario
-    assert len(openpyxl.load_workbook(BytesIO(everything.content)).sheetnames) == 4 + len(
+    assert len(openpyxl.load_workbook(BytesIO(everything.content)).sheetnames) == 5 + len(
         DEMO.scenarios
     )
     unknown = client.get(f"/api/projects/{demo_id}/export.xlsx?scenario=Nope")
@@ -587,7 +587,7 @@ def test_an_upgraded_projects_notes_are_shown_until_dismissed(client: TestClient
     assert len(imported["upgrade_notes"]) == 2
     assert set(imported["set_times"]) == {e["name"] for e in imported["project"]["expense_sets"]}
     url = f"/api/projects/{imported['id']}/dismiss-notes"
-    read = client.post(url, json={"revision": imported["revision"]}).json()
+    read = client.post(url, json={"base_revision": imported["revision"]}).json()
     assert read["upgrade_notes"] == []
-    assert client.post(url, json={"revision": imported["revision"]}).status_code == 409
+    assert client.post(url, json={"base_revision": imported["revision"]}).status_code == 409
     assert client.post(url, json={}).status_code == 422

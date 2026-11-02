@@ -143,7 +143,6 @@ export function ExpenseTable({
   lines,
   onChange,
   defaultYear,
-  onCopy,
   taken = [],
   horizon,
 }: {
@@ -152,10 +151,8 @@ export function ExpenseTable({
   defaultYear: number;
   /** the scenario's years and reserve inflation – to show each every-few-years line's repeats */
   horizon?: Horizon;
-  /** offer each line for copying into other scenarios */
-  onCopy?: (line: ExpenseLine) => void;
-  /** ids other scenarios use – a new line never takes one, so copying it never replaces a
-   * different line there */
+  /** ids adopted plans' frozen expenses use – a new line never takes one, so an id names one
+   * line across the project */
   taken?: string[];
 }) {
   const [notice, setNotice] = useState("");
@@ -247,7 +244,6 @@ export function ExpenseTable({
                         rows.removed(i);
                         onChange(lines.filter((_, j) => j !== i));
                       }}
-                      onCopy={onCopy && (() => onCopy(line))}
                     />
                   );
                 }}
@@ -460,7 +456,6 @@ function ExpenseRow({
   defaultYear,
   onChange,
   onRemove,
-  onCopy,
   onMoved,
   number,
 }: {
@@ -471,7 +466,6 @@ function ExpenseRow({
   defaultYear: number;
   onChange: (line: ExpenseLine) => void;
   onRemove: () => void;
-  onCopy?: () => void;
   /** after the line has moved to another kind's table */
   onMoved: (to: Frequency) => void;
 }) {
@@ -600,16 +594,6 @@ function ExpenseRow({
             </option>
           ))}
         </select>
-        {onCopy && (
-          <button
-            type="button"
-            className="small"
-            aria-label={`Copy expense ${n} to other scenarios`}
-            onClick={onCopy}
-          >
-            Copy to…
-          </button>
-        )}
         <button
           type="button"
           className="small"

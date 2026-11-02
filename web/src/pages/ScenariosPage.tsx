@@ -158,10 +158,11 @@ export function ScenariosPage() {
       <ProjectNav stored={stored} here="Scenarios" />
       <h1>Scenarios</h1>
       <p className="hint">
-        A scenario is one way to pay for the plan, complete in itself – its facts and assumptions,
-        its expenses, its Fully Funded Balance, its dues each year and any special assessments. Open
-        one to see and change it; every edit is saved as you make it. Start a new one blank, or as a
-        copy of any scenario here.
+        A scenario is one way to pay for the plan – its dues each year and any special assessments.
+        Every scenario uses the project's facts and assumptions, expenses and Fully Funded Balance,
+        so they compare on the same building; an adopted plan keeps the ones it was adopted with.
+        Open one to see and change it; every edit is saved as you make it. Start a new one blank, or
+        as a copy of any scenario here.
       </p>
       <ErrorBanner error={loadError ?? moveError} />
       <section className="panel">

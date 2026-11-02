@@ -36,6 +36,7 @@ from hoa_engine import (
     project_from_dict,
     project_to_dict,
     run,
+    with_expenses,
 )
 from hoa_workbook import read as reader
 from hoa_workbook.charts import shared_grid
@@ -44,11 +45,16 @@ from hoa_workbook.layout import (
     ASSESS_FIRST_ROW,
     EXPENSE_COL,
     EXPENSE_YEAR_COL,
+    EXPENSES,
     EXPENSES_HEADING,
     FACTS_HEADING,
     PLAN_FIRST_COL,
     PLAN_OPERATING_LABEL,
     PLAN_RESERVE_LABEL,
+    PROJECT,
+    PROJECT_EXPENSES_HEADING,
+    PROJECT_FACTS_HEADING,
+    PROJECT_FFB_HEADING,
     PROJECT_ROW,
     ROW,
     SOURCE_COL,
@@ -220,11 +226,33 @@ def _varied_project() -> Project:
     return replace(DEMO, facts=own.facts, scenarios=plans, expenses_edited=True)
 
 
+def _as_read(project: Project) -> Project:
+    """A project as its workbook reads back – no saved expense sets (spec 7.6)."""
+    plain = tuple(
+        s if s.adoption is None else replace(s, adoption=replace(s.adoption, expenses_from=None))
+        for s in project.scenarios
+    )
+    return replace(
+        project, scenarios=plain, expense_sets=(), expenses_from=None, expenses_edited=False
+    )
+
+
 def _projects() -> list[Any]:
     out = [
         pytest.param(DEMO, id="demo"),
         pytest.param(_short_project(), id="short"),
         pytest.param(_varied_project(), id="varied"),
+        # the project's own Fully Funded Balance worked out, on the Expenses sheet
+        pytest.param(
+            replace(
+                DEMO,
+                facts=with_expenses(
+                    FACTS,
+                    next(e for e in DEMO.expense_sets if e.name == "Worked out from useful lives"),
+                ),
+            ),
+            id="worked",
+        ),
     ]
     data_dir = os.environ.get("HOA_PRIVATE_DIR")
     if data_dir:
@@ -254,13 +282,21 @@ def test_exported_workbook_recalculates_to_the_engines_figures(
     assert recalc.formula_errors(workbook) == []
     expected = extract_expected.extract(workbook, project_to_dict(project))
     problems = []
-    for s in project.scenarios:
+    for s in project.runnable_scenarios():
         problems += [f"{s.name} {p}" for p in mismatches(run(s), expected["scenarios"][s.name])]
     assert not problems, "\n".join(problems)
-    # a worked-out Fully Funded Balance, every year the screen shows – the start year too
+    # a worked-out Fully Funded Balance, every year the screen shows – the start year too – on
+    # the Expenses sheet, or below an adopted plan's charts
     wb = openpyxl.load_workbook(workbook, data_only=True)
-    for s in (x for x in project.scenarios if x.facts.ffb_from_lines):
-        ws = next(w for w in wb.worksheets if w["A1"].value == s.name)
+    for s in project.runnable_scenarios():
+        assert s.facts is not None
+        if not s.facts.ffb_from_lines:
+            continue
+        ws = (
+            wb[EXPENSES]
+            if s.adoption is None
+            else next(w for w in wb.worksheets if w["A1"].value == s.name)
+        )
         row, header = _rows(ws)["Fully Funded Balance at start of year"], {}
         for c in range(VALUE_COL, ws.max_column + 1):
             if isinstance(ws.cell(row - 1, c).value, int):
@@ -276,7 +312,7 @@ def test_export_then_import_gives_the_same_results(project: Project) -> None:
     again = read_workbook(export_workbook(project))
     assert [s.name for s in again.scenarios] == [s.name for s in project.scenarios]
     for before, after in zip(project.scenarios, again.scenarios, strict=True):
-        a, b = run(before), run(after)
+        a, b = run(project.runnable(before)), run(again.runnable(after))
         # Excel stores numbers as doubles, so allow a millionth of a cent of drift
         pairs = [(a.summary, b.summary), *zip(a.years, b.years, strict=True)]
         for x, y in pairs:
@@ -289,19 +325,33 @@ def test_export_then_import_gives_the_same_results(project: Project) -> None:
 
 
 def test_demo_round_trip_is_identical() -> None:
-    assert read_workbook(export_workbook(DEMO)) == DEMO
+    assert read_workbook(export_workbook(DEMO)) == _as_read(DEMO)
 
 
-def test_scenarios_with_their_own_facts_round_trip_identically() -> None:
+def test_adopted_plans_with_their_own_facts_round_trip_identically() -> None:
     project = _varied_project()
-    assert read_workbook(export_workbook(project)) == project
+    assert read_workbook(export_workbook(project)) == _as_read(project)
+
+
+def test_the_shared_sheets_carry_the_projects_facts_and_expenses() -> None:
+    wb = build_workbook(DEMO)
+    assert wb.sheetnames[:5] == ["Method", "Project", "Expenses", "Compare", "Charts"]
+    expenses = wb[EXPENSES]
+    assert expenses["C3"].value == DEMO.expenses_from  # the set they came from
+    edited = build_workbook(replace(DEMO, expenses_edited=True))[EXPENSES]["C3"].value
+    assert edited == f"{DEMO.expenses_from} – edited since it was loaded"
+    plain = build_workbook(replace(DEMO, expense_sets=(), expenses_from=None))[EXPENSES]
+    assert plain["C3"].value == "none – not loaded from a saved set"
+    # a scenario on the project's facts has none below its charts, and its formulas read them
+    plan = wb["Dues only"]
+    assert FACTS_HEADING not in _rows(plan) and EXPENSES_HEADING not in _rows(plan)
+    assert plan.cell(ROW["interest"], 3).value.endswith("*'Project'!$C$18")
+    assert plan.cell(ROW["operating"], 3).value.startswith("='Expenses'!")
 
 
 def test_fully_funded_balance_years_beyond_the_horizon_are_kept() -> None:
-    s = DEMO.scenarios[0]
-    wider = replace(s, facts=replace(s.facts, ffb={**s.facts.ffb, 2050: D(5)}))
-    project = replace(DEMO, scenarios=(wider,))
-    assert read_workbook(export_workbook(project)) == project
+    wider = replace(DEMO, facts=replace(FACTS, ffb={**FACTS.ffb, 2050: D(5)}))
+    assert read_workbook(export_workbook(wider)) == _as_read(wider)
 
 
 def _rows(ws: Any) -> dict[str, int]:
@@ -327,35 +377,42 @@ def _set(at: Any, value: Any) -> Any:
 
 
 def _first_expense_row(ws: Any) -> int:
-    return _rows(ws)[EXPENSES_HEADING] + 2
+    rows = _rows(ws)
+    return int(rows.get(PROJECT_EXPENSES_HEADING, rows.get(EXPENSES_HEADING))) + 2
 
 
 def _facts_after(edit: Any, sheet: str = "Dues only", project: Project = DEMO) -> Facts:
+    """The facts `sheet`'s scenario runs on after `edit` – the project's, unless it keeps
+    its own."""
     again = read_workbook(_broken(edit, project))
-    return next(s for s in again.scenarios if s.name == sheet).facts
+    facts = again.runnable(next(s for s in again.scenarios if s.name == sheet)).facts
+    assert facts is not None
+    return facts
 
 
-def test_a_figure_typed_in_excel_is_read_as_the_scenarios_own() -> None:
-    edit = _set(_plan_cell("Dues only", "Interest earned on reserves per year"), 0.04)
+def test_a_figure_typed_on_the_project_sheet_is_every_scenarios() -> None:
+    edit = _set(_plan_cell(PROJECT, "Interest earned on reserves per year"), 0.04)
     assert _facts_after(edit).interest_rate == D("0.04")
-    blank = _set(_plan_cell("Dues only", "Largest dues increase without an owner vote"), None)
+    blank = _set(_plan_cell(PROJECT, "Largest dues increase without an owner vote"), None)
     assert _facts_after(blank).max_dues_increase is None
-    note = _set(_plan_cell("Dues only", "Minimum working cushion", SOURCE_COL), "Our policy")
+    note = _set(_plan_cell(PROJECT, "Minimum working cushion", SOURCE_COL), "Our policy")
     assert _facts_after(note).sources["cushion"] == "Our policy"
-    # the other scenarios keep theirs – nothing is shared
-    other = read_workbook(_broken(edit)).scenarios[1]
-    assert other.facts.interest_rate == FACTS.interest_rate
+    # every scenario uses it but the adopted plan, which keeps the facts it was adopted with
+    again = read_workbook(_broken(edit))
+    for s in again.runnable_scenarios():
+        assert s.facts is not None
+        assert (s.facts.interest_rate == D("0.04")) == (s.adoption is None), s.name
 
 
 def test_a_formula_in_a_fact_is_refused() -> None:
-    edit = _set(_plan_cell("Dues only", "Minimum working cushion"), "=C80*2")
+    edit = _set(_plan_cell(PROJECT, "Minimum working cushion"), "=C80*2")
     with pytest.raises(WorkbookFormatError, match="'Minimum working cushion' holds a formula"):
         read_workbook(_broken(edit))
 
 
 def test_a_spare_expense_row_filled_in_excel_adds_a_line() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         r = _first_expense_row(ws) + len(FACTS.expense_lines)  # the first spare row
         for key, value in (
             ("description", "Sign"),
@@ -372,7 +429,7 @@ def test_a_spare_expense_row_filled_in_excel_adds_a_line() -> None:
 
 def test_an_expense_row_cleared_in_excel_is_left_out() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         r = _first_expense_row(ws)
         for key in ("description", "frequency", "amount", "year", "end_year", "inflation", "id"):
             ws.cell(r, EXPENSE_COL[key]).value = None
@@ -382,7 +439,7 @@ def test_an_expense_row_cleared_in_excel_is_left_out() -> None:
 
 def test_an_expense_row_below_the_list_is_refused() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         r = _rows(ws)[PLAN_OPERATING_LABEL] - 1  # the gap between the list and its total
         ws.cell(r, EXPENSE_COL["frequency"], "once")
         ws.cell(r, EXPENSE_COL["amount"], 1)
@@ -393,7 +450,7 @@ def test_an_expense_row_below_the_list_is_refused() -> None:
 
 def test_a_spare_row_without_its_year_formulas_is_refused() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         r = _first_expense_row(ws) + len(FACTS.expense_lines)
         ws.cell(r, EXPENSE_COL["frequency"], "once")
         ws.cell(r, EXPENSE_COL["amount"], 1)
@@ -404,26 +461,45 @@ def test_a_spare_row_without_its_year_formulas_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    "label",
+    ("sheet", "label"),
     [
-        FACTS_HEADING,
-        "Interest earned on reserves per year",
-        EXPENSES_HEADING,
-        PLAN_OPERATING_LABEL,
-        PLAN_RESERVE_LABEL,
+        (PROJECT, "Interest earned on reserves per year"),
+        (EXPENSES, PROJECT_FFB_HEADING),
+        (EXPENSES, PROJECT_EXPENSES_HEADING),
+        (EXPENSES, PLAN_OPERATING_LABEL),
+        (EXPENSES, PLAN_RESERVE_LABEL),
+        ("Adopted plan", EXPENSES_HEADING),
+        ("Adopted plan", PLAN_RESERVE_LABEL),
     ],
 )
-def test_a_scenario_sheet_without_its_own_inputs_is_refused(label: str) -> None:
-    edit = _relabel("Dues only", label, "Something else")
-    with pytest.raises(WorkbookFormatError, match=f"Dues only is missing the row '{label[:20]}"):
+def test_a_workbook_without_the_facts_or_expenses_is_refused(sheet: str, label: str) -> None:
+    edit = _relabel(sheet, label, "Something else")
+    with pytest.raises(
+        WorkbookFormatError, match=re.escape(f"{sheet} is missing the row '{label[:20]}")
+    ):
+        read_workbook(_broken(edit, _varied_project()))
+
+
+def test_a_project_sheet_without_its_facts_reads_as_the_older_layout_and_is_refused() -> None:
+    # with no facts heading on the Project sheet, every scenario must carry its own – as before
+    # v2.0 – and an ordinary scenario's sheet has none
+    edit = _relabel(PROJECT, PROJECT_FACTS_HEADING, "Something else")
+    with pytest.raises(WorkbookFormatError, match="Dues only is missing the row 'This scenario"):
         read_workbook(_broken(edit))
 
 
-def test_a_scenario_on_an_impossible_horizon_is_not_exported() -> None:
-    s = DEMO.scenarios[0]
-    wide = replace(s, facts=replace(s.facts, end_year=2100))
-    with pytest.raises(ValueError, match="Dues only – the horizon must be 5–30 full years"):
-        export_workbook(replace(DEMO, scenarios=(wide,)))
+def test_an_adopted_plan_whose_facts_were_taken_away_is_refused() -> None:
+    edit = _relabel("Adopted plan", FACTS_HEADING, "Something else")
+    with pytest.raises(
+        WorkbookFormatError, match="Adopted plan is missing the row 'This scenario's facts"
+    ):
+        read_workbook(_broken(edit, _varied_project()))
+
+
+def test_a_project_on_an_impossible_horizon_is_not_exported() -> None:
+    wide = replace(DEMO, facts=replace(FACTS, end_year=2100))
+    with pytest.raises(ValueError, match="the project's facts and expenses – the horizon must be"):
+        export_workbook(wide)
 
 
 def test_a_scenario_with_problems_is_not_exported() -> None:
@@ -455,24 +531,27 @@ def test_text_worded_like_a_label_never_stands_in_for_it() -> None:
         else replace(line, description=PLAN_OPERATING_LABEL)
         if line.id == "gutters"
         else line
-        for line in own.facts.expense_lines
+        for line in project.facts.expense_lines
     )
     worded = replace(
         own,
         name="Interest earned",  # a sheet's name and description sit above its rows
         description="Operating expenses",
         assessments=(Assessment(2030, D(10), "Start year"),),
-        facts=replace(own.facts, expense_lines=renamed),
     )
-    project = replace(project, scenarios=(*project.scenarios[:2], worded, *rest))
-    assert read_workbook(export_workbook(project)) == project
+    project = replace(
+        project,
+        facts=replace(project.facts, expense_lines=renamed),
+        scenarios=(*project.scenarios[:2], worded, *rest),
+    )
+    assert read_workbook(export_workbook(project)) == _as_read(project)
     named = replace(project, scenarios=(replace(worded, name="How dues are set"),))
-    assert read_workbook(export_workbook(named)) == named
+    assert read_workbook(export_workbook(named)) == _as_read(named)
 
 
 def test_a_huge_horizon_of_a_scenario_is_refused_before_it_is_walked() -> None:
-    edit = _set(_plan_cell("Dues only", "End year"), 10**12)
-    with pytest.raises(WorkbookFormatError, match="Dues only – the horizon must be 5–30"):
+    edit = _set(_plan_cell(PROJECT, "End year"), 10**12)
+    with pytest.raises(WorkbookFormatError, match="Project – the horizon must be 5–30"):
         read_workbook(_broken(edit))
 
 
@@ -487,9 +566,13 @@ def test_an_adopted_plan_is_protected_and_read_back_whole() -> None:
     again = read_workbook(export_workbook(project))
     plans = [s for s in again.scenarios if s.adoption is not None]
     assert [(s.name, s.adoption) for s in plans] == [
+        ("Later and longer", Adoption(date(2025, 9, 1), "", 3)),
+        ("Short run", Adoption(date(2026, 1, 5), "", 4)),
         ("Adopted plan", Adoption(date(2026, 11, 3), "Fictional board vote", 2)),
         ("Earlier plan", Adoption(date(2025, 6, 1), "", 1)),
+        ("Worked out from lives", Adoption(date(2026, 12, 1), "Worked out", 5)),
     ]
+    assert all(s.facts is not None for s in plans)  # each with the facts it was adopted with
 
 
 def test_an_adoption_date_excel_turned_into_a_date_is_read() -> None:
@@ -526,7 +609,7 @@ def test_a_scenarios_start_year_cannot_be_moved_in_excel() -> None:
 
 def test_the_scenarios_fully_funded_balance_is_read_year_by_year() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         ws.cell(_rows(ws)["Fully Funded Balance at start of year"], VALUE_COL + 1, 650000)
 
     assert _facts_after(edit).ffb == {**FACTS.ffb, 2028: D(650000)}
@@ -603,8 +686,12 @@ def test_sheet_names_are_safe_unique_and_short() -> None:
         "X" * 27 + " (2)",
     ]
     assert quote("It's grown") == "'It''s grown'"
-    # the old shared sheets' names are free for scenarios now
-    assert sheet_names(["Inputs", "Expenses", "Project"]) == ["Inputs", "Expenses", "Project (2)"]
+    # the old Inputs sheet's name is free for scenarios; Expenses is the project's own again
+    assert sheet_names(["Inputs", "Expenses", "Project"]) == [
+        "Inputs",
+        "Expenses (2)",
+        "Project (2)",
+    ]
 
 
 def test_choosing_and_ordering_scenarios() -> None:
@@ -612,6 +699,7 @@ def test_choosing_and_ordering_scenarios() -> None:
     assert wb.sheetnames == [
         "Method",
         "Project",
+        "Expenses",
         "Compare",
         "Charts",
         "Steady increase",
@@ -654,7 +742,7 @@ def test_shared_dollar_grid_lines_up_with_percent(
 
 
 def _retarget_operating_total(wb: openpyxl.Workbook) -> None:
-    ws = wb["Dues only"]
+    ws = wb[EXPENSES]
     first = _first_expense_row(ws)
     cell = ws.cell(_rows(ws)[PLAN_OPERATING_LABEL], EXPENSE_YEAR_COL)
     cell.value = re.sub(rf"\${first}:", f"${first + 1}:", cell.value)
@@ -669,12 +757,12 @@ def _broken(edit: Any, project: Project = DEMO) -> bytes:
 
 
 def _fact(label: str, value: Any) -> Any:
-    return lambda: _broken(_set(_plan_cell("Dues only", label), value))
+    return lambda: _broken(_set(_plan_cell(PROJECT, label), value))
 
 
 def _expense(key: str, value: Any) -> Any:
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         ws.cell(_first_expense_row(ws), EXPENSE_COL[key], value)
 
     return lambda: _broken(edit)
@@ -682,12 +770,11 @@ def _expense(key: str, value: Any) -> Any:
 
 def _old_layout(wb: openpyxl.Workbook) -> None:
     wb.remove(wb["Project"])
-    wb.create_sheet("Inputs")
-    wb.create_sheet("Expenses")
+    wb.create_sheet("Inputs")  # beside its Expenses sheet
 
 
 def _delete_fact_row(wb: openpyxl.Workbook) -> None:
-    ws = wb["Dues only"]
+    ws = wb[PROJECT]
     ws.delete_rows(_rows(ws)["Number of units"])
 
 
@@ -718,7 +805,7 @@ def _delete_fact_row(wb: openpyxl.Workbook) -> None:
         (_expense("interval", 2.5), "interval should be a number of years"),
         (
             lambda: _broken(_retarget_operating_total),
-            "operating and reserve totals on Dues only add up different rows",
+            "operating and reserve totals on Expenses add up different rows",
         ),
         (
             lambda: _broken(lambda wb: [wb.remove(wb[s.name]) for s in DEMO.scenarios[:1]]),
@@ -737,7 +824,9 @@ def test_unreadable_workbooks_are_refused_in_plain_language(data: Any, message: 
 def test_a_workbook_without_scenario_sheets_is_refused() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
         for name in [
-            n for n in wb.sheetnames if n not in ("Method", "Project", "Compare", "Charts")
+            n
+            for n in wb.sheetnames
+            if n not in ("Method", "Project", "Expenses", "Compare", "Charts")
         ]:
             wb.remove(wb[name])
 
@@ -794,10 +883,10 @@ def _excel_insert(ws: Any, at: int) -> None:
 
 
 def _insert_expense(offset: int, copy_formulas: bool, line_id: str | None = None) -> Any:
-    """An expense inserted into Dues only's list `offset` rows below its first line."""
+    """An expense inserted into the project's list `offset` rows below its first line."""
 
     def edit(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         at = _first_expense_row(ws) + offset
         _excel_insert(ws, at)
         for key, value in (
@@ -845,7 +934,7 @@ def test_an_expense_above_the_summed_rows_is_refused() -> None:
 
 def test_a_row_inserted_on_a_scenario_sheet_keeps_the_scenario() -> None:
     project = read_workbook(_broken(lambda wb: _excel_insert(wb["Two-part assessment"], 39)))
-    assert project == DEMO
+    assert project == _as_read(DEMO)
 
 
 def _row_of(ws: Any, start: str) -> int:
@@ -966,7 +1055,7 @@ def test_typed_dues_may_be_edited() -> None:
 
 
 def test_changing_the_horizon_in_excel_is_refused() -> None:
-    edit = _set(_plan_cell("Dues only", "End year"), FACTS.end_year - 1)
+    edit = _set(_plan_cell(PROJECT, "End year"), FACTS.end_year - 1)
     with pytest.raises(WorkbookFormatError, match="horizon can only be changed in the app"):
         read_workbook(_broken(edit))
 
@@ -990,7 +1079,7 @@ def test_assessments_round_trip_one_row_each() -> None:
     f = FACTS
     two = Scenario(
         "Two in one year",
-        f,
+        None,
         DuesPath(DuesMode.RATE, first_value=D(600), increases=(Increase(D("0.03")),)),
         assessments=(
             Assessment(f.start_year + 1, D(1500), "First half"),
@@ -998,18 +1087,18 @@ def test_assessments_round_trip_one_row_each() -> None:
             Assessment(f.start_year + 2, D(0), "Placeholder"),
         ),
     )
-    project = Project("Installments", (two,))
+    project = Project("Installments", f, (two,))
     assert read_workbook(export_workbook(project)) == project
 
 
 def test_scenario_names_keep_their_spaces() -> None:
     padded = replace(DEMO.scenarios[0], name="  Padded  ", description=" lead")
-    project = Project("Spaces", (padded,))
+    project = Project("Spaces", FACTS, (padded,))
     assert read_workbook(export_workbook(project)).scenarios[0] == padded
 
 
 def test_a_scenario_named_notes_does_not_become_the_project_notes() -> None:
-    project = Project("N", (replace(DEMO.scenarios[0], name="Project notes"),))
+    project = Project("N", FACTS, (replace(DEMO.scenarios[0], name="Project notes"),))
     assert read_workbook(export_workbook(project)).notes == ""
 
 
@@ -1030,7 +1119,7 @@ def test_method_sheet_lists_the_scenarios_and_notes() -> None:
 
 def test_a_facts_source_note_sits_beside_it() -> None:
     wb = build_workbook(DEMO)
-    note = _plan_cell("Dues only", "Current dues per unit per month", SOURCE_COL)(wb)
+    note = _plan_cell(PROJECT, "Current dues per unit per month", SOURCE_COL)(wb)
     assert note.value == FACTS.sources["current_dues"]
 
 
@@ -1088,7 +1177,7 @@ def _assessment_in(year: int) -> Any:
     ("edit", "message"),
     [
         (
-            lambda wb: wb["Dues only"].cell(_first_expense_row(wb["Dues only"]), 3, -5),
+            lambda wb: wb[EXPENSES].cell(_first_expense_row(wb[EXPENSES]), 3, -5),
             "the yearly expense 'Management, accounting and administration' cannot be negative",
         ),
         (lambda wb: wb["Dues only"].cell(ROW["pinned"], 3 + 20, 700), None),
@@ -1106,7 +1195,7 @@ def test_imported_values_are_validated(edit: Any, message: str | None) -> None:
 
 def test_stray_cells_are_tolerated() -> None:
     def edit(wb: openpyxl.Workbook) -> None:
-        plan = wb["Dues only"]
+        plan = wb[EXPENSES]
         ffb = _rows(plan)["Fully Funded Balance at start of year"]
         plan.cell(ffb, plan.max_column + 2, 5)  # no year above it – ignored
         plan.cell(ffb, 1).comment = Comment("Reserve study, 2026", "x")
@@ -1117,30 +1206,33 @@ def test_stray_cells_are_tolerated() -> None:
 
 
 def test_a_new_row_gets_an_id_no_other_line_has() -> None:
-    s = DEMO.scenarios[0]
-    first = replace(s.facts.expense_lines[0], id="line-1")
-    taken = replace(s, facts=replace(s.facts, expense_lines=(first, *s.facts.expense_lines[1:])))
-    project = replace(DEMO, scenarios=(taken,))
+    first = replace(FACTS.expense_lines[0], id="line-1")
+    project = replace(DEMO, facts=replace(FACTS, expense_lines=(first, *FACTS.expense_lines[1:])))
     lines = _facts_after(_insert_expense(1, copy_formulas=True), project=project).expense_lines
     assert [line.id for line in lines[:2]] == ["line-1", "line-2"]
 
 
 # ---------------------------------------------------------------- the worked-out FFB (4.2)
 
-WORKED = "Worked-out Fully Funded Balance"  # the demo's scenario
+WORKED = "Worked out from useful lives"  # the demo's set worked out from lives
+
+
+def _worked_project() -> Project:
+    """The demo with its worked-out expense set loaded – the Expenses sheet works it out."""
+    worked = next(e for e in DEMO.expense_sets if e.name == WORKED)
+    return replace(DEMO, facts=with_expenses(FACTS, worked), expenses_from=WORKED)
 
 
 def test_a_worked_out_fully_funded_balance_is_formulas_with_the_typed_figures_kept() -> None:
-    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
-    ws = wb[WORKED]  # 31 characters – the name fits a sheet as it is
-    rows = _rows(ws)
-    ffb = rows["Fully Funded Balance at start of year"]
+    project = _worked_project()
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(project)))
+    ws = wb[EXPENSES]
+    ffb = _rows(ws)["Fully Funded Balance at start of year"]
     assert ws.cell(ffb + 1, VALUE_COL).value == "this sheet's expenses' useful lives"
     assert str(ws.cell(ffb, VALUE_COL).value).startswith("=SUMPRODUCT(")
     assert ws.cell(ffb + 2, 1).value == "Reserve study's figures (kept, not used while worked out)"
-    facts = next(s for s in DEMO.scenarios if s.name == WORKED).facts
-    assert ws.cell(ffb + 2, VALUE_COL).value == int(facts.ffb[facts.start_year])
-    typed = wb["Dues only"]
+    assert ws.cell(ffb + 2, VALUE_COL).value == int(project.facts.ffb[project.facts.start_year])
+    typed = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))[EXPENSES]
     assert typed.cell(
         _rows(typed)["Fully Funded Balance at start of year"] + 1, VALUE_COL
     ).value == ("the reserve study's figures")
@@ -1148,7 +1240,7 @@ def test_a_worked_out_fully_funded_balance_is_formulas_with_the_typed_figures_ke
 
 def _worked_ffb(edit: Any) -> Any:
     def apply(wb: openpyxl.Workbook) -> None:
-        ws = next(w for w in wb.worksheets if w["A1"].value == WORKED)
+        ws = wb[EXPENSES]
         edit(ws, _rows(ws)["Fully Funded Balance at start of year"])
 
     return apply
@@ -1166,47 +1258,53 @@ def _worked_ffb(edit: Any) -> Any:
 )
 def test_a_damaged_worked_out_fully_funded_balance_is_refused(edit: Any, message: str) -> None:
     with pytest.raises(WorkbookFormatError, match=message):
-        read_workbook(_broken(_worked_ffb(edit)))
+        read_workbook(_broken(_worked_ffb(edit), _worked_project()))
 
 
 def test_a_workbook_from_before_the_mode_row_reads_as_the_studys_figures() -> None:
     def older(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb[EXPENSES]
         r = _rows(ws)["Fully Funded Balance at start of year"] + 1
         ws.cell(r, 1).value = ws.cell(r, VALUE_COL).value = None  # v1.6 left this row blank
 
-    again = read_workbook(_broken(older))
-    facts = next(s for s in again.scenarios if s.name == "Dues only").facts
+    facts = read_workbook(_broken(older)).facts
     assert not facts.ffb_from_lines
-    assert facts.ffb == next(s for s in DEMO.scenarios if s.name == "Dues only").facts.ffb
+    assert facts.ffb == FACTS.ffb
 
 
 def test_the_fully_funded_balance_is_not_called_the_studys_when_worked_out() -> None:
-    wb = openpyxl.load_workbook(BytesIO(export_workbook(DEMO)))
-    rows = _rows(wb[WORKED])
-    assert "This scenario's Fully Funded Balance" in rows
-    for ws in wb.worksheets:
-        for row in ws.iter_rows():
-            for cell in row:
-                said = " ".join(
-                    str(t) for t in (cell.value, cell.comment and cell.comment.text) if t
-                )
-                assert "reserve study's Fully Funded Balance" not in said, (ws.title, cell)
+    wb = openpyxl.load_workbook(BytesIO(export_workbook(_worked_project())))
+    assert PROJECT_FFB_HEADING in _rows(wb[EXPENSES])
+    adopted = openpyxl.load_workbook(BytesIO(export_workbook(_varied_project())))
+    assert "This scenario's Fully Funded Balance" in _rows(adopted["Worked out from lives"])
+    for book in (wb, adopted):
+        for ws in book.worksheets:
+            for row in ws.iter_rows():
+                for cell in row:
+                    said = " ".join(
+                        str(t) for t in (cell.value, cell.comment and cell.comment.text) if t
+                    )
+                    assert "reserve study's Fully Funded Balance" not in said, (ws.title, cell)
 
 
 def test_a_workbook_with_the_older_fully_funded_balance_heading_still_reads() -> None:
     heading = "This scenario's Fully Funded Balance"
-    # an expense in the older sheet worded like the newer heading – it must not stand in for it
-    dues_only = next(s for s in DEMO.scenarios if s.name == "Dues only")
-    first, *rest = dues_only.facts.expense_lines
-    lines = (replace(first, description=heading), *rest)
-    worded = replace(dues_only, facts=replace(dues_only.facts, expense_lines=lines))
+    # an expense in an adopted plan's own list worded like the newer heading – it must not stand
+    # in for the older one
+    project = _varied_project()
+    plan = next(s for s in project.scenarios if s.name == "Adopted plan")
+    assert plan.facts is not None
+    first, *rest = plan.facts.expense_lines
+    worded = replace(
+        plan,
+        facts=replace(plan.facts, expense_lines=(replace(first, description=heading), *rest)),
+    )
     project = replace(
-        DEMO, scenarios=tuple(worded if s is dues_only else s for s in DEMO.scenarios)
+        project, scenarios=tuple(worded if s is plan else s for s in project.scenarios)
     )
 
     def older(wb: openpyxl.Workbook) -> None:
-        ws = wb["Dues only"]
+        ws = wb["Adopted plan"]
         r = min(c.row for c in ws["A"] if c.value == heading)  # the block's own heading
         ws.cell(r, 1).value = "This scenario's Fully Funded Balance (from the reserve study)"
 
@@ -1220,16 +1318,15 @@ def test_switching_the_mode_in_excel_is_read() -> None:
             ws.cell(r, c).value = ws.cell(r + 2, c).value  # the kept figures, typed back
         ws.cell(r + 2, 1).value = None
 
-    again = read_workbook(_broken(_worked_ffb(to_typed)))
-    facts = next(s for s in again.scenarios if s.name == WORKED).facts
-    before = next(s for s in DEMO.scenarios if s.name == WORKED).facts
-    assert not facts.ffb_from_lines and facts.ffb == before.ffb
+    project = _worked_project()
+    facts = read_workbook(_broken(_worked_ffb(to_typed), project)).facts
+    assert not facts.ffb_from_lines and facts.ffb == project.facts.ffb
 
 
 def test_a_one_time_costs_useful_life_is_read_and_must_be_whole() -> None:
     def life(value: Any) -> Any:
         def edit(wb: openpyxl.Workbook) -> None:
-            ws = wb["Dues only"]
+            ws = wb[EXPENSES]
             first = _first_expense_row(ws)
             row = next(
                 r
@@ -1244,3 +1341,32 @@ def test_a_one_time_costs_useful_life_is_read_and_must_be_whole() -> None:
     assert next(x for x in facts.expense_lines if x.id == "boiler").useful_life == 18
     with pytest.raises(WorkbookFormatError, match="useful life should be years"):
         read_workbook(_broken(life(2.5)))
+
+
+def test_a_workbook_from_before_v2_has_each_scenarios_facts_on_its_sheet() -> None:
+    """Exported before v2.0, every scenario carried its own facts below its charts – read as a
+    schema 3 project and upgraded, the first scenario not adopted giving the project's (spec
+    8.2)."""
+    project = _varied_project()
+    later = next(s for s in project.scenarios if s.name == "Later and longer")
+
+    def older(wb: openpyxl.Workbook) -> None:
+        # no shared facts or Expenses sheet, and scenarios with facts of their own only
+        wb.remove(wb[EXPENSES])
+        _relabel(PROJECT, PROJECT_FACTS_HEADING, "")(wb)
+        for s in project.scenarios:
+            if s.facts is None:
+                wb.remove(wb[s.name])
+        ws = wb["Later and longer"]  # an ordinary scenario then – no adoption rows
+        r = _rows(ws)["Adopted on"]
+        ws.delete_rows(r, 3)
+
+    again = read_workbook(_broken(older, project))
+    assert again.facts == later.facts
+    first = again.scenarios[0]
+    assert (first.name, first.facts, first.adoption) == ("Later and longer", None, None)
+    assert all(s.facts is not None for s in again.scenarios[1:])  # adopted plans keep theirs
+    # each scenario's own expenses kept as a set, as a project file's upgrade does (spec 8.2)
+    assert again.expenses_from == "Expenses from Later and longer"
+    # five scenarios, four different sets of expenses – Earlier plan has Later and longer's
+    assert len(again.expense_sets) == 4

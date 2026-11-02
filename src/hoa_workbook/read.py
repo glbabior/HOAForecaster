@@ -1,5 +1,9 @@
 """Read a workbook in the export layout back into a project (spec section 7.1 import).
 
+The project's facts are on the Project sheet and its Fully Funded Balance and expenses on the
+Expenses sheet; an adopted plan's own are below its charts. A workbook exported before v2.0
+has every scenario's below its charts, and is read as a schema 3 project and upgraded.
+
 Inputs are read from the blue cells – values, never formulas – and located by
 their labels, so rows a board member inserts or moves are tolerated. Each label
 is looked for only in its own part of the sheet, so an expense or note worded
@@ -33,7 +37,9 @@ from hoa_workbook.layout import (
     CHARTS_LABEL,
     EXPENSE_COL,
     EXPENSE_YEAR_COL,
+    EXPENSES,
     EXPENSES_HEADING,
+    EXPENSES_TOP,
     FACT_ROWS,
     FACTS_HEADING,
     FFB_KEPT_LABEL,
@@ -60,6 +66,9 @@ from hoa_workbook.layout import (
     PLAN_RESERVE_LABEL,
     PLAN_ROWS,
     PROJECT,
+    PROJECT_EXPENSES_HEADING,
+    PROJECT_FACTS_HEADING,
+    PROJECT_FFB_HEADING,
     RESERVED,
     ROUND_DOLLAR,
     ROUND_NONE,
@@ -226,11 +235,11 @@ def _expense_line(ws: Worksheet, r: int, where: str) -> dict[str, Any]:
     }
 
 
-def _with_ids(scenarios: list[dict[str, Any]]) -> None:
+def _with_ids(facts: list[dict[str, Any]]) -> None:
     """Every line an identifier of its own – a row added in Excel with its id cleared, or copied
     with its id kept, gets a new `line-N` that no sheet of the workbook uses, so it can never be
-    taken for another scenario's line (spec 7.2)."""
-    all_lines = [s["facts"]["expense_lines"] for s in scenarios]
+    taken for another table's line."""
+    all_lines = [f["expense_lines"] for f in facts]
     used = {line["id"] for lines in all_lines for line in lines if line["id"]}
     n = 1
     for lines in all_lines:
@@ -282,8 +291,11 @@ def _plan_rows(ws: Worksheet) -> dict[str, int]:
     return {key: rows[label] for key, (_, label) in PLAN_ROWS.items()}
 
 
-def _is_plan(ws: Worksheet) -> bool:
-    return ws.title not in RESERVED and PLAN_ROWS["mode"][1] in _first_rows(ws, _TITLE_ROWS)
+def _is_plan(ws: Worksheet, shared: bool) -> bool:
+    # before v2.0 a scenario named Expenses had a Plan sheet of that name; since, the name is the
+    # project's Expenses sheet, whatever an expense on it is called
+    known = ws.title not in RESERVED or (ws.title == EXPENSES and not shared)
+    return known and PLAN_ROWS["mode"][1] in _first_rows(ws, _TITLE_ROWS)
 
 
 def _typed_cell(value: Any, where: str) -> Any:
@@ -296,28 +308,35 @@ def _typed_cell(value: Any, where: str) -> Any:
     return value
 
 
-def _sections(ws: Worksheet) -> dict[str, int]:
-    """The rows of the blocks below a Plan sheet's charts, each found below the one before."""
-    found: dict[str, int] = {}
-    after = next((r for r, label in _labels(ws) if label.startswith(CHARTS_LABEL)), 0)
-    for heading in (FACTS_HEADING, PLAN_FFB_HEADING, FFB_LABEL, EXPENSES_HEADING):
+def _sections(ws: Worksheet, after: int, headings: tuple[tuple[str, ...], ...]) -> list[int]:
+    """The rows of a sheet's blocks below `after`, each found below the one before – under any
+    of its headings, the first on the sheet, so an expense worded like a newer heading never
+    stands in for an older one – then the operating and reserve totals."""
+    found = []
+    for names in headings:
         rows = _first_rows(ws, after)
-        # the Fully Funded Balance block under either heading – the first one on the sheet, so in
-        # an older sheet an expense worded like the newer heading never stands in for it
-        names = (heading, PLAN_FFB_HEADING_BEFORE) if heading == PLAN_FFB_HEADING else (heading,)
         r = min((rows[h] for h in names if h in rows), default=None)
         if r is None:
-            raise WorkbookFormatError(f"{ws.title} is missing the row '{heading}'")
-        found[heading] = after = r
+            raise WorkbookFormatError(f"{ws.title} is missing the row '{names[0]}'")
+        found.append(r)
+        after = r
     total = _last_rows(ws).get(PLAN_OPERATING_LABEL, 0)
     if total <= after:
         raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_OPERATING_LABEL}'")
-    found[PLAN_OPERATING_LABEL] = total
     reserve = _first_rows(ws, total).get(PLAN_RESERVE_LABEL)
     if reserve is None:
         raise WorkbookFormatError(f"{ws.title} is missing the row '{PLAN_RESERVE_LABEL}'")
-    found[PLAN_RESERVE_LABEL] = reserve
-    return found
+    return [*found, total, reserve]
+
+
+def _charts_row(ws: Worksheet) -> int:
+    return next((r for r, label in _labels(ws) if label.startswith(CHARTS_LABEL)), 0)
+
+
+def _has_own_facts(ws: Worksheet) -> bool:
+    """Whether a Plan sheet carries facts below its charts – an adopted plan's, or any
+    scenario's in a workbook exported before v2.0."""
+    return FACTS_HEADING in _first_rows(ws, _charts_row(ws))
 
 
 def _typed(value: Any, kind: str, key: str, where: str) -> Any:
@@ -329,9 +348,9 @@ def _typed(value: Any, kind: str, key: str, where: str) -> Any:
     return _number(value, where)
 
 
-def _adoption(ws: Worksheet, sections: dict[str, int]) -> dict[str, Any] | None:
+def _adoption(ws: Worksheet, reserve_row: int) -> dict[str, Any] | None:
     """An adopted plan's date, note and order – the rows below its reserve total."""
-    rows = _first_rows(ws, sections[PLAN_RESERVE_LABEL])
+    rows = _first_rows(ws, reserve_row)
     if ADOPTED_ON_LABEL not in rows:
         return None
     labels = (ADOPTED_ON_LABEL, ADOPTION_NOTE_LABEL, ADOPTION_ORDER_LABEL)
@@ -350,26 +369,62 @@ def _adoption(ws: Worksheet, sections: dict[str, int]) -> dict[str, Any] | None:
     }
 
 
-def _inputs(ws: Worksheet) -> dict[str, Any]:
-    """The scenario's facts and assumptions, Fully Funded Balance and expenses, from the blocks
-    below its charts, and its adoption if it is an adopted plan."""
-    sections = _sections(ws)
-    rows = _first_rows(ws, sections[FACTS_HEADING])
+_OWN_FFB = (PLAN_FFB_HEADING, PLAN_FFB_HEADING_BEFORE)
+
+
+def _own_inputs(ws: Worksheet) -> dict[str, Any]:
+    """A scenario's own facts and assumptions, Fully Funded Balance and expenses, from the
+    blocks below its charts, and its adoption if it is an adopted plan."""
+    facts_row, ffb_heading, ffb_row, expenses, total, reserve = _sections(
+        ws, _charts_row(ws), ((FACTS_HEADING,), _OWN_FFB, (FFB_LABEL,), (EXPENSES_HEADING,))
+    )
+    return {
+        **_inputs(ws, facts_row, ffb_heading, ws, (ffb_row, expenses, total, reserve)),
+        "adoption": _adoption(ws, reserve),
+    }
+
+
+def _project_inputs(wb: Workbook) -> dict[str, Any]:
+    """The project's facts and assumptions from the Project sheet, and its Fully Funded Balance
+    and expenses from the Expenses sheet."""
+    project, expenses = _sheet(wb, PROJECT), _sheet(wb, EXPENSES)
+    facts_row = _first_rows(project)[PROJECT_FACTS_HEADING]  # the layout is chosen by it
+    _ffb_heading, ffb_row, heading, total, reserve = _sections(
+        expenses,
+        EXPENSES_TOP - 1,
+        ((PROJECT_FFB_HEADING,), (FFB_LABEL,), (PROJECT_EXPENSES_HEADING,)),
+    )
+    return _inputs(
+        project, facts_row, project.max_row + 1, expenses, (ffb_row, heading, total, reserve)
+    )
+
+
+def _inputs(
+    facts_ws: Worksheet,
+    facts_row: int,
+    facts_end: int,
+    ws: Worksheet,
+    blocks: tuple[int, int, int, int],
+) -> dict[str, Any]:
+    """Facts and assumptions from the block at `facts_row` on one sheet (up to `facts_end`),
+    and the Fully Funded Balance and expenses from `blocks` on another – the Fully Funded
+    Balance row, the expenses heading and the two totals."""
+    ffb_row, expenses_heading, operating_total, reserve_total = blocks
+    rows = _first_rows(facts_ws, facts_row)
     facts: dict[str, Any] = {}
     sources: dict[str, str] = {}
     for spec in FACT_ROWS:
         r = rows.get(spec.label)
-        if r is None or r > sections[PLAN_FFB_HEADING]:
-            raise WorkbookFormatError(f"{ws.title} is missing the row '{spec.label}'")
-        where = f"{ws.title} '{spec.label}'"
-        value = _typed_cell(ws.cell(r, VALUE_COL).value, where)
-        note = _typed_cell(ws.cell(r, SOURCE_COL).value, f"{where} source")
+        if r is None or r > facts_end:
+            raise WorkbookFormatError(f"{facts_ws.title} is missing the row '{spec.label}'")
+        where = f"{facts_ws.title} '{spec.label}'"
+        value = _typed_cell(facts_ws.cell(r, VALUE_COL).value, where)
+        note = _typed_cell(facts_ws.cell(r, SOURCE_COL).value, f"{where} source")
         facts[spec.key] = _typed(value, spec.kind, spec.key, where)
         if _text(note):
             sources[spec.key] = _text(note)
-    horizon = _horizon(facts["start_year"], facts["end_year"], ws.title)
+    horizon = _horizon(facts["start_year"], facts["end_year"], facts_ws.title)
 
-    ffb_row = sections[FFB_LABEL]
     if _comment(ws.cell(ffb_row, 1)):
         sources["ffb"] = _comment(ws.cell(ffb_row, 1))
     worked_out = _ffb_mode(ws, ffb_row + 1)
@@ -395,17 +450,17 @@ def _inputs(ws: Worksheet) -> dict[str, Any]:
         if value is not None:
             ffb[str(y)] = _number(_typed_cell(value, where), where)
 
-    head = sections[EXPENSES_HEADING] + 1
-    total = ws.cell(sections[PLAN_OPERATING_LABEL], EXPENSE_YEAR_COL).value
+    head = expenses_heading + 1
+    total = ws.cell(operating_total, EXPENSE_YEAR_COL).value
     listed = _summed_rows(total, f"{ws.title} operating total")
-    reserve = ws.cell(sections[PLAN_RESERVE_LABEL], EXPENSE_YEAR_COL).value
+    reserve = ws.cell(reserve_total, EXPENSE_YEAR_COL).value
     if _summed_rows(reserve, f"{ws.title} reserve total") != listed:
         raise WorkbookFormatError(
             f"the operating and reserve totals on {ws.title} add up different rows – export "
             "again from the app"
         )
     lines = []
-    for r in range(head + 1, sections[PLAN_OPERATING_LABEL]):
+    for r in range(head + 1, operating_total):
         inputs = [ws.cell(r, EXPENSE_COL[key]).value for key in _LINE_INPUTS]
         if all(v is None or v == "" for v in inputs):
             continue  # a spare row
@@ -430,7 +485,6 @@ def _inputs(ws: Worksheet) -> dict[str, Any]:
             "ffb_from_lines": worked_out,
         },
         "horizon": horizon,
-        "adoption": _adoption(ws, sections),
     }
 
 
@@ -491,8 +545,16 @@ def _increases(ws: Worksheet, rate_formula: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _scenario(ws: Worksheet) -> dict[str, Any]:
-    read = _inputs(ws)
+def _scenario(ws: Worksheet, project: dict[str, Any] | None) -> dict[str, Any]:
+    """A Plan sheet's scenario – on its own facts if it has them below its charts, else on
+    `project`'s (the project's facts and expenses, from the shared sheets)."""
+    if project is None or _has_own_facts(ws):
+        read = _own_inputs(ws)
+    elif ADOPTED_ON_LABEL in _first_rows(ws, _charts_row(ws)):
+        # an adopted plan keeps the facts it was adopted with – never the project's instead
+        raise WorkbookFormatError(f"{ws.title} is missing the row '{FACTS_HEADING}'")
+    else:
+        read = project
     horizon = read["horizon"]
     row = _plan_rows(ws)
     years: dict[int, int] = {}
@@ -581,8 +643,8 @@ def _scenario(ws: Worksheet) -> dict[str, Any]:
         "dues": dues,
         "assessments": assessments,
         "rounding": "dollar" if rounding == ROUND_DOLLAR else "none",
-        "facts": read["facts"],
-        "adoption": read["adoption"],
+        "facts": None if read is project else read["facts"],
+        "adoption": read.get("adoption"),
     }
 
 
@@ -598,24 +660,35 @@ def read_workbook(source: Path | bytes) -> Project:
         ) from None
     _check_size(wb)
     text = _project(wb)
-    scenarios = [_scenario(ws) for ws in wb.worksheets if _is_plan(ws)]
-    _with_ids(scenarios)
+    # the v2.0 layout – the project's facts on its Project sheet, beside an Expenses sheet
+    shared = PROJECT_FACTS_HEADING in _first_rows(_sheet(wb, PROJECT))
+    inputs = _project_inputs(wb) if shared else None
+    scenarios = [_scenario(ws, inputs) for ws in wb.worksheets if _is_plan(ws, shared)]
+    own = [s["facts"] for s in scenarios if s["facts"] is not None]
+    _with_ids(([inputs["facts"]] if inputs else []) + own)
     if not scenarios:
         raise WorkbookFormatError("the workbook has no scenario sheets")
     try:
-        # each sheet carries the facts its scenario runs on – read as a schema 3 project, whose
-        # upgrade gives the project's facts back to the project (spec 8.2)
-        project, _ = read_project(
-            {**text, "schema_version": 3, "scenarios": scenarios}, report=False
-        )
+        if inputs is not None:
+            raw = {**text, "schema_version": 4, "facts": inputs["facts"], "scenarios": scenarios}
+            project, _ = read_project(raw)
+        else:
+            # exported before v2.0 – each sheet carries the facts its scenario runs on, read as a
+            # schema 3 project whose upgrade gives them to the project (spec 8.2)
+            raw = {**text, "schema_version": 3, "scenarios": scenarios}
+            project, _ = read_project(raw, report=False)
     except ProjectFormatError as e:
         raise WorkbookFormatError(str(e)) from None
-    # a workbook holds no saved expense sets, so the expenses come back from none (spec 7.6)
-    plain = tuple(
-        s if s.adoption is None else replace(s, adoption=replace(s.adoption, expenses_from=None))
-        for s in project.scenarios
-    )
-    project = replace(project, scenarios=plain, expense_sets=(), expenses_from=None)
+    if inputs is not None:
+        # a workbook holds no saved expense sets, so the expenses come back from none (spec 7.6)
+        plain = tuple(
+            s
+            if s.adoption is None
+            else replace(s, adoption=replace(s.adoption, expenses_from=None))
+            for s in project.scenarios
+        )
+        project = replace(project, scenarios=plain, expense_sets=(), expenses_from=None)
+    # before v2.0, each scenario's own expenses are kept as the upgrade's sets (spec 8.2)
     runnable = project.runnable_scenarios()
     problems = [f"{s.name} – {p}" for s in runnable for p in validate_run(s)]
     if problems:

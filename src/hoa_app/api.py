@@ -32,6 +32,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from hoa_app.template import blank_project, blank_scenario
 from hoa_engine import InvalidInputs, ProjectFormatError, ScenarioResult, run
+from hoa_engine.engine import ffb_of
 from hoa_engine.model import (
     MAX_NOTE,
     Project,
@@ -44,6 +45,7 @@ from hoa_engine.model import (
     scenario_from_dict,
     scenario_to_dict,
 )
+from hoa_engine.validate import horizon_problem, validate_facts
 from hoa_store.store import (
     BadProjectFile,
     Conflict,
@@ -139,6 +141,20 @@ def _results(project: Project) -> dict[str, Any]:
         except InvalidInputs as e:
             out[s.name] = {"problems": e.problems}
     return out
+
+
+def _project_run(project: Project) -> dict[str, Any]:
+    """Every scenario's results, and the project's own facts' problems and Fully Funded Balance –
+    what the project's facts screens show (spec 7.1, 7.2)."""
+    f = project.facts
+    horizon = horizon_problem(f)
+    problems = [horizon] if horizon else validate_facts(f)
+    ffb = (
+        {}
+        if problems
+        else {str(y): str(v) for y, v in ffb_of(f).items() if f.start_year <= y <= f.end_year + 1}
+    )
+    return {"scenarios": _results(project), "problems": problems, "ffb": ffb}
 
 
 def dollar_axis(project: Project, names: list[str]) -> tuple[Decimal, Decimal] | None:
@@ -328,7 +344,8 @@ def create_app(
         """A project as sent, or – given only a name – a blank one with the spec's defaults."""
         body = await body_json(request)
         if "project" in body:
-            return stored_json(store.create(parse_project(body.get("project"))))
+            project = await run_in_threadpool(parse_project, body.get("project"))
+            return stored_json(store.create(project))
         name = body.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ApiError(422, "a new project needs a name")
@@ -383,7 +400,7 @@ def create_app(
     @app.put("/api/projects/{project_id}")
     async def save_project(project_id: str, request: Request) -> dict[str, Any]:
         body = await body_json(request)
-        project = parse_project(body.get("project"))
+        project = await run_in_threadpool(parse_project, body.get("project"))
         return stored_json(store.save(project_id, project, revision(body.get("base_revision"))))
 
     @app.post("/api/projects/{project_id}/adopt")
@@ -408,7 +425,7 @@ def create_app(
     async def dismiss_notes(project_id: str, request: Request) -> dict[str, Any]:
         """The upgrade notes have been read (spec 8.2)."""
         body = await body_json(request)
-        return stored_json(store.dismiss_notes(project_id, revision(body.get("revision"))))
+        return stored_json(store.dismiss_notes(project_id, revision(body.get("base_revision"))))
 
     @app.post("/api/projects/{project_id}/unadopt")
     async def unadopt(project_id: str, request: Request) -> dict[str, Any]:
@@ -448,7 +465,9 @@ def create_app(
         """Every scenario of a project as it is being edited – the project's facts and expenses
         screens show each scenario's key results (spec 7.1)."""
         body = await body_json(request)
-        return {"scenarios": _results(parse_project(body.get("project")))}
+        # off the event loop – a large project's every scenario takes a moment
+        project = await run_in_threadpool(parse_project, body.get("project"))
+        return await run_in_threadpool(_project_run, project)
 
     # ------------------------------------------------------------ export and import
 

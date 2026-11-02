@@ -127,7 +127,7 @@ A scenario uses the project's facts, expenses and Fully Funded Balance (section 
 
 The dues path must be shown resolved (the actual number for every year) next to the inputs so the user sees what mode b produced.
 
-When a dues path moves onto a horizon with a different start year – a scenario started from an adopted plan of another time, a plan un-adopted after the project's years moved, or the schema 3 upgrade – a grown path's first-year value becomes what the path charged in the new start year (when that year was in its old horizon), so the dues carry on as they were; periods, pinned years, explicit years and assessments keep their years, and any outside the new horizon are kept and shown as problems or ignored as section 6 says.
+When a dues path moves onto a horizon with a different start year – a scenario started from an adopted plan of another time, a plan un-adopted after the project's years moved, or the schema 3 upgrade – a grown path's first-year value becomes what the path charged in the new start year (when that year was in its old horizon), so the dues carry on as they were (rounded as they were charged); its yearly increases are tidied to the new years – a period over before the new start is dropped and one running into it starts with it – and years pinned up to the new start are dropped; explicit years and assessments keep their years, and any outside the new horizon are kept and shown as problems or ignored as section 6 says.
 
 ### 5.1 Yearly increases by period
 

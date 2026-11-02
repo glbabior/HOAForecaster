@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loading, ProjectNav, useProject } from "../App";
 import { api } from "../api";
 import { ErrorBanner, Field } from "../components/ui";
-import { currentAdoption, startFrom, uniqueName } from "../template";
+import { carriedOn, currentAdoption, startFrom, uniqueName } from "../template";
 import { scenarioPath } from "./ScenarioScreens";
 
 /** Start a scenario – blank, or a copy of any scenario of the project (spec 7.2). */
@@ -36,16 +36,27 @@ export function NewScenario() {
     setBusy(true);
     setSaveError(null);
     try {
-      const blank = from ? null : await api.blankScenario(typed);
+      const facts = stored.project.facts;
+      const blank = from ? null : await api.blankScenario(typed, facts.current_dues);
+      // an adopted plan of other years carries its dues on into the project's start year – what
+      // it charged then becomes the copy's first-year figure (spec 5)
+      const moved = from?.facts && from.facts.start_year !== facts.start_year;
+      const charged =
+        moved && from.dues.mode === "rate"
+          ? (await api.run(from, null)).years.find((y) => y.year === facts.start_year)?.dues
+          : undefined;
       // copied from the project as last saved – a scenario's edit still saving is included
       await save((project) => {
         const source = project.scenarios.find((s) => s.name === from?.name) ?? from;
-        const scenario = blank ?? (source ? startFrom(source, typed) : null);
+        const copy = source ? startFrom(source, typed) : null;
+        if (copy && charged !== undefined && copy.dues.mode === "rate")
+          copy.dues = carriedOn(copy.dues, charged, facts.start_year);
+        const scenario = blank ?? copy;
         if (!scenario) throw new Error("the scenario to start from is gone");
         return { ...project, scenarios: [...project.scenarios, scenario] };
       });
-      // a copy is ready to compare; a blank one needs its facts first
-      navigate(scenarioPath(id, typed, from ? "" : "facts"));
+      // a copy is ready to compare; a blank one needs its dues first
+      navigate(scenarioPath(id, typed, from ? "" : "dues"));
     } catch (err) {
       setSaveError(err);
       setBusy(false);
@@ -65,9 +76,10 @@ export function NewScenario() {
         <fieldset className="plain start-from" aria-describedby={`${uid}-hint`}>
           <legend>Start from</legend>
           <p id={`${uid}-hint`} className="hint">
-            A copy takes all of that scenario's inputs – its facts and assumptions, expenses, Fully
-            Funded Balance, dues and special assessments – but not its adoption. A blank scenario
-            starts from the usual assumptions, ready for the building's own facts.
+            A copy takes that scenario's dues, special assessments, rounding and description – not
+            its name or its adoption. Every scenario uses the project's facts and expenses, even one
+            started from an adopted plan. A blank scenario starts at the current dues, with no
+            special assessments.
           </p>
           <div className="cards choices">
             {[null, ...startingPoints].map((s, i) => (
@@ -90,12 +102,12 @@ export function NewScenario() {
                 </span>
                 <span id={`${uid}-${i}-caption`} className="card-caption">
                   {!s
-                    ? "The usual assumptions"
+                    ? "The current dues, no assessments"
                     : s.adoption
                       ? s === current
                         ? "The adopted plan"
                         : "An earlier adopted plan"
-                      : s.description || "A copy of every input"}
+                      : s.description || "A copy of its dues and assessments"}
                 </span>
               </label>
             ))}
